@@ -8,7 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -84,6 +84,18 @@ function plist({ component, label }) {
   <dict>
     <key>AI_EMPLOYEE_CONFIG_FILE</key>
     <string>${escapeXml(configPath)}</string>
+    <key>PATH</key>
+    <string>${escapeXml(
+      [
+        dirname(process.execPath),
+        join(homedir(), ".local", "bin"),
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+      ].join(":"),
+    )}</string>
   </dict>
 ${lifecycle}
   <key>ThrottleInterval</key>

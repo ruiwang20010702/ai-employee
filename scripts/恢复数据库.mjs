@@ -64,11 +64,19 @@ const decipher = createDecipheriv(
   iv,
 );
 decipher.setAuthTag(authTag);
+const restoreEnvironment = databaseEnvironment(required("DATABASE_URL"));
 const restore = spawn(
   process.env.PG_RESTORE_PATH ?? "pg_restore",
-  ["--clean", "--if-exists", "--no-owner", "--no-privileges"],
+  [
+    "--dbname",
+    restoreEnvironment.PGDATABASE,
+    "--clean",
+    "--if-exists",
+    "--no-owner",
+    "--no-privileges",
+  ],
   {
-    env: databaseEnvironment(required("DATABASE_URL")),
+    env: restoreEnvironment,
     stdio: ["pipe", "inherit", "pipe"],
   },
 );
@@ -88,4 +96,4 @@ const [, exitCode] = await Promise.all([
 if (exitCode !== 0) {
   throw new Error(`pg_restore failed (${exitCode}): ${stderr.trim()}`);
 }
-console.log(JSON.stringify({ restored: true, encryptedPath }));
+console.log(JSON.stringify({ restored: true }));

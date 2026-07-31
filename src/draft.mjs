@@ -163,25 +163,33 @@ export async function generateReplyDraft(
     "</untrusted_new_messages>",
   ].join("\n\n");
 
-  await execFileAsync(
-    codexPath,
-    [
-      "--ask-for-approval",
-      "never",
-      "exec",
-      "--ephemeral",
-      "--sandbox",
-      "read-only",
-      "--output-schema",
-      schemaPath,
-      "--output-last-message",
-      outputPath,
-      "--cd",
-      projectPath,
-      prompt,
-    ],
-    { maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
-  );
+  try {
+    await execFileAsync(
+      codexPath,
+      [
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "--ephemeral",
+        "--sandbox",
+        "read-only",
+        "--output-schema",
+        schemaPath,
+        "--output-last-message",
+        outputPath,
+        "--cd",
+        projectPath,
+        prompt,
+      ],
+      { maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
+    );
+  } catch (error) {
+    const reason =
+      error.killed || error.code === "ETIMEDOUT" ? "timeout" : "execution";
+    const sanitized = new Error(`Codex draft ${reason} failed`);
+    sanitized.code = `CODEX_DRAFT_${reason.toUpperCase()}`;
+    throw sanitized;
+  }
 
   const response = validateDraft(
     JSON.parse(await readFile(outputPath, "utf8")),
