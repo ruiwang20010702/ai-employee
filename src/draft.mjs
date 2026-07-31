@@ -1,9 +1,7 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
 const projectRoot = new URL("../", import.meta.url);
 const runtimeDir = new URL(".runtime/", projectRoot);
 const draftsDir = new URL("drafts/", runtimeDir);
@@ -125,6 +123,59 @@ function validateDraft(draft) {
   return draft;
 }
 
+async function runCodex({
+  codexPath,
+  args,
+  prompt,
+  timeoutMs,
+}) {
+  await new Promise((resolveRun, rejectRun) => {
+    const child = spawn(codexPath, [...args, "-"], {
+      detached: true,
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    let settled = false;
+    let timedOut = false;
+    let forceKillTimer;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      clearTimeout(forceKillTimer);
+      if (error) rejectRun(error);
+      else resolveRun();
+    };
+    const killGroup = (signal) => {
+      try {
+        process.kill(-child.pid, signal);
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    };
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      killGroup("SIGTERM");
+      forceKillTimer = setTimeout(() => killGroup("SIGKILL"), 2_000);
+      forceKillTimer.unref();
+    }, timeoutMs);
+    timeoutTimer.unref();
+    child.once("error", () => {
+      finish(new Error("Codex draft execution failed"));
+    });
+    child.once("close", (code) => {
+      if (timedOut) {
+        finish(new Error("Codex draft timeout failed"));
+      } else if (code !== 0) {
+        finish(new Error("Codex draft execution failed"));
+      } else {
+        finish();
+      }
+    });
+    child.stdin.on("error", () => {});
+    child.stdin.end(prompt);
+  });
+}
+
 export async function generateReplyDraft(
   event,
   {
@@ -164,9 +215,9 @@ export async function generateReplyDraft(
   ].join("\n\n");
 
   try {
-    await execFileAsync(
+    await runCodex({
       codexPath,
-      [
+      args: [
         "--ask-for-approval",
         "never",
         "exec",
@@ -179,14 +230,13 @@ export async function generateReplyDraft(
         outputPath,
         "--cd",
         projectPath,
-        prompt,
       ],
-      { maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
-    );
+      prompt,
+      timeoutMs,
+    });
   } catch (error) {
-    const reason =
-      error.killed || error.code === "ETIMEDOUT" ? "timeout" : "execution";
-    const sanitized = new Error(`Codex draft ${reason} failed`);
+    const reason = error.message.includes("timeout") ? "timeout" : "execution";
+    const sanitized = new Error(error.message);
     sanitized.code = `CODEX_DRAFT_${reason.toUpperCase()}`;
     throw sanitized;
   }
