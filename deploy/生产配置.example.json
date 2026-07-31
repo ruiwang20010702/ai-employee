@@ -1,0 +1,16 @@
+{
+  "DATABASE_URL": "postgresql://ai_employee:replace_me@127.0.0.1:5432/ai_employee",
+  "DATABASE_SSL": false,
+  "DATABASE_POOL_MAX": 10,
+  "AI_EMPLOYEE_DATA_KEY": "replace_with_base64_32_byte_key",
+  "AI_EMPLOYEE_BACKUP_KEY": "replace_with_different_base64_32_byte_key",
+  "AI_EMPLOYEE_BACKUP_DIRECTORY": "/absolute/path/to/offsite-synced-backups",
+  "AI_EMPLOYEE_TENANT_ID": "company_user",
+  "DINGTALK_TARGET_USER_IDS": "replace_with_allowed_user_ids",
+  "DINGTALK_SELF_USER_ID": "replace_with_self_user_id",
+  "DWS_PATH": "/Users/replace/.local/bin/dws",
+  "CODEX_PATH": "/opt/homebrew/bin/codex",
+  "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply",
+  "AI_EMPLOYEE_HEALTH_HOST": "127.0.0.1",
+  "AI_EMPLOYEE_HEALTH_PORT": 9464
+}

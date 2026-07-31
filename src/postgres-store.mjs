@@ -810,8 +810,20 @@ export class PostgresStore {
     );
   }
 
+  async recordHeartbeat(component, now = new Date()) {
+    await this.pool.query(
+      `
+      INSERT INTO settings(tenant_id, key, value, updated_at)
+      VALUES ($1,$2,$3,$4)
+      ON CONFLICT (tenant_id, key)
+      DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+    `,
+      [this.tenantId, `heartbeat:${component}`, now.toISOString(), now],
+    );
+  }
+
   async health() {
-    const [database, taskCounts, pendingMessages, checkpoints] =
+    const [database, taskCounts, pendingMessages, checkpoints, heartbeats] =
       await Promise.all([
         checkPostgres(this.pool),
         this.pool.query(
@@ -840,6 +852,14 @@ export class PostgresStore {
         `,
           [this.tenantId],
         ),
+        this.pool.query(
+          `
+          SELECT key, value, updated_at
+          FROM settings
+          WHERE tenant_id = $1 AND key LIKE 'heartbeat:%'
+        `,
+          [this.tenantId],
+        ),
       ]);
     return {
       database,
@@ -849,6 +869,12 @@ export class PostgresStore {
       ),
       pendingMessages: Number(pendingMessages.rows[0].count),
       checkpoints: checkpoints.rows,
+      heartbeats: Object.fromEntries(
+        heartbeats.rows.map((row) => [
+          row.key.slice("heartbeat:".length),
+          row.value,
+        ]),
+      ),
     };
   }
 

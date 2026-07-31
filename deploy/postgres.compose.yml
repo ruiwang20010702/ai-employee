@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16.14-alpine3.23
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      POSTGRES_DB: ai_employee
+      POSTGRES_USER: ai_employee
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --data-checksums --encoding=UTF8
+      PGDATA: /var/lib/postgresql/data/pgdata
+    secrets:
+      - postgres_password
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ai_employee_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_employee -d ai_employee"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - password_encryption=scram-sha-256
+
+secrets:
+  postgres_password:
+    file: ../.runtime/secrets/postgres_password
+
+volumes:
+  ai_employee_postgres:
+    name: ai_employee_postgres

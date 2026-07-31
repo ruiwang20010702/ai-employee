@@ -155,8 +155,24 @@ export async function runWorker({
 } = {}) {
   store = store ? await store.open() : await createProductionStore(config);
   let stopped = false;
+  let lastHeartbeatAt = 0;
+  const stopController = new AbortController();
+
+  const interruptibleDelay = async () => {
+    try {
+      await delay(config.workerPollMs, undefined, {
+        signal: stopController.signal,
+      });
+    } catch (error) {
+      if (error.name !== "AbortError") throw error;
+    }
+  };
 
   const tick = async () => {
+    if (Date.now() - lastHeartbeatAt >= config.heartbeatMs) {
+      await store.recordHeartbeat?.("worker");
+      lastHeartbeatAt = Date.now();
+    }
     if (await store.isPaused()) return false;
     const drafted = await processDraftTask({ store, dws, config, generator });
     const sent = await processApprovedTask({ store, dws, config });
@@ -179,10 +195,10 @@ export async function runWorker({
     while (!stopped) {
       try {
         const worked = await tick();
-        if (!worked) await delay(config.workerPollMs);
+        if (!worked) await interruptibleDelay();
       } catch (error) {
         log("worker.error", { message: error.message });
-        await delay(config.workerPollMs);
+        if (!stopped) await interruptibleDelay();
       }
     }
   })();
@@ -190,6 +206,7 @@ export async function runWorker({
   return {
     async stop() {
       stopped = true;
+      stopController.abort();
       await loop;
       await store.close();
       log("worker.stopped");

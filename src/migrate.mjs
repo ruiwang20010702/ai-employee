@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { createPostgresPool } from "./postgres.mjs";
+import { applyProductionConfigFile } from "./production-config-file.mjs";
 
 const migrationsDirectory = fileURLToPath(
   new URL("../db/migrations/", import.meta.url),
@@ -73,6 +74,9 @@ const isMain =
   resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
+  if (process.env.AI_EMPLOYEE_CONFIG_FILE) {
+    await applyProductionConfigFile();
+  }
   const config = loadConfig({ requireTargets: false, production: true });
   const pool = createPostgresPool(config);
   try {

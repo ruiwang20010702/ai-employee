@@ -127,3 +127,36 @@ integration("PostgreSQL 审批、幂等发送账本和审计形成闭环", async
   );
   assert.ok(audit.rows.some((row) => row.event_type === "send.completed"));
 });
+
+integration("PostgreSQL 保存组件心跳并返回深度健康状态", async (t) => {
+  const store = await fixture(t);
+  await store.recordHeartbeat("listener");
+  await store.recordHeartbeat("worker");
+  const health = await store.health();
+  assert.ok(health.database);
+  assert.ok(health.heartbeats.listener);
+  assert.ok(health.heartbeats.worker);
+});
+
+integration("PostgreSQL 复合外键阻止跨租户关联任务", async (t) => {
+  const first = await fixture(t);
+  const second = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await first.ingestMessages(messages().slice(0, 1), base);
+  await second.ingestMessages(messages().slice(0, 1), base);
+  const [firstTaskId] = await first.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await assert.rejects(
+    second.pool.query(
+      `
+      UPDATE messages
+      SET task_id = $1
+      WHERE tenant_id = $2 AND platform_message_id = 'm1'
+    `,
+      [firstTaskId, second.tenantId],
+    ),
+    (error) => error.code === "23503",
+  );
+});

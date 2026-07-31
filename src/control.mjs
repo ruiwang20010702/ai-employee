@@ -1,7 +1,11 @@
 import { loadConfig } from "./config.mjs";
 import { createProductionStore } from "./production-store.mjs";
+import { applyProductionConfigFile } from "./production-config-file.mjs";
 
 const [command = "list", argument, ...rest] = process.argv.slice(2);
+if (process.env.AI_EMPLOYEE_CONFIG_FILE) {
+  await applyProductionConfigFile();
+}
 const config = loadConfig({ requireTargets: false, production: true });
 const store = await createProductionStore(config);
 

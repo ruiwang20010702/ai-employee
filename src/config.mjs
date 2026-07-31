@@ -9,6 +9,20 @@ function positiveNumber(name, fallback) {
   return value;
 }
 
+function positiveInteger(name, fallback) {
+  const value = positiveNumber(name, fallback);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function portNumber(name, fallback) {
+  const value = positiveInteger(name, fallback);
+  if (value > 65_535) throw new Error(`${name} must be <= 65535`);
+  return value;
+}
+
 function commaSeparated(name, fallback = "") {
   return String(process.env[name] ?? fallback)
     .split(",")
@@ -59,7 +73,7 @@ export function loadConfig({
     dataKey,
     tenantId,
     databaseSsl: process.env.DATABASE_SSL === "true",
-    databasePoolMax: positiveNumber("DATABASE_POOL_MAX", 10),
+    databasePoolMax: positiveInteger("DATABASE_POOL_MAX", 10),
     fallbackMs: positiveNumber("DINGTALK_FALLBACK_MS", 300_000),
     debounceMs: positiveNumber("DINGTALK_DEBOUNCE_MS", 800),
     quietWindowMs: positiveNumber("DINGTALK_QUIET_WINDOW_MS", 3_000),
@@ -69,7 +83,19 @@ export function loadConfig({
     ),
     overlapMs: positiveNumber("DINGTALK_FETCH_OVERLAP_MS", 600_000),
     workerPollMs: positiveNumber("AI_EMPLOYEE_WORKER_POLL_MS", 2_000),
-    maxTaskAttempts: positiveNumber("AI_EMPLOYEE_MAX_TASK_ATTEMPTS", 5),
+    heartbeatMs: positiveNumber("AI_EMPLOYEE_HEARTBEAT_MS", 30_000),
+    heartbeatStaleMs: positiveNumber(
+      "AI_EMPLOYEE_HEARTBEAT_STALE_MS",
+      90_000,
+    ),
+    healthHost: process.env.AI_EMPLOYEE_HEALTH_HOST ?? "127.0.0.1",
+    healthPort: portNumber("AI_EMPLOYEE_HEALTH_PORT", 9464),
+    healthAuthToken: process.env.AI_EMPLOYEE_HEALTH_AUTH_TOKEN?.trim() || null,
+    requiredComponents: commaSeparated(
+      "AI_EMPLOYEE_REQUIRED_COMPONENTS",
+      "listener,worker",
+    ),
+    maxTaskAttempts: positiveInteger("AI_EMPLOYEE_MAX_TASK_ATTEMPTS", 5),
     capabilities: new Set(
       commaSeparated("AI_EMPLOYEE_ALLOWED_CAPABILITIES", "draft_reply"),
     ),

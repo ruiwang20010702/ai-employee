@@ -1,68 +1,95 @@
 # AI 员工
 
-基于 DWS 和 Codex 的钉钉 AI 员工。完整方案见[设计总览](./docs/设计总览.md)。
+基于 DWS、Codex 和 PostgreSQL 的钉钉 AI 员工。它实时发现白名单联系人的新消息，合并连续消息，判断是否需要回复，生成草稿，并在逐任务审批后受控发送。
 
-当前实现已经具备可靠消息接入、连续消息合并、独立草稿 Worker、人工审批和受控发送闭环。默认只能生成草稿，不能自动外发消息。
+生产默认是“草稿模式”：可以监听、判断和生成草稿，不能自行外发。开启发送仍必须同时满足能力开关、人工审批、发送前人工回复复查和幂等账本。
 
-## 当前能力
+## 已实现能力
 
-| 能力 | 状态 | 安全边界 |
+| 能力 | 生产状态 | 边界 |
 |---|---|---|
-| 钉钉消息监听 | 已实现 | 只监听环境变量白名单中的单聊联系人 |
-| 实时唤醒与补漏 | 已实现 | 本地活动信号唤醒，DWS 分页取数，定时检查兜底 |
-| 去重与恢复 | 已实现 | SQLite 唯一键、任务租约、指数退避和死信 |
-| 连续消息合并 | 已实现 | 默认等待 3 秒，同一会话消息合并后判断 |
-| 判断是否回复 | 已实现 | 明确闭环走硬规则，其余交给 Codex 结合上下文复核 |
-| 草稿生成 | 已实现 | 独立 Worker、只读 Codex 沙箱，不阻塞监听器 |
-| 人工审批 | 已实现 | 每条外发消息必须单次批准 |
-| 钉钉发送 | 已实现但默认关闭 | 需要能力开关、审批、自身 userId 和人工回复复查 |
-| 项目代码、文档与部署执行 | 尚未开放 | 仍需项目绑定、细粒度能力网关和独立验收流程 |
+| 钉钉消息监听 | 可用 | 只读取配置中的单聊联系人 |
+| 实时唤醒与补漏 | 可用 | 本地活动信号唤醒，5 分钟增量检查兜底 |
+| 消息与任务可靠性 | 可用 | PostgreSQL 去重、事务、租约、重试和死信 |
+| 连续消息合并 | 可用 | 默认等待 3 秒后合并判断 |
+| 判断是否回复 | 可用 | 明确闭环走硬规则，其余由 Codex 结合上下文复核 |
+| 草稿生成 | 可用 | 独立 Worker、只读 Codex 沙箱 |
+| 人工审批与发送 | 可用、默认关闭 | 每条消息单次批准；未知结果不自动重发 |
+| 健康与指标 | 可用 | 深度就绪检查、组件心跳和 Prometheus 指标 |
+| 常驻与恢复 | 可用 | macOS LaunchAgent、数据库迁移、加密备份和恢复 |
+| 代码、共享文档和生产发布 | 未授权 | 当前运行时不会接受这类副作用任务 |
 
-## 环境要求
+最后一行是能力边界，不是故障：消息里的文字不能自行扩大 AI 权限。后续开放代码或部署时，必须另行绑定项目目录、审批、验收和回滚。
 
-- macOS 和已登录的钉钉桌面端。
-- 可用的 DWS。
+## 生产要求
+
+- macOS，已登录钉钉桌面端。
 - Node.js 22.5 或更高版本。
-- 可用的 Codex CLI。
+- DWS、Codex CLI、`pg_dump` 和 `pg_restore`。
+- PostgreSQL 16。
+- DWS 和 Codex 的有效本机授权。
 
-## 配置
+## 首次部署
 
-查看 [.env.example](./.env.example)，运行时注入变量，不要提交真实 `.env`。
-
-最小配置：
-
-```bash
-export DINGTALK_TARGET_USER_IDS="<联系人 userId>"
-npm run listen
-```
-
-多个联系人用逗号分隔：
+1. 安装依赖：
 
 ```bash
-export DINGTALK_TARGET_USER_IDS="<userId1>,<userId2>"
+npm ci
 ```
 
-## 运行方式
-
-开两个终端：
+2. 创建 PostgreSQL。仓库提供了只监听本机端口的 Compose 配置：
 
 ```bash
-# 终端一：监听并可靠入库
-npm run listen
-
-# 终端二：生成草稿
-npm run worker
+mkdir -p .runtime/secrets
+openssl rand -hex 32 > .runtime/secrets/postgres_password
+chmod 600 .runtime/secrets/postgres_password
+docker compose -f deploy/postgres.compose.yml up -d
 ```
 
-任务和消息保存在 `.runtime/ai-employee.sqlite`。消息正文、任务载荷、草稿、审批原因和发送回执使用 AES-256-GCM 加密；目录权限为 `700`，数据库和本机密钥文件权限为 `600`。
-
-默认会在数据库旁生成本机密钥文件。正式运行建议通过密钥管理环境注入：
+3. 从[生产配置示例](./deploy/生产配置.example.json)复制为 `.runtime/production.json`，填写真实值并收紧权限：
 
 ```bash
-export AI_EMPLOYEE_DATA_KEY="$(openssl rand -base64 32)"
+cp deploy/生产配置.example.json .runtime/production.json
+chmod 600 .runtime/production.json
 ```
 
-更换或遗失密钥会导致历史加密数据无法读取，不要在已有数据库上直接替换密钥。
+数据密钥和备份密钥必须分别生成，不能相同：
+
+```bash
+openssl rand -base64 32
+openssl rand -base64 32
+```
+
+4. 运行生产预检。它会检查配置、密钥、远程数据库 TLS、所需工具、数据库连接，并在事务中执行迁移：
+
+```bash
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run production:preflight
+```
+
+5. 安装并启动监听、Worker、健康检查和每日备份：
+
+```bash
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run service:install
+```
+
+6. 验证所有依赖和组件心跳：
+
+```bash
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run production:verify
+```
+
+完整部署、升级、回滚、备份和恢复方法见[生产运维手册](./docs/生产运维手册.md)。
+
+## 日常操作
+
+以下命令都使用同一份生产配置：
+
+```bash
+export AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json"
+```
 
 查看任务：
 
@@ -72,11 +99,12 @@ npm run control -- list awaiting_approval
 npm run control -- show <任务ID>
 ```
 
-批准或拒绝：
+批准、拒绝或重试：
 
 ```bash
 npm run control -- approve <任务ID> "同意发送"
 npm run control -- reject <任务ID> "改为人工回复"
+npm run control -- retry <任务ID>
 ```
 
 暂停和恢复：
@@ -86,107 +114,79 @@ npm run control -- pause
 npm run control -- resume
 ```
 
-健康检查：
-
-```bash
-npm run health
-```
-
-死信任务确认原因后可以人工重试：
-
-```bash
-npm run control -- retry <任务ID>
-```
-
-清理超过指定天数的已完成任务和消息：
-
-```bash
-npm run control -- purge 30
-```
-
-## 开启真实发送
-
-真实发送默认关闭。确认草稿模式运行正常后，重新启动 Worker 并显式配置：
-
-```bash
-export DINGTALK_SELF_USER_ID="<自己的 userId>"
-export AI_EMPLOYEE_ALLOWED_CAPABILITIES="draft_reply,send_message"
-npm run worker
-```
-
-发送必须同时满足：
-
-1. 联系人在监听白名单内。
-2. 任务已经生成有效草稿。
-3. 负责人对该任务执行一次明确批准。
-4. `send_message` 能力已开启。
-5. 发送前没有检测到负责人已经人工回复。
-6. 使用任务 ID 作为 DWS 幂等 UUID，并记录副作用结果。
-7. 消息保留“通过 AI 发送”标记。
-
-如果发送结果未知，系统不会自动重发。人工核对钉钉后处理：
+发送结果未知时必须先人工核对钉钉：
 
 ```bash
 # 已经发出
 npm run control -- resolve-sent <任务ID>
 
-# 确认没有发出，允许继续使用原幂等键发送
+# 确认没有发出，允许继续使用原幂等键
 npm run control -- resolve-not-sent <任务ID>
 ```
 
-## 不回复规则
+健康检查和指标：
 
-以下情况直接不回复：
+```bash
+npm run health
+curl http://127.0.0.1:9464/live
+curl http://127.0.0.1:9464/ready
+curl http://127.0.0.1:9464/metrics
+```
+
+## 开启真实发送
+
+先在草稿模式验收，再把生产配置中的能力改为：
+
+```json
+{
+  "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply,send_message"
+}
+```
+
+并确保 `DINGTALK_SELF_USER_ID` 正确，然后重启服务。发送仍然必须逐任务批准；系统不会获得永久发送许可。
+
+## 不回复规则
 
 - “收到”“好的”“谢谢”等确认或闭环。
 - 明确表示“不用回”“你先忙”“晚点再说”。
 - 只有表情或附件占位。
-- 可识别的自动通知。
-- 合并后仍然缺少语义的极短片段。
+- 可识别的自动通知和重复回执。
+- 合并后仍缺少语义的极短片段。
+- 负责人已经人工回复。
 
-其他消息不再仅凭关键词丢弃，而是进入上下文复核，以降低漏掉真实任务的风险。
+其他消息进入上下文复核，避免仅凭关键词漏掉真实任务。
 
-## 可靠性设计
+## 安全与可靠性
 
-- DWS 按游标完整分页，不再只取前 50 条。
-- 每次从上次成功时间前回退一段重叠窗口，利用消息唯一键去重。
-- 单个联系人失败不会阻塞其他联系人，也不会推进失败联系人的检查点。
-- 监听期间再次触发检查会记录为待执行，不会静默丢弃。
-- 草稿失败按指数退避重试；超过上限进入死信，不能伪装成功。
-- 进程崩溃后，过期任务租约可以由 Worker 重新接管。
-- 钉钉本地目录缺失时继续使用定时兜底，不因版本目录差异直接退出。
-
-## 隐私与安全
-
-- 不读取钉钉私有数据库；本地文件变化只作为活动信号。
-- 正式消息正文只通过 DWS 获取。
-- 运行数据、聊天内容、审批和草稿不进入 Git。
-- 消息正文、任务载荷、草稿和回执采用 AES-256-GCM 加密后落盘。
-- 普通运行日志默认不输出消息正文或真实联系人 ID。
-- 聊天内容被标记为不可信数据，不能扩大工具权限。
-- Codex 草稿运行在只读沙箱中。
-- 外部发送独立受能力开关和审批控制，提示词不能授权。
+- 生产代码只使用 PostgreSQL；SQLite 仅保留为快速单元测试适配器，不会被生产入口加载，也不会进入发布包。
+- 正文、任务载荷、草稿、审批原因和发送回执使用 AES-256-GCM 字段级加密。
+- 配置文件必须为 `600`；日志不输出正文和真实联系人 ID。
+- DWS 活动文件只作为唤醒信号，消息事实仍通过 DWS 获取。
+- 任务使用数据库租约和 `FOR UPDATE SKIP LOCKED`，进程崩溃后可恢复。
+- 外发使用稳定幂等键；结果未知时转人工核对。
+- 每日备份由不同密钥加密，恢复必须显式确认目标数据库。
+- 非本机健康端口必须配置 Bearer Token。
 
 更完整的边界见[安全说明](./安全说明.md)。
 
-## 检查
+## 验证
 
 ```bash
 npm run check
+npm run check:security
+npm pack --dry-run
 ```
 
-测试覆盖分类、DWS 结构解析、增量时间窗、消息幂等、连续消息合并、失败重试、死信、租约恢复、审批、能力开关、人工回复检测和幂等发送。
+GitHub 检查会在 Node.js 22 和 24 上启动真实 PostgreSQL 16，执行迁移、并发租约、审批、幂等和加密集成测试，并运行依赖审计与 CodeQL。
 
-不访问真实消息的 DWS 接入冒烟检查：
+## 文档
 
-```bash
-DINGTALK_TARGET_USER_IDS=example DWS_MOCK=true npm run check:dws
-```
-
-## 当前边界
-
-这一版本解决了钉钉沟通链路的可靠性与安全底座，但还没有开放代码修改、共享文档写入、项目发布或生产部署。此类能力不能直接复用“批准发送消息”的权限，需要按项目单独绑定目录、动作、验收和回滚。
+- [产品需求文档](./docs/产品需求文档.md)
+- [设计总览](./docs/设计总览.md)
+- [技术设计文档](./docs/技术设计文档.md)
+- [生产运维手册](./docs/生产运维手册.md)
+- [安全说明](./安全说明.md)
 
 ## 许可证
 
-当前仓库暂未授予开源许可证。代码公开用于展示和交流，不代表允许复制、修改或分发。
+当前仓库未授予开源许可证。公开可见不代表允许复制、修改或分发。

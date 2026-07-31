@@ -7,6 +7,7 @@ import { Store } from "../src/store.mjs";
 import {
   processApprovedTask,
   processDraftTask,
+  runWorker,
 } from "../src/worker.mjs";
 
 async function fixture(t) {
@@ -180,4 +181,20 @@ test("检测到人工已经回复时取消发送", async (t) => {
     },
   });
   assert.equal(store.getTask(taskId).status, "cancelled_manual");
+});
+
+test("Worker 停止时会立即唤醒，不等待完整轮询周期", async (t) => {
+  const store = await fixture(t);
+  const worker = await runWorker({
+    store,
+    dws: {},
+    config: {
+      ...baseConfig,
+      workerPollMs: 60_000,
+      heartbeatMs: 30_000,
+    },
+  });
+  const startedAt = Date.now();
+  await worker.stop();
+  assert.ok(Date.now() - startedAt < 1_000);
 });

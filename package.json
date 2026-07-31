@@ -1,7 +1,20 @@
 {
   "name": "ai-employee-dingtalk-listener",
+  "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
+  "files": [
+    "db/",
+    "deploy/",
+    "docs/",
+    "schemas/",
+    "scripts/",
+    "src/",
+    "!src/store.mjs",
+    "README.md",
+    "安全说明.md"
+  ],
   "engines": {
     "node": ">=22.5"
   },
@@ -11,6 +24,14 @@
     "worker:once": "node src/worker.mjs --once",
     "control": "node src/control.mjs",
     "health": "node src/health.mjs",
+    "health:serve": "node src/health-server.mjs",
+    "service:generate": "node scripts/管理常驻服务.mjs generate",
+    "service:install": "node scripts/管理常驻服务.mjs install",
+    "service:uninstall": "node scripts/管理常驻服务.mjs uninstall",
+    "production:preflight": "node scripts/生产预检.mjs",
+    "production:verify": "node scripts/验证生产服务.mjs",
+    "db:backup": "node scripts/备份数据库.mjs",
+    "db:restore": "node scripts/恢复数据库.mjs",
     "db:migrate": "node src/migrate.mjs",
     "check": "node --check src/*.mjs && node --test test/*.test.mjs",
     "check:security": "npm audit --audit-level=high",

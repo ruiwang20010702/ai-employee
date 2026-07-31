@@ -88,7 +88,9 @@ export async function startListener({
 } = {}) {
   store = store ? await store.open() : await createProductionStore(config);
   let checking = false;
+  let stopping = false;
   let pendingTrigger = null;
+  const activeOperations = new Set();
   let debounceTimer;
   let fallbackTimer;
   let bundleSweepTimer;
@@ -105,6 +107,7 @@ export async function startListener({
   };
 
   const runCheck = async (trigger) => {
+    if (stopping) return null;
     if (checking) {
       pendingTrigger = trigger;
       return;
@@ -130,6 +133,7 @@ export async function startListener({
       }
       const taskIds = await createTasks();
       const paused = await store.isPaused();
+      await store.recordHeartbeat?.("listener");
       log("listener.checked", {
         trigger,
         targets: config.targetUserIds.length,
@@ -156,12 +160,15 @@ export async function startListener({
   };
 
   const safeCheck = async (trigger) => {
-    try {
-      return await runCheck(trigger);
-    } catch (error) {
-      log("listener.error", { trigger, message: error.message });
-      return null;
-    }
+    if (stopping) return null;
+    const operation = runCheck(trigger)
+      .catch((error) => {
+        log("listener.error", { trigger, message: error.message });
+        return null;
+      })
+      .finally(() => activeOperations.delete(operation));
+    activeOperations.add(operation);
+    return operation;
   };
 
   const startup = await runCheck("startup");
@@ -205,11 +212,14 @@ export async function startListener({
     config.fallbackMs,
   );
   bundleSweepTimer = setInterval(async () => {
-    try {
-      await createTasks();
-    } catch (error) {
-      log("listener.bundle_error", { message: error.message });
-    }
+    if (stopping) return;
+    const operation = createTasks()
+      .catch((error) => {
+        log("listener.bundle_error", { message: error.message });
+      })
+      .finally(() => activeOperations.delete(operation));
+    activeOperations.add(operation);
+    await operation;
   }, Math.min(config.quietWindowMs, 1_000));
   log("listener.started", {
     targets: config.targetUserIds.length,
@@ -218,10 +228,14 @@ export async function startListener({
   });
 
   const stop = async (signal = "manual") => {
+    if (stopping) return;
+    stopping = true;
+    pendingTrigger = null;
     for (const watcher of watchers) watcher.close();
     clearInterval(fallbackTimer);
     clearInterval(bundleSweepTimer);
     clearTimeout(debounceTimer);
+    await Promise.allSettled([...activeOperations]);
     await store.close();
     log("listener.stopped", { signal });
   };

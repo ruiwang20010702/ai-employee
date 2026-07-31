@@ -1,0 +1,53 @@
+name: 生产发布
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要发布的分支、标签或提交
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-employee-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 人工批准后发布
+    environment: production
+    runs-on: [self-hosted, macOS, ai-employee-production]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run check
+      - name: 注入受保护的生产配置
+        env:
+          AI_EMPLOYEE_CONFIG_JSON: ${{ secrets.AI_EMPLOYEE_CONFIG_JSON }}
+        run: >-
+          node -e 'const fs=require("node:fs");fs.mkdirSync(".runtime",
+          {recursive:true,mode:0o700});fs.writeFileSync(".runtime/production.json",
+          process.env.AI_EMPLOYEE_CONFIG_JSON+"\n",{mode:0o600})'
+      - name: 生产预检并执行数据库迁移
+        env:
+          AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
+        run: npm run production:preflight
+      - name: 安装并重启常驻服务
+        env:
+          AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
+        run: npm run service:install
+      - name: 验证生产服务
+        env:
+          AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
+        run: npm run production:verify

@@ -9,12 +9,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: 检查-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16.14-alpine3.23
         env:
           POSTGRES_DB: ai_employee_test
           POSTGRES_USER: postgres
@@ -36,6 +40,8 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm run check
         env:
           TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/ai_employee_test
+      - run: npm pack --dry-run

@@ -11,7 +11,7 @@ const prefix = "enc:v1:";
 
 function decodeKey(value) {
   const key = Buffer.from(value, "base64");
-  if (key.length !== 32) {
+  if (key.length !== 32 || key.toString("base64") !== value) {
     throw new Error("AI_EMPLOYEE_DATA_KEY must be a base64 encoded 32-byte key");
   }
   return key;
