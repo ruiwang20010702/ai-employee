@@ -26,7 +26,7 @@
 - macOS，已登录钉钉桌面端。
 - Node.js 22.5 或更高版本。
 - DWS、Codex CLI、`pg_dump` 和 `pg_restore`。
-- PostgreSQL 16。
+- PostgreSQL 16 或 17。
 - DWS 和 Codex 的有效本机授权。
 
 ## 首次部署
