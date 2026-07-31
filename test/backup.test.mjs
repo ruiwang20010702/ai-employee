@@ -54,14 +54,20 @@ test("备份成功后原子发布且可以通过认证解密恢复", async (t) =
     env: environment(directory, dumpPath),
   });
   const receipt = JSON.parse(stdout);
-  const encrypted = await readFile(receipt.destination);
+  assert.equal(receipt.completed, true);
+  const backupFiles = (await readdir(directory)).filter((name) =>
+    name.endsWith(".dump.enc"),
+  );
+  assert.equal(backupFiles.length, 1);
+  const destination = join(directory, backupFiles[0]);
+  const encrypted = await readFile(destination);
   assert.equal(encrypted.includes(Buffer.from("verified-dump-content")), false);
   assert.equal(
     (await readdir(directory)).some((name) => name.endsWith(".partial")),
     false,
   );
 
-  await execFileAsync(process.execPath, [restoreScript, receipt.destination], {
+  await execFileAsync(process.execPath, [restoreScript, destination], {
     env: {
       ...environment(directory, dumpPath),
       PG_RESTORE_PATH: restorePath,

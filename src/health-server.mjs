@@ -71,13 +71,7 @@ export async function startHealthServer({
     server.once("error", reject);
     server.listen(config.healthPort, config.healthHost, resolveListen);
   });
-  console.log(
-    JSON.stringify({
-      type: "health.started",
-      host: config.healthHost,
-      port: config.healthPort,
-    }),
-  );
+  console.log(JSON.stringify({ type: "health.started" }));
 
   return {
     server,

@@ -12,7 +12,7 @@ const headers = config.healthAuthToken
   ? { authorization: `Bearer ${config.healthAuthToken}` }
   : {};
 const deadline = Date.now() + Number(process.env.AI_EMPLOYEE_VERIFY_TIMEOUT_MS ?? 90_000);
-let lastError = "service did not respond";
+let lastStatus = "service did not respond";
 
 while (Date.now() < deadline) {
   try {
@@ -22,13 +22,13 @@ while (Date.now() < deadline) {
     });
     const body = await response.json();
     if (response.ok && body.status === "ready") {
-      console.log(JSON.stringify({ verified: true, url, checks: body.checks }));
+      console.log(JSON.stringify({ verified: true }));
       process.exit(0);
     }
-    lastError = `${response.status}: ${JSON.stringify(body)}`;
-  } catch (error) {
-    lastError = error.message;
+    lastStatus = `HTTP ${response.status}`;
+  } catch {
+    lastStatus = "request failed";
   }
   await new Promise((resolve) => setTimeout(resolve, 2_000));
 }
-throw new Error(`Production verification failed: ${lastError}`);
+throw new Error(`Production verification failed: ${lastStatus}`);
