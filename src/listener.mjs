@@ -1,233 +1,244 @@
-import { execFile } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { watch } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { promisify } from "node:util";
-import { generateDraft } from "./draft.mjs";
+import { createHash } from "node:crypto";
+import { access, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadConfig } from "./config.mjs";
+import { DwsAdapter } from "./dws.mjs";
+import { Store } from "./store.mjs";
 
-const execFileAsync = promisify(execFile);
-const root = new URL("../", import.meta.url);
-const runtimeDir = new URL(".runtime/", root);
-const stateFile = new URL("state.json", runtimeDir);
-const eventFile = new URL("events.jsonl", runtimeDir);
-const targetUserId = process.env.DINGTALK_TARGET_USER_ID;
-const once = process.argv.includes("--once");
-const fallbackMs = Number(process.env.DINGTALK_FALLBACK_MS ?? 300_000);
-const debounceMs = Number(process.env.DINGTALK_DEBOUNCE_MS ?? 800);
-
-const dingtalkRoot = join(homedir(), "Library/Application Support/DingTalkMac");
-const dwsPath = process.env.DWS_PATH ?? join(homedir(), ".local/bin/dws");
-
-if (!targetUserId) {
-  throw new Error(
-    "DINGTALK_TARGET_USER_ID is required. Copy .env.example and inject it at runtime.",
-  );
+function log(type, fields = {}) {
+  console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
 }
 
-function localTimestamp(date) {
-  const parts = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-  const value = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  return `${value.year}-${value.month}-${value.day} ${value.hour}:${value.minute}:${value.second}`;
+function checkpointKey(userId) {
+  return `dws:last-success:${hashId(userId)}`;
 }
 
-async function loadState() {
-  try {
-    return JSON.parse(await readFile(stateFile, "utf8"));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    return { initialized: false, seenMessageIds: [] };
+function hashId(value) {
+  return createHash("sha256").update(String(value)).digest("hex").slice(0, 16);
+}
+
+export function fetchStart({
+  checkpoint,
+  now,
+  overlapMs,
+  initialLookbackHours,
+}) {
+  if (checkpoint) {
+    const parsed = new Date(checkpoint);
+    if (!Number.isNaN(parsed.getTime())) {
+      return new Date(parsed.getTime() - overlapMs);
+    }
   }
+  return new Date(now.getTime() - initialLookbackHours * 60 * 60 * 1000);
 }
 
-async function saveState(state) {
-  await mkdir(runtimeDir, { recursive: true });
-  await writeFile(stateFile, `${JSON.stringify(state, null, 2)}\n`);
-}
-
-async function appendEvent(event) {
-  await mkdir(runtimeDir, { recursive: true });
-  const previous = await readFile(eventFile, "utf8").catch(() => "");
-  await writeFile(eventFile, `${previous}${JSON.stringify(event)}\n`);
-}
-
-function collectMessages(payload) {
-  const conversations =
-    payload?.result?.conversationMessagesList ??
-    payload?.conversationMessagesList ??
-    [];
-  return conversations.flatMap((conversation) =>
-    (conversation.messages ?? []).map((message) => ({
-      ...message,
-      singleChat: conversation.singleChat,
-      conversationTitle: conversation.title,
-    })),
+export async function discoverWatchDirectories(dingtalkRoot) {
+  const entries = await readdir(dingtalkRoot, { withFileTypes: true }).catch(
+    () => [],
   );
+  const candidates = entries
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith("_v3"))
+    .flatMap((entry) => {
+      const accountDirectory = join(dingtalkRoot, entry.name);
+      return [
+        join(accountDirectory, "DBFiles"),
+        join(accountDirectory, "Sync_v2", "point"),
+        join(accountDirectory, "SyncPoint"),
+      ];
+    });
+  const existing = [];
+  for (const directory of candidates) {
+    if (await access(directory).then(() => true).catch(() => false)) {
+      existing.push(directory);
+    }
+  }
+  return [...new Set(existing)];
 }
 
-async function fetchRecentMessages() {
-  const end = new Date();
-  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-  const { stdout } = await execFileAsync(
-    dwsPath,
-    [
-      "chat",
-      "message",
-      "list-by-sender",
-      "--sender-user-id",
-      targetUserId,
-      "--start",
-      `${localTimestamp(start).replace(" ", "T")}+08:00`,
-      "--end",
-      `${localTimestamp(end).replace(" ", "T")}+08:00`,
-      "--limit",
-      "50",
-      "-f",
-      "json",
-    ],
-    { maxBuffer: 4 * 1024 * 1024 },
-  );
-  return collectMessages(JSON.parse(stdout));
+export async function ingestTarget({
+  userId,
+  config,
+  store,
+  dws,
+  now = new Date(),
+}) {
+  const start = fetchStart({
+    checkpoint: store.getCheckpoint(checkpointKey(userId)),
+    now,
+    overlapMs: config.overlapMs,
+    initialLookbackHours: config.initialLookbackHours,
+  });
+  const messages = await dws.fetchBySender({
+    senderUserId: userId,
+    start,
+    end: now,
+  });
+  const inserted = store.ingestMessages(messages, now);
+  store.setCheckpoint(checkpointKey(userId), now.toISOString(), now);
+  return { fetched: messages.length, inserted };
 }
 
-let checking = false;
-async function check(trigger) {
-  if (checking) return;
-  checking = true;
-  try {
-    const [state, messages] = await Promise.all([loadState(), fetchRecentMessages()]);
-    const ids = messages.map((message) => message.openMessageId).filter(Boolean);
+export async function startListener({
+  config = loadConfig(),
+  store = new Store(config.databasePath),
+  dws = new DwsAdapter(config),
+  once = process.argv.includes("--once"),
+} = {}) {
+  await store.open();
+  let checking = false;
+  let pendingTrigger = null;
+  let debounceTimer;
+  let fallbackTimer;
+  let bundleSweepTimer;
+  const watchers = [];
 
-    if (!state.initialized) {
-      await saveState({
-        initialized: true,
-        seenMessageIds: ids.slice(-200),
-        lastCheckAt: new Date().toISOString(),
-      });
-      console.log(JSON.stringify({ type: "ready", baselineMessages: ids.length }));
+  const createTasks = () => {
+    if (store.isPaused()) return [];
+    const taskIds = store.createReadyTasks({
+      quietWindowMs: config.quietWindowMs,
+      maxAttempts: config.maxTaskAttempts,
+    });
+    if (taskIds.length > 0) log("tasks.queued", { count: taskIds.length });
+    return taskIds;
+  };
+
+  const runCheck = async (trigger) => {
+    if (checking) {
+      pendingTrigger = trigger;
       return;
     }
-
-    const seen = new Set(state.seenMessageIds);
-    const fresh = messages
-      .filter((message) => message.openMessageId && !seen.has(message.openMessageId))
-      .sort((a, b) => String(a.createTime).localeCompare(String(b.createTime)));
-
-    for (const message of fresh) {
-      const event = {
-        type: "dingtalk.message.received",
-        detectedAt: new Date().toISOString(),
-        trigger,
-        sender: message.sender,
-        senderUserId: targetUserId,
-        messageId: message.openMessageId,
-        conversationId: message.openConversationId,
-        createTime: message.createTime,
-        content: message.content,
-      };
-      await appendEvent(event);
-      console.log(JSON.stringify(event));
-      try {
-        const draft = await generateDraft(event);
-        console.log(JSON.stringify(draft));
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            type: "draft.error",
-            sourceMessageId: event.messageId,
+    checking = true;
+    try {
+      let fetched = 0;
+      let inserted = 0;
+      let errors = 0;
+      for (const userId of config.targetUserIds) {
+        try {
+          const result = await ingestTarget({ userId, config, store, dws });
+          fetched += result.fetched;
+          inserted += result.inserted;
+        } catch (error) {
+          errors += 1;
+          log("listener.target_error", {
+            trigger,
+            targetHash: hashId(userId),
             message: error.message,
-            at: new Date().toISOString(),
-          }),
-        );
+          });
+        }
+      }
+      const taskIds = createTasks();
+      log("listener.checked", {
+        trigger,
+        targets: config.targetUserIds.length,
+        fetched,
+        inserted,
+        tasks: taskIds.length,
+        paused: store.isPaused(),
+        errors,
+      });
+      return {
+        fetched,
+        inserted,
+        tasks: taskIds.length,
+        errors,
+      };
+    } finally {
+      checking = false;
+      if (pendingTrigger) {
+        const next = pendingTrigger;
+        pendingTrigger = null;
+        queueMicrotask(() => safeCheck(next));
       }
     }
+  };
 
-    await saveState({
-      initialized: true,
-      seenMessageIds: [...new Set([...state.seenMessageIds, ...ids])].slice(-200),
-      lastCheckAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "listener.error",
-        trigger,
-        message: error.message,
-        at: new Date().toISOString(),
-      }),
-    );
-  } finally {
-    checking = false;
+  const safeCheck = async (trigger) => {
+    try {
+      return await runCheck(trigger);
+    } catch (error) {
+      log("listener.error", { trigger, message: error.message });
+      return null;
+    }
+  };
+
+  const startup = await runCheck("startup");
+  if (once) {
+    store.close();
+    if (startup.errors === config.targetUserIds.length) {
+      throw new Error("DWS fetch failed for every configured target");
+    }
+    return { stop() {} };
   }
-}
 
-async function findAccountDirectory() {
-  const { stdout } = await execFileAsync("/usr/bin/find", [
-    dingtalkRoot,
-    "-mindepth",
-    "1",
-    "-maxdepth",
-    "1",
-    "-type",
-    "d",
-    "-name",
-    "*_v3",
+  const signalFiles = new Set([
+    "dingtalk.db-wal",
+    "dingtalk.db_fts-wal",
+    "sync_sync_sync_HZ",
+    "synca.dat",
   ]);
-  const directory = stdout.trim().split("\n").find(Boolean);
-  if (!directory) throw new Error("DingTalk account directory was not found");
-  return directory;
-}
+  const watchDirectories = await discoverWatchDirectories(config.dingtalkRoot);
+  for (const directory of watchDirectories) {
+    try {
+      watchers.push(
+        watch(directory, { persistent: true }, (_eventType, filename) => {
+          if (!signalFiles.has(String(filename))) return;
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(
+            () => safeCheck("dingtalk-local-event"),
+            config.debounceMs,
+          );
+        }),
+      );
+      watchers.at(-1).on("error", (error) => {
+        log("listener.watch_error", { directory, message: error.message });
+      });
+    } catch (error) {
+      log("listener.watch_error", { directory, message: error.message });
+    }
+  }
 
-await check("startup");
-if (once) process.exit(0);
+  fallbackTimer = setInterval(
+    () => safeCheck("fallback"),
+    config.fallbackMs,
+  );
+  bundleSweepTimer = setInterval(() => {
+    try {
+      createTasks();
+    } catch (error) {
+      log("listener.bundle_error", { message: error.message });
+    }
+  }, Math.min(config.quietWindowMs, 1_000));
+  log("listener.started", {
+    targets: config.targetUserIds.length,
+    watchedDirectories: watchers.length,
+    fallbackMs: config.fallbackMs,
+  });
 
-const accountDirectory = await findAccountDirectory();
-const watchDirectories = [
-  join(accountDirectory, "DBFiles"),
-  join(accountDirectory, "Sync_v2", "point"),
-  join(accountDirectory, "SyncPoint"),
-];
-let debounceTimer;
-const signalFiles = new Set([
-  "dingtalk.db-wal",
-  "dingtalk.db_fts-wal",
-  "sync_sync_sync_HZ",
-  "synca.dat",
-]);
-const watchers = watchDirectories.map((directory) =>
-  watch(directory, { persistent: true }, (_eventType, filename) => {
-    if (!signalFiles.has(String(filename))) return;
+  const stop = (signal = "manual") => {
+    for (const watcher of watchers) watcher.close();
+    clearInterval(fallbackTimer);
+    clearInterval(bundleSweepTimer);
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => check("dingtalk-local-event"), debounceMs);
-  }),
-);
-
-const fallbackTimer = setInterval(() => check("fallback"), fallbackMs);
-console.log(
-  JSON.stringify({
-    type: "listening",
-    targetUserId,
-    watchDirectories,
-    fallbackMs,
-  }),
-);
-
-function shutdown(signal) {
-  for (const watcher of watchers) watcher.close();
-  clearInterval(fallbackTimer);
-  clearTimeout(debounceTimer);
-  console.log(JSON.stringify({ type: "stopped", signal }));
-  process.exit(0);
+    store.close();
+    log("listener.stopped", { signal });
+  };
+  return { stop, runCheck, createTasks };
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+const isMain =
+  process.argv[1] &&
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+
+if (isMain) {
+  const listener = await startListener();
+  process.on("SIGINT", () => {
+    listener.stop("SIGINT");
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    listener.stop("SIGTERM");
+    process.exit(0);
+  });
+}

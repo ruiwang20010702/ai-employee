@@ -2,9 +2,16 @@
   "name": "ai-employee-dingtalk-listener",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "listen": "node src/listener.mjs",
-    "check": "node --check src/listener.mjs && node --check src/draft.mjs && node test/classifier.test.mjs",
+    "worker": "node src/worker.mjs",
+    "worker:once": "node src/worker.mjs --once",
+    "control": "node src/control.mjs",
+    "health": "node src/health.mjs",
+    "check": "node --check src/*.mjs && node --test test/*.test.mjs",
     "check:dws": "node src/listener.mjs --once"
   }
 }
