@@ -1,0 +1,10 @@
+{
+  "name": "ai-employee-dingtalk-listener",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "listen": "node src/listener.mjs",
+    "check": "node --check src/listener.mjs && node --check src/draft.mjs && node test/classifier.test.mjs",
+    "check:dws": "node src/listener.mjs --once"
+  }
+}

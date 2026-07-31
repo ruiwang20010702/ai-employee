@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["shouldReply", "reply", "confidence", "riskLevel", "reason"],
+  "properties": {
+    "shouldReply": {
+      "type": "boolean"
+    },
+    "reply": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "riskLevel": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}
