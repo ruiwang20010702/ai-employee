@@ -1,12 +1,12 @@
 import { access, constants } from "node:fs/promises";
 import { loadConfig } from "./config.mjs";
-import { Store } from "./store.mjs";
+import { createProductionStore } from "./production-store.mjs";
 
-const config = loadConfig({ requireTargets: false });
-const store = await new Store(config.databasePath).open();
+const config = loadConfig({ requireTargets: false, production: true });
+const store = await createProductionStore(config);
 
 try {
-  const state = store.health();
+  const state = await store.health();
   const executable = async (path) =>
     access(path, constants.X_OK)
       .then(() => true)
@@ -29,5 +29,5 @@ try {
   console.log(JSON.stringify({ healthy, checks }, null, 2));
   if (!healthy) process.exitCode = 1;
 } finally {
-  store.close();
+  await store.close();
 }

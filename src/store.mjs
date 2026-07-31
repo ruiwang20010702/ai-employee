@@ -480,7 +480,14 @@ export class Store {
       const existing = this.db
         .prepare("SELECT * FROM side_effects WHERE idempotency_key = ?")
         .get(key);
-      if (existing) return existing;
+      if (existing) {
+        return {
+          ...existing,
+          receipt_json: existing.receipt_json
+            ? this.cipher.decrypt(existing.receipt_json)
+            : null,
+        };
+      }
       const timestamp = nowIso(now);
       this.db
         .prepare(
@@ -491,9 +498,10 @@ export class Store {
         `,
         )
         .run(key, taskId, capability, timestamp, timestamp);
-      return this.db
+      const created = this.db
         .prepare("SELECT * FROM side_effects WHERE idempotency_key = ?")
         .get(key);
+      return { ...created, receipt_json: null };
     });
   }
 

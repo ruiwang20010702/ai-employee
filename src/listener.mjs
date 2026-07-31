@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { DwsAdapter } from "./dws.mjs";
-import { Store } from "./store.mjs";
+import { createProductionStore } from "./production-store.mjs";
 
 function log(type, fields = {}) {
   console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
@@ -65,7 +65,7 @@ export async function ingestTarget({
   now = new Date(),
 }) {
   const start = fetchStart({
-    checkpoint: store.getCheckpoint(checkpointKey(userId)),
+    checkpoint: await store.getCheckpoint(checkpointKey(userId)),
     now,
     overlapMs: config.overlapMs,
     initialLookbackHours: config.initialLookbackHours,
@@ -75,18 +75,18 @@ export async function ingestTarget({
     start,
     end: now,
   });
-  const inserted = store.ingestMessages(messages, now);
-  store.setCheckpoint(checkpointKey(userId), now.toISOString(), now);
+  const inserted = await store.ingestMessages(messages, now);
+  await store.setCheckpoint(checkpointKey(userId), now.toISOString(), now);
   return { fetched: messages.length, inserted };
 }
 
 export async function startListener({
-  config = loadConfig(),
-  store = new Store(config.databasePath),
+  config = loadConfig({ production: true }),
+  store = null,
   dws = new DwsAdapter(config),
   once = process.argv.includes("--once"),
 } = {}) {
-  await store.open();
+  store = store ? await store.open() : await createProductionStore(config);
   let checking = false;
   let pendingTrigger = null;
   let debounceTimer;
@@ -94,9 +94,9 @@ export async function startListener({
   let bundleSweepTimer;
   const watchers = [];
 
-  const createTasks = () => {
-    if (store.isPaused()) return [];
-    const taskIds = store.createReadyTasks({
+  const createTasks = async () => {
+    if (await store.isPaused()) return [];
+    const taskIds = await store.createReadyTasks({
       quietWindowMs: config.quietWindowMs,
       maxAttempts: config.maxTaskAttempts,
     });
@@ -128,14 +128,15 @@ export async function startListener({
           });
         }
       }
-      const taskIds = createTasks();
+      const taskIds = await createTasks();
+      const paused = await store.isPaused();
       log("listener.checked", {
         trigger,
         targets: config.targetUserIds.length,
         fetched,
         inserted,
         tasks: taskIds.length,
-        paused: store.isPaused(),
+        paused,
         errors,
       });
       return {
@@ -165,7 +166,7 @@ export async function startListener({
 
   const startup = await runCheck("startup");
   if (once) {
-    store.close();
+    await store.close();
     if (startup.errors === config.targetUserIds.length) {
       throw new Error("DWS fetch failed for every configured target");
     }
@@ -203,9 +204,9 @@ export async function startListener({
     () => safeCheck("fallback"),
     config.fallbackMs,
   );
-  bundleSweepTimer = setInterval(() => {
+  bundleSweepTimer = setInterval(async () => {
     try {
-      createTasks();
+      await createTasks();
     } catch (error) {
       log("listener.bundle_error", { message: error.message });
     }
@@ -216,12 +217,12 @@ export async function startListener({
     fallbackMs: config.fallbackMs,
   });
 
-  const stop = (signal = "manual") => {
+  const stop = async (signal = "manual") => {
     for (const watcher of watchers) watcher.close();
     clearInterval(fallbackTimer);
     clearInterval(bundleSweepTimer);
     clearTimeout(debounceTimer);
-    store.close();
+    await store.close();
     log("listener.stopped", { signal });
   };
   return { stop, runCheck, createTasks };
@@ -233,12 +234,12 @@ const isMain =
 
 if (isMain) {
   const listener = await startListener();
-  process.on("SIGINT", () => {
-    listener.stop("SIGINT");
+  process.on("SIGINT", async () => {
+    await listener.stop("SIGINT");
     process.exit(0);
   });
-  process.on("SIGTERM", () => {
-    listener.stop("SIGTERM");
+  process.on("SIGTERM", async () => {
+    await listener.stop("SIGTERM");
     process.exit(0);
   });
 }

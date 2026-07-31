@@ -11,7 +11,12 @@
     "worker:once": "node src/worker.mjs --once",
     "control": "node src/control.mjs",
     "health": "node src/health.mjs",
+    "db:migrate": "node src/migrate.mjs",
     "check": "node --check src/*.mjs && node --test test/*.test.mjs",
+    "check:security": "npm audit --audit-level=high",
     "check:dws": "node src/listener.mjs --once"
+  },
+  "dependencies": {
+    "pg": "8.22.0"
   }
 }

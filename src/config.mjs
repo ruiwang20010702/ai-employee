@@ -16,7 +16,10 @@ function commaSeparated(name, fallback = "") {
     .filter(Boolean);
 }
 
-export function loadConfig({ requireTargets = true } = {}) {
+export function loadConfig({
+  requireTargets = true,
+  production = false,
+} = {}) {
   const targetUserIds = [
     ...new Set([
       ...commaSeparated("DINGTALK_TARGET_USER_IDS"),
@@ -30,6 +33,19 @@ export function loadConfig({ requireTargets = true } = {}) {
     );
   }
 
+  const databaseUrl = process.env.DATABASE_URL?.trim() || null;
+  const dataKey = process.env.AI_EMPLOYEE_DATA_KEY?.trim() || null;
+  const tenantId = process.env.AI_EMPLOYEE_TENANT_ID?.trim() || null;
+  if (production && !databaseUrl) {
+    throw new Error("DATABASE_URL is required in production mode");
+  }
+  if (production && !dataKey) {
+    throw new Error("AI_EMPLOYEE_DATA_KEY is required in production mode");
+  }
+  if (production && !tenantId) {
+    throw new Error("AI_EMPLOYEE_TENANT_ID is required in production mode");
+  }
+
   return {
     targetUserIds,
     selfUserId: process.env.DINGTALK_SELF_USER_ID?.trim() || null,
@@ -39,7 +55,11 @@ export function loadConfig({ requireTargets = true } = {}) {
     dingtalkRoot:
       process.env.DINGTALK_DATA_ROOT ??
       join(homedir(), "Library/Application Support/DingTalkMac"),
-    databasePath: process.env.AI_EMPLOYEE_DATABASE_PATH || null,
+    databaseUrl,
+    dataKey,
+    tenantId,
+    databaseSsl: process.env.DATABASE_SSL === "true",
+    databasePoolMax: positiveNumber("DATABASE_POOL_MAX", 10),
     fallbackMs: positiveNumber("DINGTALK_FALLBACK_MS", 300_000),
     debounceMs: positiveNumber("DINGTALK_DEBOUNCE_MS", 800),
     quietWindowMs: positiveNumber("DINGTALK_QUIET_WINDOW_MS", 3_000),

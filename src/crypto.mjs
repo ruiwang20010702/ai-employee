@@ -1,4 +1,9 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+} from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -70,5 +75,11 @@ export class DataCipher {
       decipher.update(encrypted),
       decipher.final(),
     ]).toString("utf8");
+  }
+
+  fingerprint(value) {
+    return createHmac("sha256", this.key)
+      .update(String(value))
+      .digest("hex");
   }
 }

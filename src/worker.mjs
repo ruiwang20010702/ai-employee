@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { generateReplyDraft } from "./draft.mjs";
 import { DwsAdapter } from "./dws.mjs";
-import { Store } from "./store.mjs";
+import { createProductionStore } from "./production-store.mjs";
 
 function log(type, fields = {}) {
   console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
@@ -12,7 +12,7 @@ function log(type, fields = {}) {
 
 export async function processDraftTask({ store, dws, config, generator }) {
   if (!config.capabilities.has("draft_reply")) return false;
-  const task = store.claimTask();
+  const task = await store.claimTask();
   if (!task) return false;
   try {
     if (config.selfUserId) {
@@ -22,7 +22,7 @@ export async function processDraftTask({ store, dws, config, generator }) {
         after: task.payload.latestCreateTime,
       });
       if (manual.known && manual.replied) {
-        store.completeDraft(task.id, {
+        await store.completeDraft(task.id, {
           shouldReply: false,
           reply: "",
           confidence: 1,
@@ -49,14 +49,14 @@ export async function processDraftTask({ store, dws, config, generator }) {
         conversation,
       },
     );
-    store.completeDraft(task.id, draft);
+    await store.completeDraft(task.id, draft);
     log("worker.draft_completed", {
       taskId: task.id,
       shouldReply: draft.shouldReply,
       riskLevel: draft.riskLevel,
     });
   } catch (error) {
-    const status = store.failTask(task.id, error);
+    const status = await store.failTask(task.id, error);
     log("worker.draft_failed", {
       taskId: task.id,
       status,
@@ -75,11 +75,11 @@ export async function processApprovedTask({ store, dws, config }) {
     return false;
   }
 
-  const task = store.claimApprovedTask();
+  const task = await store.claimApprovedTask();
   if (!task) return false;
   const reply = task.result?.reply?.trim();
   if (!reply) {
-    store.markSideEffectUnknown(
+    await store.markSideEffectUnknown(
       task.id,
       "send_message",
       new Error("Approved task has no reply text"),
@@ -95,15 +95,18 @@ export async function processApprovedTask({ store, dws, config }) {
       after: task.payload.latestCreateTime,
     });
   } catch (error) {
-    store.returnApprovedTask(task.id, `manual reply check failed: ${error.message}`);
+    await store.returnApprovedTask(
+      task.id,
+      `manual reply check failed: ${error.message}`,
+    );
     return true;
   }
   if (!manual.known) {
-    store.returnApprovedTask(task.id, manual.reason);
+    await store.returnApprovedTask(task.id, manual.reason);
     return true;
   }
   if (manual.replied) {
-    store.cancelForManualReply(task.id);
+    await store.cancelForManualReply(task.id);
     log("worker.send_cancelled", {
       taskId: task.id,
       reason: "manual_reply_detected",
@@ -112,12 +115,12 @@ export async function processApprovedTask({ store, dws, config }) {
   }
 
   try {
-    const effect = store.beginSideEffect(task.id, "send_message");
+    const effect = await store.beginSideEffect(task.id, "send_message");
     if (effect.status === "completed") {
-      store.completeSideEffect(
+      await store.completeSideEffect(
         task.id,
         "send_message",
-        JSON.parse(store.cipher.decrypt(effect.receipt_json ?? "{}")),
+        JSON.parse(effect.receipt_json ?? "{}"),
       );
       return true;
     }
@@ -134,27 +137,27 @@ export async function processApprovedTask({ store, dws, config }) {
       text: reply,
       idempotencyKey: task.id,
     });
-    store.completeSideEffect(task.id, "send_message", receipt);
+    await store.completeSideEffect(task.id, "send_message", receipt);
     log("worker.send_completed", { taskId: task.id });
   } catch (error) {
-    store.markSideEffectUnknown(task.id, "send_message", error);
+    await store.markSideEffectUnknown(task.id, "send_message", error);
     log("worker.send_unknown", { taskId: task.id, message: error.message });
   }
   return true;
 }
 
 export async function runWorker({
-  config = loadConfig(),
-  store = new Store(config.databasePath),
+  config = loadConfig({ production: true }),
+  store = null,
   dws = new DwsAdapter(config),
   generator = generateReplyDraft,
   once = process.argv.includes("--once"),
 } = {}) {
-  await store.open();
+  store = store ? await store.open() : await createProductionStore(config);
   let stopped = false;
 
   const tick = async () => {
-    if (store.isPaused()) return false;
+    if (await store.isPaused()) return false;
     const drafted = await processDraftTask({ store, dws, config, generator });
     const sent = await processApprovedTask({ store, dws, config });
     return drafted || sent;
@@ -164,7 +167,7 @@ export async function runWorker({
     while (await tick()) {
       // Drain tasks deterministically for scripts and tests.
     }
-    store.close();
+    await store.close();
     return { stop() {} };
   }
 
@@ -188,7 +191,7 @@ export async function runWorker({
     async stop() {
       stopped = true;
       await loop;
-      store.close();
+      await store.close();
       log("worker.stopped");
     },
   };
