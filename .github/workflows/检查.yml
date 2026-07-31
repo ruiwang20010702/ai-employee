@@ -1,6 +1,7 @@
 name: 检查
 
 on:
+  workflow_dispatch:
   push:
     branches: ["main"]
   pull_request:
