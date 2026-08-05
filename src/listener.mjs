@@ -1,11 +1,12 @@
 import { watch } from "node:fs";
 import { createHash } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { loadConfig } from "./config.mjs";
 import { DwsAdapter } from "./dws.mjs";
 import { createProductionStore } from "./production-store.mjs";
+import { safeErrorCode } from "./logging.mjs";
+import { isMainModule } from "./main-module.mjs";
 
 function log(type, fields = {}) {
   console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
@@ -13,6 +14,10 @@ function log(type, fields = {}) {
 
 function checkpointKey(userId) {
   return `dws:last-success:${hashId(userId)}`;
+}
+
+function groupCheckpointKey(groupId) {
+  return `dws:group-mentions:last-success:${hashId(groupId)}`;
 }
 
 function hashId(value) {
@@ -80,6 +85,30 @@ export async function ingestTarget({
   return { fetched: messages.length, inserted };
 }
 
+export async function ingestGroupMentions({
+  groupId,
+  config,
+  store,
+  dws,
+  now = new Date(),
+}) {
+  const key = groupCheckpointKey(groupId);
+  const start = fetchStart({
+    checkpoint: await store.getCheckpoint(key),
+    now,
+    overlapMs: config.overlapMs,
+    initialLookbackHours: config.initialLookbackHours,
+  });
+  const messages = await dws.fetchGroupMentions({
+    groupIds: [groupId],
+    start,
+    end: now,
+  });
+  const inserted = await store.ingestMessages(messages, now);
+  await store.setCheckpoint(key, now.toISOString(), now);
+  return { fetched: messages.length, inserted };
+}
+
 export async function startListener({
   config = loadConfig({ production: true }),
   store = null,
@@ -94,12 +123,15 @@ export async function startListener({
   let debounceTimer;
   let fallbackTimer;
   let bundleSweepTimer;
+  let heartbeatTimer;
   const watchers = [];
 
   const createTasks = async () => {
     if (await store.isPaused()) return [];
     const taskIds = await store.createReadyTasks({
       quietWindowMs: config.quietWindowMs,
+      bundleGapMs: config.bundleGapMs,
+      maxMessagesPerTask: config.maxMessagesPerTask,
       maxAttempts: config.maxTaskAttempts,
     });
     if (taskIds.length > 0) log("tasks.queued", { count: taskIds.length });
@@ -127,16 +159,47 @@ export async function startListener({
           log("listener.target_error", {
             trigger,
             targetHash: hashId(userId),
-            message: error.message,
+            errorCode: safeErrorCode(error),
+          });
+        }
+      }
+      for (const groupId of config.targetGroupIds) {
+        try {
+          const result = await ingestGroupMentions({
+            groupId,
+            config,
+            store,
+            dws,
+          });
+          fetched += result.fetched;
+          inserted += result.inserted;
+        } catch (error) {
+          errors += 1;
+          log("listener.group_error", {
+            trigger,
+            groupHash: hashId(groupId),
+            errorCode: safeErrorCode(error),
           });
         }
       }
       const taskIds = await createTasks();
       const paused = await store.isPaused();
+      if (errors === 0) {
+        await store.setCheckpoint(
+          "listener:last-full-success",
+          new Date().toISOString(),
+        );
+      } else {
+        await store.setCheckpoint(
+          "listener:last-full-failure",
+          "target_fetch_failed",
+        );
+      }
       await store.recordHeartbeat?.("listener");
       log("listener.checked", {
         trigger,
         targets: config.targetUserIds.length,
+        groups: config.targetGroupIds.length,
         fetched,
         inserted,
         tasks: taskIds.length,
@@ -163,7 +226,10 @@ export async function startListener({
     if (stopping) return null;
     const operation = runCheck(trigger)
       .catch((error) => {
-        log("listener.error", { trigger, message: error.message });
+        log("listener.error", {
+          trigger,
+          errorCode: safeErrorCode(error),
+        });
         return null;
       })
       .finally(() => activeOperations.delete(operation));
@@ -174,7 +240,10 @@ export async function startListener({
   const startup = await runCheck("startup");
   if (once) {
     await store.close();
-    if (startup.errors === config.targetUserIds.length) {
+    if (
+      startup.errors ===
+      config.targetUserIds.length + config.targetGroupIds.length
+    ) {
       throw new Error("DWS fetch failed for every configured target");
     }
     return { stop() {} };
@@ -200,10 +269,16 @@ export async function startListener({
         }),
       );
       watchers.at(-1).on("error", (error) => {
-        log("listener.watch_error", { directory, message: error.message });
+        log("listener.watch_error", {
+          directoryHash: hashId(directory),
+          errorCode: safeErrorCode(error),
+        });
       });
     } catch (error) {
-      log("listener.watch_error", { directory, message: error.message });
+      log("listener.watch_error", {
+        directoryHash: hashId(directory),
+        errorCode: safeErrorCode(error),
+      });
     }
   }
 
@@ -211,11 +286,25 @@ export async function startListener({
     () => safeCheck("fallback"),
     config.fallbackMs,
   );
+  heartbeatTimer = setInterval(() => {
+    if (stopping) return;
+    const operation = store
+      .recordHeartbeat?.("listener")
+      ?.catch((error) => {
+        log("listener.heartbeat_error", {
+          errorCode: safeErrorCode(error),
+        });
+      })
+      ?.finally(() => activeOperations.delete(operation));
+    if (operation) activeOperations.add(operation);
+  }, config.heartbeatMs);
   bundleSweepTimer = setInterval(async () => {
     if (stopping) return;
     const operation = createTasks()
       .catch((error) => {
-        log("listener.bundle_error", { message: error.message });
+        log("listener.bundle_error", {
+          errorCode: safeErrorCode(error),
+        });
       })
       .finally(() => activeOperations.delete(operation));
     activeOperations.add(operation);
@@ -223,6 +312,7 @@ export async function startListener({
   }, Math.min(config.quietWindowMs, 1_000));
   log("listener.started", {
     targets: config.targetUserIds.length,
+    groups: config.targetGroupIds.length,
     watchedDirectories: watchers.length,
     fallbackMs: config.fallbackMs,
   });
@@ -234,6 +324,7 @@ export async function startListener({
     for (const watcher of watchers) watcher.close();
     clearInterval(fallbackTimer);
     clearInterval(bundleSweepTimer);
+    clearInterval(heartbeatTimer);
     clearTimeout(debounceTimer);
     await Promise.allSettled([...activeOperations]);
     await store.close();
@@ -242,9 +333,7 @@ export async function startListener({
   return { stop, runCheck, createTasks };
 }
 
-const isMain =
-  process.argv[1] &&
-  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+const isMain = isMainModule(import.meta.url);
 
 if (isMain) {
   const listener = await startListener();

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["shouldReply", "reply", "confidence", "riskLevel", "reason"],
+  "required": ["shouldReply", "reply", "confidence", "riskLevel", "reason", "workRequest"],
   "properties": {
     "shouldReply": {
       "type": "boolean"
@@ -21,6 +21,21 @@
     },
     "reason": {
       "type": "string"
+    },
+    "workRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requested", "objective", "projectHint"],
+          "properties": {
+            "requested": { "type": "boolean" },
+            "objective": { "type": "string" },
+            "projectHint": { "type": "string" }
+          }
+        },
+        { "type": "null" }
+      ]
     }
   }
 }

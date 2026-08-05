@@ -1,6 +1,11 @@
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  isSecretReference,
+  resolveSecretReference,
+  secretConfigKeys,
+} from "./secret-provider.mjs";
 
 export const productionConfigKeys = new Set([
   "DATABASE_URL",
@@ -9,24 +14,54 @@ export const productionConfigKeys = new Set([
   "AI_EMPLOYEE_DATA_KEY",
   "AI_EMPLOYEE_TENANT_ID",
   "DINGTALK_TARGET_USER_IDS",
+  "DINGTALK_TARGET_GROUP_IDS",
   "DINGTALK_SELF_USER_ID",
+  "AI_EMPLOYEE_PROJECTS_DIRECTORY",
   "DINGTALK_DEBOUNCE_MS",
   "DINGTALK_FALLBACK_MS",
   "DINGTALK_QUIET_WINDOW_MS",
+  "AI_EMPLOYEE_BUNDLE_GAP_MS",
+  "AI_EMPLOYEE_MAX_MESSAGES_PER_TASK",
   "DINGTALK_INITIAL_LOOKBACK_HOURS",
   "DINGTALK_FETCH_OVERLAP_MS",
   "DWS_PATH",
   "CODEX_PATH",
   "AI_EMPLOYEE_WORKER_POLL_MS",
+  "AI_EMPLOYEE_PLAN_EXECUTOR_POLL_MS",
+  "AI_EMPLOYEE_PLAN_EXECUTION_LEASE_MS",
+  "AI_EMPLOYEE_PLAN_EXECUTION_LEASE_RENEW_MS",
+  "AI_EMPLOYEE_MANUAL_REPLY_RECHECK_MS",
+  "AI_EMPLOYEE_RECONCILIATION_WINDOW_MS",
+  "AI_EMPLOYEE_RECONCILIATION_GRACE_MS",
+  "AI_EMPLOYEE_RECONCILIATION_LIMIT",
+  "AI_EMPLOYEE_RECONCILIATION_STALE_MS",
+  "AI_EMPLOYEE_REQUIRE_MESSAGE_RECONCILIATION",
+  "AI_EMPLOYEE_REPLY_MAX_AGE_MS",
+  "AI_EMPLOYEE_DRAFT_APPROVAL_TTL_MS",
   "AI_EMPLOYEE_MAX_TASK_ATTEMPTS",
+  "AI_EMPLOYEE_SHADOW_MIN_SAMPLES",
+  "AI_EMPLOYEE_SHADOW_MIN_NO_REPLY_ACCURACY",
   "AI_EMPLOYEE_ALLOWED_CAPABILITIES",
   "AI_EMPLOYEE_APPROVER",
   "AI_EMPLOYEE_HEARTBEAT_MS",
   "AI_EMPLOYEE_HEARTBEAT_STALE_MS",
+  "AI_EMPLOYEE_EXTERNAL_CHECK_STALE_MS",
   "AI_EMPLOYEE_HEALTH_HOST",
   "AI_EMPLOYEE_HEALTH_PORT",
   "AI_EMPLOYEE_HEALTH_AUTH_TOKEN",
+  "AI_EMPLOYEE_ADMIN_HOST",
+  "AI_EMPLOYEE_ADMIN_PORT",
+  "AI_EMPLOYEE_ADMIN_READ_TOKEN",
+  "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
+  "AI_EMPLOYEE_ALERT_WEBHOOK_URL",
+  "AI_EMPLOYEE_ALERT_WEBHOOK_SECRET",
+  "AI_EMPLOYEE_ALERT_INTERVAL_MS",
+  "AI_EMPLOYEE_ALERT_COOLDOWN_MS",
+  "AI_EMPLOYEE_AVAILABILITY_SAMPLE_INTERVAL_MS",
+  "AI_EMPLOYEE_AVAILABILITY_WINDOW_MS",
+  "AI_EMPLOYEE_AVAILABILITY_RETENTION_MS",
   "AI_EMPLOYEE_REQUIRED_COMPONENTS",
+  "AI_EMPLOYEE_REQUIRED_OPERATIONAL_CHECKS",
   "AI_EMPLOYEE_BACKUP_KEY",
   "AI_EMPLOYEE_BACKUP_DIRECTORY",
   "PG_DUMP_PATH",
@@ -43,6 +78,8 @@ export async function applyProductionConfigFile({
   path = process.env.AI_EMPLOYEE_CONFIG_FILE ??
     defaultProductionConfigPath(),
   environment = process.env,
+  secretResolverOptions = {},
+  resolveSecrets = true,
 } = {}) {
   const configPath = resolve(path);
   const metadata = await stat(configPath);
@@ -56,6 +93,9 @@ export async function applyProductionConfigFile({
   if (!values || Array.isArray(values) || typeof values !== "object") {
     throw new Error("Production config must be a JSON object");
   }
+  const sourceEnvironment = { ...environment };
+  const stagedEnvironment = {};
+  const resolvedSecretKeys = [];
   for (const [key, value] of Object.entries(values)) {
     if (!productionConfigKeys.has(key)) {
       throw new Error(`Unsupported config key: ${key}`);
@@ -63,7 +103,20 @@ export async function applyProductionConfigFile({
     if (!["string", "number", "boolean"].includes(typeof value)) {
       throw new Error(`Config value must be scalar: ${key}`);
     }
-    environment[key] = String(value);
+    if (isSecretReference(value) && !secretConfigKeys.has(key)) {
+      throw new Error(`Secret references are not allowed for config key: ${key}`);
+    }
+    if (secretConfigKeys.has(key) && resolveSecrets) {
+      const resolved = await resolveSecretReference(String(value), {
+        environment: sourceEnvironment,
+        ...secretResolverOptions,
+      });
+      stagedEnvironment[key] = resolved.value;
+      if (resolved.source !== "inline") resolvedSecretKeys.push(key);
+    } else {
+      stagedEnvironment[key] = String(value);
+    }
   }
-  return { configPath, values };
+  Object.assign(environment, stagedEnvironment);
+  return { configPath, values, resolvedSecretKeys };
 }

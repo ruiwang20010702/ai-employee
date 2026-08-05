@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { classifyMessage } from "../src/draft.mjs";
+import { generateReplyDraft } from "../src/draft.mjs";
 
 test("明确闭环消息不回复", () => {
   for (const message of [
@@ -20,6 +21,17 @@ test("明确闭环消息不回复", () => {
       `expected no_reply: ${message}`,
     );
   }
+});
+
+test("未 @ 当前账号的群聊消息直接不回复", async () => {
+  const result = await generateReplyDraft({
+    taskId: "group-no-mention",
+    chatType: "group",
+    mentionedSelf: false,
+    content: "大家看一下这个方案",
+  });
+  assert.equal(result.shouldReply, false);
+  assert.equal(result.decisionKind, "group_not_mentioned");
 });
 
 test("非明确闭环消息交给上下文模型复核", () => {

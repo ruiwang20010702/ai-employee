@@ -22,7 +22,15 @@ while (Date.now() < deadline) {
     });
     const body = await response.json();
     if (response.ok && body.status === "ready") {
-      console.log(JSON.stringify({ verified: true }));
+      const adminResponse = await fetch(
+        `http://${config.adminHost}:${config.adminPort}/`,
+        { signal: AbortSignal.timeout(5_000) },
+      );
+      if (!adminResponse.ok) {
+        lastStatus = `admin HTTP ${adminResponse.status}`;
+        continue;
+      }
+      console.log(JSON.stringify({ verified: true, admin: true }));
       process.exit(0);
     }
     lastStatus = `HTTP ${response.status}`;

@@ -43,7 +43,9 @@ export function collectMessages(payload, senderUserId) {
         message.senderUserId ??
         message.sender?.userId ??
         message.sender?.staffId ??
-        senderUserId,
+        senderUserId ??
+        message.senderOpenDingTalkId ??
+        message.sender?.openDingTalkId,
       senderOpenDingTalkId:
         message.senderOpenDingTalkId ?? message.sender?.openDingTalkId,
       senderName:
@@ -103,7 +105,7 @@ export class DwsAdapter {
   async run(args, options = {}) {
     const { stdout } = await execFileAsync(
       this.dwsPath,
-      [...args, ...(this.dwsMock ? ["--mock"] : []), "-f", "json"],
+      [...args, ...(this.dwsMock ? ["--mock"] : []), "--format", "json"],
       {
         maxBuffer: 8 * 1024 * 1024,
         timeout: 60_000,
@@ -113,7 +115,7 @@ export class DwsAdapter {
     return JSON.parse(stdout);
   }
 
-  async fetchBySender({ senderUserId, start, end }) {
+  async fetchBySenderAll({ senderUserId, start, end }) {
     const messages = [];
     const seenCursors = new Set();
     let cursor = "0";
@@ -138,9 +140,53 @@ export class DwsAdapter {
         "--cursor",
         cursor,
       ]);
+      messages.push(...collectMessages(payload, senderUserId));
+      const pageInfo = pagination(payload);
+      if (!pageInfo.hasMore) return messages;
+      cursor = pageInfo.nextCursor;
+    }
+    throw new Error("DWS pagination exceeded 100 pages");
+  }
+
+  async fetchBySender({ senderUserId, start, end }) {
+    return (await this.fetchBySenderAll({ senderUserId, start, end })).filter(
+      (message) => message.singleChat !== false,
+    );
+  }
+
+  async fetchGroupMentions({ groupIds, start, end }) {
+    if (!Array.isArray(groupIds) || groupIds.length === 0) return [];
+    const messages = [];
+    const seenCursors = new Set();
+    let cursor = "0";
+
+    for (let page = 0; page < 100; page += 1) {
+      if (seenCursors.has(cursor)) {
+        throw new Error(`DWS pagination cursor repeated: ${cursor}`);
+      }
+      seenCursors.add(cursor);
+      const payload = await this.run([
+        "chat",
+        "message",
+        "search-advanced",
+        "--at-me",
+        "--conversation-ids",
+        groupIds.join(","),
+        "--start",
+        isoWithOffset(start),
+        "--end",
+        isoWithOffset(end),
+        "--limit",
+        "50",
+        "--cursor",
+        cursor,
+      ]);
       messages.push(
-        ...collectMessages(payload, senderUserId).filter(
-          (message) => message.singleChat !== false,
+        ...collectMessages(payload, null).filter(
+          (message) =>
+            message.singleChat === false &&
+            groupIds.includes(message.conversationId) &&
+            !message.isSelf,
         ),
       );
       const pageInfo = pagination(payload);
@@ -151,11 +197,14 @@ export class DwsAdapter {
   }
 
   async fetchDirect({ userId, before = new Date(), limit = 30 }) {
+    const identityFlag = /^DT[A-Za-z0-9]/.test(String(userId))
+      ? "--open-dingtalk-id"
+      : "--user";
     const payload = await this.run([
       "chat",
       "message",
       "list-direct",
-      "--user",
+      identityFlag,
       userId,
       "--time",
       localTimestamp(before),
@@ -169,7 +218,7 @@ export class DwsAdapter {
     );
   }
 
-  async hasManualReply({ userId, selfUserId, after }) {
+  async hasManualReply({ conversationId, selfUserId, after, now = new Date() }) {
     if (!selfUserId) {
       return {
         known: false,
@@ -177,41 +226,65 @@ export class DwsAdapter {
         reason: "DINGTALK_SELF_USER_ID is not configured",
       };
     }
-    const messages = await this.fetchDirect({ userId, limit: 100 });
-    let unknownIdentity = false;
-    const replied = messages.some((message) => {
-      const messageTime = epoch(message.createTime);
-      const afterTime = epoch(after);
-      if (messageTime == null || afterTime == null || messageTime <= afterTime) {
-        return false;
-      }
-      const senderId =
-        message.raw?.senderUserId ??
-        message.raw?.sender?.userId ??
-        message.raw?.sender?.staffId;
-      if (!message.isSelf && !senderId) {
-        unknownIdentity = true;
-        return false;
-      }
-      return message.isSelf || senderId === selfUserId;
-    });
-    if (!replied && unknownIdentity) {
+    if (!conversationId) {
       return {
         known: false,
         replied: false,
-        reason: "Messages after the source could not be attributed safely",
+        reason: "Conversation ID is not available",
       };
     }
+    const afterTime = epoch(after);
+    if (afterTime == null) {
+      return {
+        known: false,
+        replied: false,
+        reason: "Source message time is invalid",
+      };
+    }
+    const messages = await this.fetchBySenderAll({
+      senderUserId: selfUserId,
+      start: new Date(afterTime),
+      end: now,
+    });
+    const replied = messages.some((message) => {
+      const messageTime = epoch(message.createTime);
+      return (
+        message.conversationId === conversationId &&
+        messageTime != null &&
+        messageTime > afterTime
+      );
+    });
     return { known: true, replied };
   }
 
   async sendText({ userId, text, idempotencyKey }) {
+    const identityFlag = /^DT[A-Za-z0-9]/.test(String(userId))
+      ? "--open-dingtalk-id"
+      : "--user";
     return this.run([
       "chat",
       "message",
       "send",
-      "--user",
+      identityFlag,
       userId,
+      "--title",
+      "AI 员工回复",
+      "--text",
+      text,
+      "--uuid",
+      idempotencyKey,
+      "--ai-tag",
+      "-y",
+    ]);
+  }
+
+  async sendGroupText({ groupId, text, idempotencyKey }) {
+    return this.run([
+      "chat",
+      "message",
+      "send",
+      "--group",
+      groupId,
       "--title",
       "AI 员工回复",
       "--text",

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { createPostgresPool } from "./postgres.mjs";
 import { applyProductionConfigFile } from "./production-config-file.mjs";
+import { isMainModule } from "./main-module.mjs";
 
 const migrationsDirectory = fileURLToPath(
   new URL("../db/migrations/", import.meta.url),
@@ -69,9 +70,7 @@ export async function migrate(pool) {
   }
 }
 
-const isMain =
-  process.argv[1] &&
-  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+const isMain = isMainModule(import.meta.url);
 
 if (isMain) {
   if (process.env.AI_EMPLOYEE_CONFIG_FILE) {

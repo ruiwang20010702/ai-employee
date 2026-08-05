@@ -1,9 +1,8 @@
 import { createServer } from "node:http";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { evaluateHealth, prometheusMetrics } from "./health-check.mjs";
 import { createProductionStore } from "./production-store.mjs";
+import { isMainModule } from "./main-module.mjs";
 
 export async function startHealthServer({
   config = loadConfig({ requireTargets: false, production: true }),
@@ -34,7 +33,11 @@ export async function startHealthServer({
       return;
     }
     try {
-      const health = await evaluateHealth({ store, config });
+      const health = await evaluateHealth({
+        store,
+        config,
+        includeOperationalMetrics: request.url === "/metrics",
+      });
       if (request.url === "/ready") {
         response.writeHead(health.ready ? 200 : 503, {
           "content-type": "application/json",
@@ -85,9 +88,7 @@ export async function startHealthServer({
   };
 }
 
-const isMain =
-  process.argv[1] &&
-  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+const isMain = isMainModule(import.meta.url);
 
 if (isMain) {
   const service = await startHealthServer();

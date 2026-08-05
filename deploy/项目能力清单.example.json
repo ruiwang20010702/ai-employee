@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "projectId": "example_project",
+  "name": "示例项目",
+  "rootDirectory": "/absolute/path/to/project",
+  "requesters": ["replace_with_authorized_user_id"],
+  "capabilities": {
+    "research": { "mode": "automatic", "timeoutMs": 120000 },
+    "document_draft": { "mode": "automatic", "timeoutMs": 120000 },
+    "shared_document_write": {
+      "mode": "approval_required",
+      "folderNodeId": "replace_with_fixed_document_folder_node_id",
+      "maxContentBytes": 204800,
+      "maxRuns": 1,
+      "timeoutMs": 120000
+    },
+    "dingtalk_todo_create": {
+      "mode": "disabled"
+    },
+    "dingtalk_calendar_create": {
+      "mode": "disabled"
+    },
+    "dingtalk_report_submit": {
+      "mode": "disabled"
+    },
+    "code_patch": { "mode": "approval_required", "timeoutMs": 600000 },
+    "local_branch": { "mode": "approval_required", "maxRuns": 1 },
+    "local_test": {
+      "mode": "approval_required",
+      "timeoutMs": 600000,
+      "commands": {
+        "项目检查": {
+          "executable": "/absolute/path/to/npm",
+          "args": ["run", "check"],
+          "timeoutMs": 600000,
+          "maxOutputBytes": 1048576
+        }
+      }
+    },
+    "git_push": {
+      "mode": "approval_required",
+      "maxRuns": 1,
+      "timeoutMs": 120000,
+      "remote": "origin",
+      "expectedRemoteUrl": "https://github.com/example/ai-employee-project.git",
+      "branchPrefix": "ai-employee/"
+    },
+    "production_deploy": {
+      "mode": "approval_required",
+      "maxRuns": 1,
+      "commands": {
+        "生产发布": {
+          "executable": "/absolute/path/to/project-release-script",
+          "args": ["deploy"],
+          "timeoutMs": 900000,
+          "maxOutputBytes": 1048576
+        },
+        "发布验收": {
+          "executable": "/absolute/path/to/project-release-script",
+          "args": ["verify"],
+          "timeoutMs": 120000,
+          "maxOutputBytes": 1048576
+        },
+        "发布回滚": {
+          "executable": "/absolute/path/to/project-release-script",
+          "args": ["rollback"],
+          "timeoutMs": 600000,
+          "maxOutputBytes": 1048576
+        }
+      }
+    }
+  }
+}

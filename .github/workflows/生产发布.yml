@@ -39,10 +39,14 @@ jobs:
           node -e 'const fs=require("node:fs");fs.mkdirSync(".runtime",
           {recursive:true,mode:0o700});fs.writeFileSync(".runtime/production.json",
           process.env.AI_EMPLOYEE_CONFIG_JSON+"\n",{mode:0o600})'
-      - name: 生产预检并执行数据库迁移
+      - name: 只读生产预检
         env:
           AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
         run: npm run production:preflight
+      - name: 执行数据库迁移
+        env:
+          AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
+        run: npm run db:backup && npm run db:migrate
       - name: 安装并重启常驻服务
         env:
           AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json

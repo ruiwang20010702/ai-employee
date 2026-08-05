@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "projectId": "example_project",
+  "requesterId": "replace_with_authorized_user_id",
+  "objective": "完成方案、代码修改、测试和上线准备",
+  "steps": [
+    {
+      "id": "方案",
+      "capability": "document_draft",
+      "description": "形成可审查的实现方案",
+      "expectedEvidence": "方案文档及关键取舍",
+      "inputs": {}
+    },
+    {
+      "id": "共享方案",
+      "capability": "shared_document_write",
+      "description": "把已审查方案创建到项目固定文档目录并回读验收",
+      "expectedEvidence": "文档 nodeId、链接和回读内容哈希",
+      "rollback": "删除共享文档需要另行明确审批",
+      "inputs": { "documentStepId": "方案", "title": "项目实现方案" }
+    },
+    {
+      "id": "代码",
+      "capability": "code_patch",
+      "description": "在项目目录中形成代码补丁",
+      "workingDirectory": "/absolute/path/to/project",
+      "expectedEvidence": "变更文件和差异",
+      "inputs": {}
+    },
+    {
+      "id": "隔离分支",
+      "capability": "local_branch",
+      "description": "把已验证补丁应用到隔离分支",
+      "workingDirectory": "/absolute/path/to/project",
+      "expectedEvidence": "隔离 worktree、分支、基线提交和补丁哈希",
+      "rollback": "删除本计划创建的隔离 worktree 和分支",
+      "inputs": { "patchStepId": "代码" }
+    },
+    {
+      "id": "测试",
+      "capability": "local_test",
+      "description": "在隔离分支运行项目验收检查",
+      "workingDirectory": "/absolute/path/to/project",
+      "expectedEvidence": "真实命令、退出状态和输出哈希",
+      "rollback": "测试不修改外部系统；清理测试临时数据",
+      "inputs": { "commandId": "项目检查", "workspaceStepId": "隔离分支" }
+    },
+    {
+      "id": "推送",
+      "capability": "git_push",
+      "description": "把已测试的隔离提交推送到受控远端分支",
+      "workingDirectory": "/absolute/path/to/project",
+      "expectedEvidence": "远端分支回读到相同提交哈希",
+      "rollback": "远端分支删除需要另行审批",
+      "inputs": { "workspaceStepId": "隔离分支" }
+    },
+    {
+      "id": "上线",
+      "capability": "production_deploy",
+      "description": "经强审批后执行生产发布",
+      "workingDirectory": "/absolute/path/to/project",
+      "expectedEvidence": "部署版本、健康检查和关键路径验证",
+      "rollback": "回滚到上一已验证版本",
+      "inputs": {
+        "workspaceStepId": "隔离分支",
+        "pushStepId": "推送",
+        "commandId": "生产发布",
+        "verificationCommandId": "发布验收",
+        "rollbackCommandId": "发布回滚"
+      }
+    }
+  ]
+}

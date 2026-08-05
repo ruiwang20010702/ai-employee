@@ -1,0 +1,18 @@
+{
+  "DATABASE_URL": "env://AI_EMPLOYEE_SECRET_DATABASE_URL",
+  "DATABASE_SSL": true,
+  "AI_EMPLOYEE_DATA_KEY": "keychain://ai-employee/data-key",
+  "AI_EMPLOYEE_BACKUP_KEY": "keychain://ai-employee/backup-key",
+  "AI_EMPLOYEE_ADMIN_READ_TOKEN": "keychain://ai-employee/admin-read-token",
+  "AI_EMPLOYEE_ADMIN_WRITE_TOKEN": "keychain://ai-employee/admin-write-token",
+  "AI_EMPLOYEE_TENANT_ID": "replace_with_tenant_id",
+  "AI_EMPLOYEE_APPROVER": "replace_with_operator_id",
+  "DINGTALK_TARGET_USER_IDS": "replace_with_allowed_user_ids",
+  "DINGTALK_TARGET_GROUP_IDS": "",
+  "DINGTALK_SELF_USER_ID": "replace_with_self_user_id",
+  "AI_EMPLOYEE_PROJECTS_DIRECTORY": "/absolute/path/to/ai员工/.runtime/projects",
+  "AI_EMPLOYEE_BACKUP_DIRECTORY": "/absolute/path/to/offsite-synced-backups",
+  "DWS_PATH": "dws",
+  "CODEX_PATH": "codex",
+  "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply"
+}

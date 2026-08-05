@@ -1,0 +1,192 @@
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
+import { loadConfig } from "./config.mjs";
+import { safeErrorCode } from "./logging.mjs";
+import { loadProjectManifests } from "./project-manifests.mjs";
+import { createProductionStore } from "./production-store.mjs";
+import { createControlledWorkAdapters } from "./work-adapters.mjs";
+import { executeWorkPlan } from "./work-executor.mjs";
+import { planResultTaskId } from "./plan-result-notification.mjs";
+import { isMainModule } from "./main-module.mjs";
+import { pausedPlanScopes } from "./scoped-pause.mjs";
+
+function log(type, fields = {}) {
+  console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
+}
+
+export async function processNextWorkPlan({
+  store,
+  config,
+  adapters,
+  executionOwner,
+  now = () => new Date(),
+}) {
+  if (!config.capabilities.has("work_plan_execution")) return false;
+  const projects = await loadProjectManifests(config.projectsDirectory);
+  const [approved, automatic] = await Promise.all([
+    store.listWorkPlans({ status: "approved", limit: 100 }),
+    store.listWorkPlans({ status: "ready", limit: 100 }),
+  ]);
+  const candidates = [...approved, ...automatic].sort(
+    (left, right) =>
+      new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
+  );
+  let plan = null;
+  for (const candidate of candidates) {
+    if ((await pausedPlanScopes(store, candidate.plan)).length === 0) {
+      plan = candidate;
+      break;
+    }
+  }
+  if (!plan) return false;
+  const manifest = projects.get(plan.project_id);
+  if (!manifest) {
+    await store.setCheckpoint?.(
+      "executor:last-failure",
+      "project_manifest_unavailable",
+    );
+    log("executor.plan_blocked", {
+      planId: plan.id,
+      errorCode: "project_manifest_unavailable",
+    });
+    return false;
+  }
+  const result = await executeWorkPlan({
+    store,
+    planId: plan.id,
+    manifest,
+    adapters,
+    executionOwner,
+    leaseMs: config.planExecutionLeaseMs,
+    leaseRenewMs: config.planExecutionLeaseRenewMs,
+    manifestProvider: async (projectId) =>
+      (await loadProjectManifests(config.projectsDirectory)).get(projectId) ?? null,
+    now,
+  });
+  const notification = await store.ensureWorkPlanResultDraft?.(plan.id, now());
+  await store.setCheckpoint?.("executor:last-success", now().toISOString());
+  log("executor.plan_finished", {
+    planId: plan.id,
+    projectId: plan.project_id,
+    status: result.status,
+    failedStep: result.failedStep,
+    errorCode: result.errorCode,
+    notificationTaskId: notification?.id,
+  });
+  return true;
+}
+
+export async function reconcilePlanResultDrafts({
+  store,
+  limit = 100,
+  now = new Date(),
+}) {
+  let created = 0;
+  for (const status of ["completed", "failed", "cancelled"]) {
+    const plans = await store.listWorkPlans({ status, limit });
+    for (const plan of plans) {
+      if (!plan.plan?.sourceTaskId) continue;
+      const before = await store.getTask?.(planResultTaskId(plan.id));
+      const task = await store.ensureWorkPlanResultDraft?.(plan.id, now);
+      if (!before && task) created += 1;
+    }
+  }
+  return created;
+}
+
+export async function runPlanExecutor({
+  config = loadConfig({ requireTargets: false, production: true }),
+  store = null,
+  adapters = null,
+  once = process.argv.includes("--once"),
+  executionOwner = `${hostname()}:${process.pid}:${randomUUID()}`,
+} = {}) {
+  store = store ? await store.open() : await createProductionStore(config);
+  adapters = adapters ?? createControlledWorkAdapters({
+    codexPath: config.codexPath,
+    dwsPath: config.dwsPath,
+  });
+  let stopped = false;
+  let heartbeatTimer;
+  const stopController = new AbortController();
+  const interruptibleDelay = async () => {
+    try {
+      await delay(config.planExecutorPollMs, undefined, {
+        signal: stopController.signal,
+      });
+    } catch (error) {
+      if (error.name !== "AbortError") throw error;
+    }
+  };
+  const tick = async () => {
+    await store.recordHeartbeat?.("executor");
+    const recovered = await store.recoverExpiredWorkPlans?.(new Date()) ?? 0;
+    if (recovered > 0) {
+      log("executor.interrupted_plans_failed", { count: recovered });
+    }
+    if (await store.isPaused()) return false;
+    const notifications = await reconcilePlanResultDrafts({ store });
+    const executed = await processNextWorkPlan({
+      store,
+      config,
+      adapters,
+      executionOwner,
+    });
+    return notifications > 0 || executed;
+  };
+
+  if (once) {
+    while (await tick()) {
+      // Drain only currently authorized plans.
+    }
+    await store.close();
+    return { stop() {} };
+  }
+
+  log("executor.started", {
+    enabled: config.capabilities.has("work_plan_execution"),
+  });
+  heartbeatTimer = setInterval(() => {
+    if (stopped) return;
+    store.recordHeartbeat?.("executor")?.catch((error) => {
+      log("executor.heartbeat_error", { errorCode: safeErrorCode(error) });
+    });
+  }, config.heartbeatMs);
+  const loop = (async () => {
+    while (!stopped) {
+      try {
+        const worked = await tick();
+        if (!worked) await interruptibleDelay();
+      } catch (error) {
+        const errorCode = safeErrorCode(error);
+        await (store.setCheckpoint?.("executor:last-failure", errorCode) ?? Promise.resolve())
+          .catch(() => {});
+        log("executor.error", { errorCode });
+        if (!stopped) await interruptibleDelay();
+      }
+    }
+  })();
+  return {
+    async stop() {
+      stopped = true;
+      clearInterval(heartbeatTimer);
+      stopController.abort();
+      await loop;
+      await store.close();
+      log("executor.stopped");
+    },
+  };
+}
+
+const isMain = isMainModule(import.meta.url);
+
+if (isMain) {
+  const executor = await runPlanExecutor();
+  const shutdown = async () => {
+    await executor.stop();
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
