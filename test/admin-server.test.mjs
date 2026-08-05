@@ -10,6 +10,8 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.ok(script);
   assert.doesNotThrow(() => new Function(script));
   assert.match(script, /plan-revise/u);
+  assert.match(script, /\/api\/privacy\/preview/u);
+  assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
 });
 
 function fixture() {
@@ -51,6 +53,27 @@ function fixture() {
         lowRiskTasks: { samples: 1, successes: 1, successRate: 1, successRateTarget: 0.95, successRateTargetMet: true, durationSamples: 1, durationP95Ms: 60000, durationTargetMs: 120000, durationTargetMet: true, lifecycleSamples: 1, lifecycleP95Ms: 90000 },
         approvalWait: { samples: 1, p95Ms: 30000 },
         reliability: { duplicateSideEffects: 0, unknownSideEffects: 0, completedSideEffects: 1, sideEffectAuditCoverage: 1, codexTimeouts: 0, deadTasks: 0 },
+      };
+    },
+    async previewPrivacyErasure(selector) {
+      decisions.push({ type: "privacy-preview", selector });
+      return {
+        selector: { type: "person", fingerprint: "a".repeat(24) },
+        counts: {
+          tasks: 1,
+          messages: 2,
+          workPlans: 0,
+          memories: 0,
+          auditEvents: 1,
+          identityReferences: 1,
+        },
+        blocked: { tasks: 0, messages: 0, workPlans: 0, scopedPauses: 0 },
+        eligibleTotal: 5,
+        blockedTotal: 0,
+        confirmation: "ERASE-0123456789ABCDEF",
+        snapshotDigest: "0".repeat(64),
+        warning: "This permanently erases business content and cannot be undone.",
+        unsafeExtraField: selector.personId,
       };
     },
     async setScopedPause(change) {
@@ -247,6 +270,64 @@ test("局部暂停只允许已配置范围并可恢复", async () => {
     });
     assert.equal(resumed.status, 200);
     assert.equal(decisions.at(-1).paused, false);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("隐私删除管理台只允许双令牌预览并不暴露选择值或删除路由", async () => {
+  const { store, config, decisions } = fixture();
+  const service = await startAdminServer({ store, config });
+  const { port } = service.server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const readHeaders = {
+    authorization: "Bearer read-secret",
+    "content-type": "application/json",
+  };
+  const writeHeaders = {
+    ...readHeaders,
+    "x-ai-employee-write-token": "write-secret",
+  };
+  try {
+    const selector = { personId: "private-user-id" };
+    const readOnly = await fetch(`${base}/api/privacy/preview`, {
+      method: "POST",
+      headers: readHeaders,
+      body: JSON.stringify(selector),
+    });
+    assert.equal(readOnly.status, 403);
+    assert.equal(decisions.length, 0);
+
+    const invalid = await fetch(`${base}/api/privacy/preview`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ personId: "private-user-id", projectId: "project_1" }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).error, "privacy_selector_invalid");
+    assert.equal(decisions.length, 0);
+
+    const preview = await fetch(`${base}/api/privacy/preview`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify(selector),
+    });
+    assert.equal(preview.status, 200);
+    const body = await preview.json();
+    assert.equal(body.selector.fingerprint, "a".repeat(24));
+    assert.equal(body.confirmation, "ERASE-0123456789ABCDEF");
+    assert.equal(body.eligibleTotal, 5);
+    assert.equal(Object.hasOwn(body, "unsafeExtraField"), false);
+    assert.doesNotMatch(JSON.stringify(body), /private-user-id/u);
+    assert.deepEqual(decisions, [{ type: "privacy-preview", selector }]);
+
+    const deletion = await fetch(`${base}/api/privacy/delete`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ ...selector, confirmation: body.confirmation }),
+    });
+    assert.equal(deletion.status, 404);
+    assert.deepEqual(decisions, [{ type: "privacy-preview", selector }]);
   } finally {
     await service.stop("test");
   }

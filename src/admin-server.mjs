@@ -21,6 +21,7 @@ import {
 import { safeCommandEnvironment } from "./controlled-command-runner.mjs";
 import { isMainModule } from "./main-module.mjs";
 import { buildPlanTakeover } from "./plan-takeover.mjs";
+import { validatePrivacySelector } from "./privacy-erasure.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -158,6 +159,60 @@ function memorySummary(memory) {
     confidence: memory.confidence,
     expiresAt: memory.expires_at,
     updatedAt: memory.updated_at,
+  };
+}
+
+const privacyEligibleCountKeys = Object.freeze([
+  "tasks",
+  "messages",
+  "workPlans",
+  "memories",
+  "auditEvents",
+  "identityReferences",
+]);
+const privacyBlockedCountKeys = Object.freeze([
+  "tasks",
+  "messages",
+  "workPlans",
+  "scopedPauses",
+]);
+
+function safePrivacyCounts(input, keys) {
+  return Object.fromEntries(keys.map((key) => {
+    const value = input?.[key];
+    return [key, Number.isSafeInteger(value) && value >= 0 ? value : 0];
+  }));
+}
+
+function privacyPreviewSummary(preview) {
+  const counts = safePrivacyCounts(preview.counts, privacyEligibleCountKeys);
+  const blocked = safePrivacyCounts(preview.blocked, privacyBlockedCountKeys);
+  const eligibleTotal = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  const blockedTotal = Object.values(blocked).reduce((sum, count) => sum + count, 0);
+  const type = ["person", "project", "time"].includes(preview.selector?.type)
+    ? preview.selector.type
+    : null;
+  const fingerprint = /^[a-f0-9]{24}$/u.test(preview.selector?.fingerprint ?? "")
+    ? preview.selector.fingerprint
+    : null;
+  const snapshotDigest = /^[a-f0-9]{64}$/u.test(preview.snapshotDigest ?? "")
+    ? preview.snapshotDigest
+    : null;
+  const confirmationCandidate = /^ERASE-[A-F0-9]{16}$/u.test(
+    preview.confirmation ?? "",
+  ) ? preview.confirmation : null;
+  const confirmation =
+    eligibleTotal > 0 && blockedTotal === 0 && type && fingerprint && snapshotDigest
+      ? confirmationCandidate
+      : null;
+  return {
+    selector: { type, fingerprint },
+    counts,
+    blocked,
+    eligibleTotal,
+    blockedTotal,
+    confirmation,
+    snapshotDigest,
   };
 }
 
@@ -444,6 +499,20 @@ export async function startAdminServer({
             selectionKind,
           })),
         });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/privacy/preview") {
+        const selector = await readJson(request, 4_096);
+        try {
+          validatePrivacySelector(selector);
+        } catch {
+          throw Object.assign(new Error("privacy_selector_invalid"), { status: 400 });
+        }
+        json(
+          response,
+          200,
+          privacyPreviewSummary(await store.previewPrivacyErasure(selector)),
+        );
         return;
       }
 
