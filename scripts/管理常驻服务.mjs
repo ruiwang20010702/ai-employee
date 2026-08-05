@@ -6,12 +6,14 @@ import {
   readdir,
   readFile,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { isMainModule } from "../src/main-module.mjs";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -163,6 +165,58 @@ async function generate() {
   );
 }
 
+export async function restoreLaunchAgents({
+  serviceDefinitions = services,
+  destinationDirectory = launchAgentsDirectory,
+  previous = new Map(),
+  runLaunchctl = execFileAsync,
+  launchDomain = domain,
+} = {}) {
+  const failedLabels = [];
+  for (const service of [...serviceDefinitions].reverse()) {
+    const filename = `${service.label}.plist`;
+    const destination = join(destinationDirectory, filename);
+    await runLaunchctl("/bin/launchctl", [
+      "bootout",
+      launchDomain,
+      destination,
+    ]).catch(() => {});
+    const backup = previous.get(service.label);
+    try {
+      if (backup) {
+        await copyFile(backup, destination);
+        await chmod(destination, 0o600);
+        await runLaunchctl("/bin/launchctl", [
+          "bootstrap",
+          launchDomain,
+          destination,
+        ]);
+        await runLaunchctl("/bin/launchctl", [
+          "print",
+          `${launchDomain}/${service.label}`,
+        ]);
+      } else {
+        await unlink(destination).catch((error) => {
+          if (error.code !== "ENOENT") throw error;
+        });
+        const stillLoaded = await runLaunchctl("/bin/launchctl", [
+          "print",
+          `${launchDomain}/${service.label}`,
+        ]).then(() => true).catch(() => false);
+        if (stillLoaded) {
+          throw new Error("New service remained loaded after rollback");
+        }
+      }
+    } catch {
+      failedLabels.push(service.label);
+    }
+  }
+  return {
+    complete: failedLabels.length === 0,
+    failedLabels,
+  };
+}
+
 async function install() {
   await generate();
   await mkdir(launchAgentsDirectory, { recursive: true });
@@ -203,25 +257,13 @@ async function install() {
       ]);
     }
   } catch (error) {
-    for (const service of [...services].reverse()) {
-      const filename = `${service.label}.plist`;
-      const destination = join(launchAgentsDirectory, filename);
-      await execFileAsync("/bin/launchctl", [
-        "bootout",
-        domain,
-        destination,
-      ]).catch(() => {});
-      const backup = previous.get(service.label);
-      if (!backup) continue;
-      await copyFile(backup, destination);
-      await chmod(destination, 0o600);
-      await execFileAsync("/bin/launchctl", [
-        "bootstrap",
-        domain,
-        destination,
-      ]).catch(() => {});
+    const rollback = await restoreLaunchAgents({ previous });
+    if (!rollback.complete) {
+      throw new Error(
+        `Service install failed and rollback was incomplete: ${rollback.failedLabels.join(",")}`,
+      );
     }
-    throw new Error(`Service install failed and rollback ran: ${error.message}`);
+    throw new Error(`Service install failed and rollback completed: ${error.message}`);
   }
   console.log(
     JSON.stringify({
@@ -252,8 +294,10 @@ async function uninstall() {
   );
 }
 
-const command = process.argv[2] ?? "generate";
-if (command === "generate") await generate();
-else if (command === "install") await install();
-else if (command === "uninstall") await uninstall();
-else throw new Error("Usage: 管理常驻服务.mjs generate|install|uninstall");
+if (isMainModule(import.meta.url)) {
+  const command = process.argv[2] ?? "generate";
+  if (command === "generate") await generate();
+  else if (command === "install") await install();
+  else if (command === "uninstall") await uninstall();
+  else throw new Error("Usage: 管理常驻服务.mjs generate|install|uninstall");
+}
