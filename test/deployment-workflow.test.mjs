@@ -12,6 +12,8 @@ test("生产发布使用稳定版本目录、外部密钥门禁和失败回退",
 
   assert.match(workflow, /AI_EMPLOYEE_DEPLOY_ROOT/u);
   assert.match(workflow, /AI_EMPLOYEE_RELEASE_DIRECTORY/u);
+  assert.match(workflow, /准备版本化发布\.mjs prepare/u);
+  assert.match(workflow, /准备版本化发布\.mjs activate/u);
   assert.match(workflow, /git archive --format=tar HEAD/u);
   assert.match(workflow, /merge-base --is-ancestor HEAD refs\/remotes\/origin\/main/u);
   assert.match(workflow, /AI_EMPLOYEE_DEPLOY_SHA/u);
