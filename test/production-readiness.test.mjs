@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   checkCodexRuntime,
   checkDwsRuntime,
+  checkGbrainRuntime,
+  checkProductionReadiness,
   requireExecutable,
   validateBase64Key,
   validateLongToken,
@@ -22,6 +24,13 @@ function validConfig(overrides = {}) {
     alertWebhookSecret: null,
     databaseUrl: "postgresql://employee:secret@127.0.0.1:5432/employee",
     databaseSsl: false,
+    capabilities: new Set(),
+    dwsPath: "dws",
+    codexPath: "codex",
+    gbrainPath: "gbrain",
+    projectsDirectory: "/projects",
+    targetUserIds: [],
+    targetGroupIds: [],
     ...overrides,
   };
 }
@@ -147,4 +156,62 @@ test("DWS runtime check uses JSON auth status and returns no identity", async ()
     })),
     /not ready/u,
   );
+});
+
+test("gbrain runtime check only returns a validated version", async () => {
+  const result = await checkGbrainRuntime("gbrain", async (path, args, options) => {
+    assert.equal(path, "gbrain");
+    assert.deepEqual(args, ["version"]);
+    assert.equal(options.env.AI_EMPLOYEE_DATA_KEY, undefined);
+    return { stdout: "gbrain 0.30.2\n" };
+  });
+  assert.deepEqual(result, { required: true, version: "0.30.2" });
+  await assert.rejects(
+    () => checkGbrainRuntime("gbrain", async () => ({ stdout: "unknown\n" })),
+    /invalid version/u,
+  );
+});
+
+test("生产计划启用知识页读取时预检强制验证 gbrain", async () => {
+  const calls = [];
+  const config = validConfig({
+    capabilities: new Set(["work_plan_execution"]),
+  });
+  const result = await checkProductionReadiness({
+    config,
+    environment: { AI_EMPLOYEE_BACKUP_KEY: backupKey },
+    manifestLoader: async () => new Map([["project", {
+      capabilities: { knowledge_read: { mode: "automatic" } },
+    }]]),
+    executableChecker: async (name, path) => calls.push([name, path]),
+    codexChecker: async () => ({ status: "ok" }),
+    dwsChecker: async () => ({ authenticated: true }),
+    gbrainChecker: async (path) => {
+      calls.push(["gbrain-runtime", path]);
+      return { required: true, version: "0.30.2" };
+    },
+    createPool: () => ({ async end() {} }),
+    checkDatabase: async () => ({ database: true }),
+  });
+  assert.deepEqual(result.gbrainRuntime, { required: true, version: "0.30.2" });
+  assert.equal(calls.some(([name]) => name === "gbrain"), true);
+  assert.equal(calls.some(([name]) => name === "gbrain-runtime"), true);
+});
+
+test("未启用知识页读取时预检不要求安装 gbrain", async () => {
+  const calls = [];
+  const result = await checkProductionReadiness({
+    config: validConfig(),
+    environment: { AI_EMPLOYEE_BACKUP_KEY: backupKey },
+    executableChecker: async (name) => calls.push(name),
+    codexChecker: async () => ({ status: "ok" }),
+    dwsChecker: async () => ({ authenticated: true }),
+    gbrainChecker: async () => {
+      throw new Error("must not run");
+    },
+    createPool: () => ({ async end() {} }),
+    checkDatabase: async () => ({ database: true }),
+  });
+  assert.deepEqual(result.gbrainRuntime, { required: false });
+  assert.equal(calls.includes("gbrain"), false);
 });

@@ -341,9 +341,10 @@ Worker 每分钟复查待审批草稿：如果检测到当前账号已在同一�
 npm run check
 npm run check:security
 npm pack --dry-run
+npm run reuse:verify
 ```
 
-GitHub 检查会在 Node.js 22 和 24 上启动真实 PostgreSQL 16，执行迁移、并发租约、审批、幂等和加密集成测试，并运行依赖审计与 CodeQL。
+`reuse:verify` 会真实生成 tarball、安装到空目录、解析安装后的全部源码、初始化受保护配置、验证不可覆盖，再创建并校验一个默认无外部权限的项目清单；它不会连接生产数据库、钉钉或 Codex。GitHub 检查会在 Node.js 22 和 24 上启动真实 PostgreSQL 16，执行迁移、并发租约、审批、幂等和加密集成测试，并运行该隔离安装验收、依赖审计与 CodeQL。
 
 ## 文档
 

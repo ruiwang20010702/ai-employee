@@ -6,6 +6,10 @@ const workflowUrl = new URL(
   "../.github/workflows/生产发布.yml",
   import.meta.url,
 );
+const checkWorkflowUrl = new URL(
+  "../.github/workflows/检查.yml",
+  import.meta.url,
+);
 
 test("生产发布使用稳定版本目录、外部密钥门禁和失败回退", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
@@ -24,4 +28,9 @@ test("生产发布使用稳定版本目录、外部密钥门禁和失败回退",
     workflow.includes("${{ github.workspace }}/.runtime/production.json"),
     false,
   );
+});
+
+test("持续集成从真实发布包执行隔离复用验收", async () => {
+  const workflow = await readFile(checkWorkflowUrl, "utf8");
+  assert.match(workflow, /npm run reuse:verify/u);
 });

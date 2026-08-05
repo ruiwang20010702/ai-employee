@@ -104,6 +104,25 @@ export async function checkDwsRuntime(
   };
 }
 
+export async function checkGbrainRuntime(
+  gbrainPath,
+  run = execFileAsync,
+) {
+  let version;
+  try {
+    const { stdout } = await run(gbrainPath, ["version"], {
+      timeout: 10_000,
+      maxBuffer: 512 * 1024,
+      env: safeCodexEnvironment(gbrainPath),
+    });
+    version = String(stdout).trim().match(/^gbrain\s+([^\s]+)/u)?.[1] ?? null;
+  } catch {
+    throw new Error("gbrain runtime version check failed");
+  }
+  if (!version) throw new Error("gbrain runtime returned an invalid version");
+  return { required: true, version };
+}
+
 export function validateProductionReadinessConfig(
   config,
   environment = process.env,
@@ -153,30 +172,48 @@ export async function checkProductionReadiness({
   config,
   environment = process.env,
   createPool = createPostgresPool,
+  checkDatabase = checkPostgres,
+  manifestLoader = loadProjectManifests,
+  executableChecker = requireExecutable,
+  codexChecker = checkCodexRuntime,
+  dwsChecker = checkDwsRuntime,
+  gbrainChecker = checkGbrainRuntime,
 } = {}) {
   validateProductionReadinessConfig(config, environment);
-  await Promise.all([
-    requireExecutable("DWS", config.dwsPath),
-    requireExecutable("Codex", config.codexPath),
-    requireExecutable("pg_dump", environment.PG_DUMP_PATH ?? "pg_dump"),
-    requireExecutable("pg_restore", environment.PG_RESTORE_PATH ?? "pg_restore"),
-  ]);
-  const [codexRuntime, dwsRuntime] = await Promise.all([
-    checkCodexRuntime(config.codexPath),
-    checkDwsRuntime(config.dwsPath),
-  ]);
+  let projects = new Map();
   if (config.capabilities.has("work_plan_execution")) {
-    const projects = await loadProjectManifests(config.projectsDirectory);
+    projects = await manifestLoader(config.projectsDirectory);
     if (projects.size === 0) {
       throw new Error(
         "work_plan_execution requires at least one valid project manifest",
       );
     }
   }
+  const gbrainRequired = [...projects.values()].some(
+    (project) => project.capabilities.knowledge_read != null &&
+      project.capabilities.knowledge_read.mode !== "disabled",
+  );
+  const executableChecks = [
+    executableChecker("DWS", config.dwsPath),
+    executableChecker("Codex", config.codexPath),
+    executableChecker("pg_dump", environment.PG_DUMP_PATH ?? "pg_dump"),
+    executableChecker("pg_restore", environment.PG_RESTORE_PATH ?? "pg_restore"),
+  ];
+  if (gbrainRequired) {
+    executableChecks.push(executableChecker("gbrain", config.gbrainPath));
+  }
+  await Promise.all(executableChecks);
+  const [codexRuntime, dwsRuntime, gbrainRuntime] = await Promise.all([
+    codexChecker(config.codexPath),
+    dwsChecker(config.dwsPath),
+    gbrainRequired
+      ? gbrainChecker(config.gbrainPath)
+      : Promise.resolve({ required: false }),
+  ]);
 
   const pool = createPool(config);
   try {
-    const database = await checkPostgres(pool);
+    const database = await checkDatabase(pool);
     return {
       ready: true,
       database: database.database,
@@ -184,6 +221,7 @@ export async function checkProductionReadiness({
       capabilities: [...config.capabilities],
       codexRuntime,
       dwsRuntime,
+      gbrainRuntime,
     };
   } finally {
     await pool.end();
