@@ -134,7 +134,6 @@ export async function executeWorkPlan({
       const cancellationTimer = setInterval(() => {
         cancellationPoll = cancellationPoll.then(checkCancellation);
       }, cancellationPollMs);
-      cancellationTimer.unref?.();
       try {
         if (leaseError) throw new Error("Work plan execution lease was lost");
         if (await store.isPaused?.()) {
