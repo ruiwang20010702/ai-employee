@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runAlertCheck } from "../src/alert-monitor.mjs";
+import { runAlertCheck, startAlertMonitor } from "../src/alert-monitor.mjs";
 
 function fixture() {
   const checkpoints = new Map();
@@ -76,4 +76,18 @@ test("Webhook 失败不会进入冷却，下一次检查仍会重试", async () 
     /HTTP 503/u,
   );
   assert.equal(calls, 2);
+});
+
+test("常驻告警采样定时器会保持进程存活", async () => {
+  const { store, config } = fixture();
+  store.close = async () => {};
+  config.alertWebhookUrl = null;
+  config.alertWebhookSecret = null;
+  config.alertIntervalMs = 60_000;
+  const monitor = await startAlertMonitor({ store, config });
+  try {
+    assert.equal(monitor.isTimerReferenced(), true);
+  } finally {
+    await monitor.stop("test");
+  }
 });

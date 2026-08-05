@@ -132,12 +132,14 @@ export async function startAlertMonitor({
   timer = setInterval(() => {
     if (!stopped) void check();
   }, config.alertIntervalMs);
-  timer.unref?.();
   console.log(JSON.stringify({
     type: "alert.started",
     externalWebhookEnabled: Boolean(config.alertWebhookUrl),
   }));
   return {
+    isTimerReferenced() {
+      return timer?.hasRef?.() ?? true;
+    },
     async stop(signal = "manual") {
       stopped = true;
       clearInterval(timer);
