@@ -320,6 +320,7 @@ test("保留期清理只删除已经结束的旧任务", async (t) => {
     1,
   );
   assert.equal(store.getTask(taskId), null);
+  assert.equal(store.ingestMessages(messages().slice(0, 1), new Date("2021-01-02T00:00:00.000Z")), 0);
 });
 
 test("监听器和 Worker 并发启动时共享同一密钥和数据库", async (t) => {
@@ -527,6 +528,149 @@ test("记忆永久删除要求绑定确认值并擦除全部业务正文", async
     () => store.deleteMemory(id, "owner", memoryDeletionConfirmation(id)),
     /cannot be deleted/u,
   );
+});
+
+test("按人隐私擦除绑定实时快照并清空任务、消息、记忆和人工标注", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-05T10:00:00.000Z");
+  store.ingestMessages(messages().slice(0, 1), base);
+  const [taskId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  store.claimTask({ now: new Date(base.getTime() + 10) });
+  let blocked = store.previewPrivacyErasure({ personId: "u1" }, new Date(base.getTime() + 20));
+  assert.equal(blocked.confirmation, null);
+  assert.equal(blocked.blocked.tasks, 1);
+  store.completeDraft(taskId, {
+    shouldReply: false,
+    reply: "",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "无需回复",
+  }, new Date(base.getTime() + 20));
+  store.upsertDecisionReview(taskId, {
+    expectedShouldReply: false,
+    reviewer: "u1",
+    note: "含个人信息的标注",
+  }, new Date(base.getTime() + 30));
+  const first = store.previewPrivacyErasure({ personId: "u1" }, new Date(base.getTime() + 40));
+  assert.match(first.confirmation, /^ERASE-/u);
+  assert.equal(JSON.stringify(first).includes("u1"), false);
+  const memoryId = store.proposeMemory({
+    type: "person",
+    subject: "u1",
+    statement: "个人敏感陈述",
+    sourceType: "chat",
+    sourceId: "private-message",
+    createdBy: "u1",
+  }, new Date(base.getTime() + 41));
+  assert.throws(
+    () => store.erasePrivacyData({ personId: "u1" }, first.confirmation, "operator", new Date(base.getTime() + 50)),
+    /current snapshot/u,
+  );
+  const preview = store.previewPrivacyErasure({ personId: "u1" }, new Date(base.getTime() + 50));
+  const result = store.erasePrivacyData(
+    { personId: "u1" },
+    preview.confirmation,
+    "operator",
+    new Date(base.getTime() + 50),
+  );
+  assert.equal(result.erased, true);
+  assert.equal(store.getTask(taskId), null);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM messages").get().count, 0);
+  assert.equal(store.ingestMessages(messages().slice(0, 1), new Date(base.getTime() + 60)), 0);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM messages").get().count, 0);
+  const rawTask = store.db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
+  assert.ok(rawTask.privacy_erased_at);
+  assert.deepEqual(JSON.parse(store.cipher.decrypt(rawTask.payload_json)), {});
+  const rawMemory = store.db.prepare("SELECT * FROM memory_items WHERE id = ?").get(memoryId);
+  assert.ok(rawMemory.deleted_at);
+  assert.equal(store.cipher.decrypt(rawMemory.statement_ciphertext), "");
+  const review = store.db.prepare("SELECT * FROM decision_reviews WHERE task_id = ?").get(taskId);
+  assert.equal(review, undefined);
+  assert.equal(store.previewPrivacyErasure({ personId: "u1" }).eligibleTotal, 0);
+});
+
+test("按项目擦除覆盖计划、来源任务和项目记忆但不接受活动计划", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-05T10:00:00.000Z");
+  store.ingestMessages(messages().slice(0, 1), base);
+  const [taskId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  store.claimTask({ now: new Date(base.getTime() + 10) });
+  store.completeDraft(taskId, {
+    shouldReply: false, reply: "", confidence: 0.9, riskLevel: "low", reason: "无需回复",
+  }, new Date(base.getTime() + 20));
+  const manifest = {
+    version: 1,
+    projectId: "privacy_project",
+    name: "隐私测试",
+    rootDirectory: "/workspace/privacy",
+    requesters: ["u1"],
+    capabilities: { research: { mode: "automatic" } },
+  };
+  const plan = store.registerWorkPlan(assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: "privacy_project",
+      requesterId: "u1",
+      sourceTaskId: taskId,
+      objective: "项目敏感目标",
+      steps: [{ id: "research", capability: "research", description: "研究", expectedEvidence: "结论" }],
+    },
+  }), new Date(base.getTime() + 30));
+  assert.equal(store.previewPrivacyErasure({ projectId: "privacy_project" }).blocked.workPlans, 1);
+  store.requestWorkPlanCancellation(plan.id, "operator", new Date(base.getTime() + 40));
+  const memoryId = store.proposeMemory({
+    type: "project",
+    subject: "项目口径",
+    projectId: "privacy_project",
+    statement: "项目敏感陈述",
+    sourceType: "operator",
+    sourceId: "source",
+    createdBy: "operator",
+  }, new Date(base.getTime() + 41));
+  const preview = store.previewPrivacyErasure({ projectId: "privacy_project" }, new Date(base.getTime() + 50));
+  assert.equal(preview.counts.tasks, 1);
+  assert.equal(preview.counts.workPlans, 1);
+  assert.equal(preview.counts.memories, 1);
+  store.erasePrivacyData(
+    { projectId: "privacy_project" }, preview.confirmation, "operator", new Date(base.getTime() + 50),
+  );
+  assert.equal(store.getWorkPlan(plan.id), null);
+  assert.equal(store.getTask(taskId), null);
+  const rawPlan = store.db.prepare("SELECT * FROM work_plans WHERE id = ?").get(plan.id);
+  assert.equal(rawPlan.project_id, "deleted");
+  assert.deepEqual(JSON.parse(store.cipher.decrypt(rawPlan.plan_ciphertext)), {});
+  assert.ok(store.db.prepare("SELECT deleted_at FROM memory_items WHERE id = ?").get(memoryId).deleted_at);
+  assert.throws(
+    () => store.registerWorkPlan(assessWorkPlan({
+      manifest,
+      plan: {
+        version: 1,
+        projectId: "privacy_project",
+        requesterId: "u1",
+        sourceTaskId: taskId,
+        objective: "项目敏感目标",
+        steps: [{ id: "research", capability: "research", description: "研究", expectedEvidence: "结论" }],
+      },
+    })),
+    /cannot be recreated/u,
+  );
+});
+
+test("时间擦除遇到未归档消息或仍生效的暂停范围会整体阻止", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-01T10:00:00.000Z");
+  store.ingestMessages(messages().slice(0, 1), base);
+  store.setScopedPause({
+    type: "contact", value: "u1", paused: true, actor: "operator", reason: "处理中",
+  }, base);
+  const preview = store.previewPrivacyErasure(
+    { before: "2026-08-02T00:00:00.000Z" },
+    new Date("2026-08-05T00:00:00.000Z"),
+  );
+  assert.equal(preview.confirmation, null);
+  assert.equal(preview.blocked.messages, 1);
+  assert.equal(preview.blocked.scopedPauses, 1);
 });
 
 function assessedPlan(description = "形成代码补丁") {

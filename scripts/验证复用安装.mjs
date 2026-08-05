@@ -72,7 +72,9 @@ function packageFileGate(files) {
     "scripts/创建项目配置.mjs",
     "scripts/校验项目能力.mjs",
     "scripts/验证复用安装.mjs",
+    "db/migrations/016_隐私擦除墓碑.sql",
     "src/capability-policy.mjs",
+    "src/privacy-erasure.mjs",
     "src/production-config-file.mjs",
   ];
   for (const path of required) {

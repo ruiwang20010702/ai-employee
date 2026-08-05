@@ -40,6 +40,7 @@ async function fixture(t) {
     await pool.query("DELETE FROM work_plans WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM memory_items WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM messages WHERE tenant_id = $1", [tenantId]);
+    await pool.query("DELETE FROM privacy_erased_messages WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM tasks WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM settings WHERE tenant_id = $1", [tenantId]);
     await pool.end();
@@ -565,6 +566,138 @@ integration("PostgreSQL 记忆永久删除擦除正文并保留无正文审计",
   const details = JSON.parse(store.cipher.decrypt(audit.rows[0].details_ciphertext));
   assert.deepEqual(details, { memoryId: id, erased: true });
   assert.equal(JSON.stringify(details).includes("敏感"), false);
+});
+
+integration("PostgreSQL 按人隐私擦除在串行事务中清空正文和关联审计", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-05T10:00:00.000Z");
+  await store.ingestMessages(messages().slice(0, 1), base);
+  const [taskId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await store.claimTask({ now: new Date(base.getTime() + 10) });
+  await store.completeDraft(taskId, {
+    shouldReply: false,
+    reply: "",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "无需回复",
+  }, new Date(base.getTime() + 20));
+  await store.upsertDecisionReview(taskId, {
+    expectedShouldReply: false,
+    reviewer: "u1",
+    note: "个人标注正文",
+  }, new Date(base.getTime() + 30));
+  const memoryId = await store.proposeMemory({
+    type: "person",
+    subject: "u1",
+    statement: "个人敏感陈述",
+    sourceType: "chat",
+    sourceId: "private-message",
+    createdBy: "u1",
+  }, new Date(base.getTime() + 31));
+  const preview = await store.previewPrivacyErasure(
+    { personId: "u1" },
+    new Date(base.getTime() + 40),
+  );
+  assert.match(preview.confirmation, /^ERASE-/u);
+  assert.equal(preview.counts.tasks, 1);
+  assert.equal(preview.counts.memories, 1);
+  assert.equal(JSON.stringify(preview).includes("u1"), false);
+  await store.erasePrivacyData(
+    { personId: "u1" },
+    preview.confirmation,
+    "privacy-operator",
+    new Date(base.getTime() + 40),
+  );
+  assert.equal(await store.getTask(taskId), null);
+  assert.equal(await store.getMemory(memoryId), null);
+  assert.equal(await store.ingestMessages(messages().slice(0, 1), new Date(base.getTime() + 50)), 0);
+  const raw = await store.pool.query(
+    `SELECT t.privacy_erased_at, t.payload_ciphertext,
+            (SELECT COUNT(*)::int FROM messages m
+             WHERE m.tenant_id = t.tenant_id AND m.task_id = t.id) AS message_count,
+            r.reviewer, r.note_ciphertext
+     FROM tasks t
+     LEFT JOIN decision_reviews r
+       ON r.tenant_id = t.tenant_id AND r.task_id = t.id
+     WHERE t.tenant_id = $1 AND t.id = $2`,
+    [store.tenantId, taskId],
+  );
+  assert.ok(raw.rows[0].privacy_erased_at);
+  assert.deepEqual(JSON.parse(store.cipher.decrypt(raw.rows[0].payload_ciphertext)), {});
+  assert.equal(raw.rows[0].message_count, 0);
+  assert.equal(raw.rows[0].reviewer, null);
+  assert.equal(raw.rows[0].note_ciphertext, null);
+  const audit = await store.pool.query(
+    `SELECT actor, details_ciphertext FROM audit_events
+     WHERE tenant_id = $1 ORDER BY id`,
+    [store.tenantId],
+  );
+  const decoded = audit.rows.map((row) => ({
+    actor: row.actor,
+    details: JSON.parse(store.cipher.decrypt(row.details_ciphertext)),
+  }));
+  assert.equal(JSON.stringify(decoded).includes("个人敏感"), false);
+  assert.equal(JSON.stringify(decoded).includes("个人标注"), false);
+  const erasure = decoded.at(-1);
+  assert.equal(erasure.actor, "system:privacy");
+  assert.equal(erasure.details.selector.type, "person");
+  assert.match(erasure.details.requestedByFingerprint, /^[a-f0-9]{24}$/u);
+  assert.equal(JSON.stringify(erasure).includes("privacy-operator"), false);
+});
+
+integration("PostgreSQL 按项目擦除计划及其明确绑定的来源任务", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-05T10:00:00.000Z");
+  await store.ingestMessages(messages().slice(0, 1), base);
+  const [taskId] = await store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  await store.claimTask({ now: new Date(base.getTime() + 10) });
+  await store.completeDraft(taskId, {
+    shouldReply: false, reply: "", confidence: 0.9, riskLevel: "low", reason: "无需回复",
+  }, new Date(base.getTime() + 20));
+  const manifest = {
+    version: 1,
+    projectId: "privacy_project",
+    name: "隐私测试",
+    rootDirectory: "/workspace/privacy",
+    requesters: ["u1"],
+    capabilities: { research: { mode: "automatic" } },
+  };
+  const assessment = assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: "privacy_project",
+      requesterId: "u1",
+      sourceTaskId: taskId,
+      objective: "项目敏感目标",
+      steps: [{ id: "research", capability: "research", description: "研究", expectedEvidence: "结论" }],
+    },
+  });
+  const plan = await store.registerWorkPlan(assessment, new Date(base.getTime() + 30));
+  assert.equal((await store.previewPrivacyErasure({ projectId: "privacy_project" })).confirmation, null);
+  await store.requestWorkPlanCancellation(plan.id, "operator", new Date(base.getTime() + 40));
+  const preview = await store.previewPrivacyErasure(
+    { projectId: "privacy_project" }, new Date(base.getTime() + 50),
+  );
+  assert.equal(preview.counts.tasks, 1);
+  assert.equal(preview.counts.workPlans, 1);
+  await store.erasePrivacyData(
+    { projectId: "privacy_project" }, preview.confirmation, "operator", new Date(base.getTime() + 50),
+  );
+  assert.equal(await store.getTask(taskId), null);
+  assert.equal(await store.getWorkPlan(plan.id), null);
+  const raw = await store.pool.query(
+    `SELECT project_id, plan_ciphertext, privacy_erased_at FROM work_plans
+     WHERE tenant_id = $1 AND id = $2`,
+    [store.tenantId, plan.id],
+  );
+  assert.equal(raw.rows[0].project_id, "deleted");
+  assert.deepEqual(JSON.parse(store.cipher.decrypt(raw.rows[0].plan_ciphertext)), {});
+  assert.ok(raw.rows[0].privacy_erased_at);
+  await assert.rejects(store.registerWorkPlan(assessment), /cannot be recreated/u);
 });
 
 integration("PostgreSQL 记忆导出审计不保存目标路径或正文", async (t) => {

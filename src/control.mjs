@@ -49,6 +49,18 @@ async function refreshMemorySource(memory) {
   return change;
 }
 
+async function readPrivacySelector() {
+  const value = (await readStdin()).trim();
+  if (!value) {
+    throw new Error("Privacy erasure selector JSON is required on stdin");
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error("Privacy erasure selector on stdin must be valid JSON");
+  }
+}
+
 try {
   if (command === "list") {
     print(
@@ -112,6 +124,19 @@ try {
     }
     const before = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     print({ purgedTasks: await store.purgeCompleted({ before }), before });
+  } else if (command === "privacy-delete-preview") {
+    print(await store.previewPrivacyErasure(await readPrivacySelector()));
+  } else if (command === "privacy-delete") {
+    if (!argument) {
+      throw new Error(
+        "Usage: selector JSON on stdin | control privacy-delete <confirmation>",
+      );
+    }
+    print(await store.erasePrivacyData(
+      await readPrivacySelector(),
+      argument,
+      config.approver,
+    ));
   } else if (command === "memory-propose") {
     const [subject, sourceType, sourceId, projectId, expiresAt] = rest;
     if (!argument || !subject || !sourceType || !sourceId) {
@@ -396,7 +421,7 @@ try {
     print(quality);
   } else {
     throw new Error(
-      "Commands: list, show, approve, reject, retry, dismiss-dead, resolve-sent, resolve-not-sent, purge, pause, resume, scope-list, scope-pause, scope-resume, memory-propose, memory-confirm, memory-revoke, memory-list, memory-search, memory-source-check, memory-delete-preview, memory-delete, memory-export, plan-register, plan-show, plan-revise, plan-approve, plan-reject, plan-cancel, plan-execute, plan-evidence, review-label, review-report",
+      "Commands: list, show, approve, reject, retry, dismiss-dead, resolve-sent, resolve-not-sent, purge, privacy-delete-preview, privacy-delete, pause, resume, scope-list, scope-pause, scope-resume, memory-propose, memory-confirm, memory-revoke, memory-list, memory-search, memory-source-check, memory-delete-preview, memory-delete, memory-export, plan-register, plan-show, plan-revise, plan-approve, plan-reject, plan-cancel, plan-execute, plan-evidence, review-label, review-report",
     );
   }
 } finally {

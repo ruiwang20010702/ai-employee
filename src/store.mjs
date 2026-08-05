@@ -23,6 +23,13 @@ import {
   scopedPauseKey,
 } from "./scoped-pause.mjs";
 import { validateWorkPlanRevision } from "./work-plan.mjs";
+import {
+  buildPrivacyErasurePreview,
+  erasableTaskStatuses,
+  erasableWorkPlanStatuses,
+  privacySelectorFingerprint,
+  validatePrivacySelector,
+} from "./privacy-erasure.mjs";
 
 const projectRoot = new URL("../", import.meta.url);
 const defaultDatabaseUrl = new URL(".runtime/ai-employee.sqlite", projectRoot);
@@ -118,6 +125,11 @@ export class Store {
       CREATE INDEX IF NOT EXISTS messages_pending
       ON messages(status, conversation_id, sender_user_id, ingested_at);
 
+      CREATE TABLE IF NOT EXISTS privacy_erased_messages (
+        message_key TEXT PRIMARY KEY,
+        erased_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -135,6 +147,7 @@ export class Store {
         decision_at TEXT,
         approved_at TEXT,
         approved_by TEXT,
+        privacy_erased_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -226,6 +239,7 @@ export class Store {
         cancel_requested_by TEXT,
         supersedes_work_plan_id TEXT,
         revision_actor TEXT,
+        privacy_erased_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY(supersedes_work_plan_id) REFERENCES work_plans(id)
@@ -308,6 +322,9 @@ export class Store {
     if (!taskColumns.has("decision_at")) {
       this.db.exec("ALTER TABLE tasks ADD COLUMN decision_at TEXT");
     }
+    if (!taskColumns.has("privacy_erased_at")) {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN privacy_erased_at TEXT");
+    }
     if (!workPlanColumns.has("execution_owner")) {
       this.db.exec("ALTER TABLE work_plans ADD COLUMN execution_owner TEXT");
     }
@@ -325,6 +342,9 @@ export class Store {
     }
     if (!workPlanColumns.has("revision_actor")) {
       this.db.exec("ALTER TABLE work_plans ADD COLUMN revision_actor TEXT");
+    }
+    if (!workPlanColumns.has("privacy_erased_at")) {
+      this.db.exec("ALTER TABLE work_plans ADD COLUMN privacy_erased_at TEXT");
     }
     this.db.exec(
       `CREATE UNIQUE INDEX IF NOT EXISTS work_plans_single_revision_idx
@@ -397,6 +417,9 @@ export class Store {
         create_time, content, ingested_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
+    const wasErased = this.db.prepare(
+      "SELECT 1 FROM privacy_erased_messages WHERE message_key = ?",
+    );
     let inserted = 0;
     this.transaction(() => {
       for (const message of messages) {
@@ -406,6 +429,9 @@ export class Store {
           !message.conversationId ||
           !message.createTime
         ) {
+          continue;
+        }
+        if (wasErased.get(this.cipher.fingerprint(`message:${message.id}`))) {
           continue;
         }
         const result = insert.run(
@@ -850,7 +876,7 @@ export class Store {
 
   getTask(taskId) {
     return taskFromRow(
-      this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId),
+      this.db.prepare("SELECT * FROM tasks WHERE id = ? AND privacy_erased_at IS NULL").get(taskId),
       this.cipher,
     );
   }
@@ -868,7 +894,7 @@ export class Store {
         .prepare(
           `
           SELECT * FROM tasks
-          WHERE status = ?
+          WHERE privacy_erased_at IS NULL AND status = ?
             AND (created_at < ? OR (created_at = ? AND id < ?))
           ORDER BY created_at DESC, id DESC
           LIMIT ?
@@ -878,13 +904,13 @@ export class Store {
     } else if (status) {
       rows = this.db
           .prepare(
-            "SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            "SELECT * FROM tasks WHERE privacy_erased_at IS NULL AND status = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
           )
           .all(status, limit, offset);
     } else {
       rows = this.db
         .prepare(
-          "SELECT * FROM tasks ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+          "SELECT * FROM tasks WHERE privacy_erased_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
         )
         .all(limit, offset);
     }
@@ -1344,6 +1370,12 @@ export class Store {
       throw new Error("Denied work plan cannot be registered");
     }
     const id = `plan_${assessment.planHash.slice(0, 24)}`;
+    const erased = this.db.prepare(
+      "SELECT privacy_erased_at FROM work_plans WHERE id = ?",
+    ).get(id);
+    if (erased?.privacy_erased_at) {
+      throw new Error("Erased work plan content cannot be recreated unchanged");
+    }
     const timestamp = nowIso(now);
     this.db
       .prepare(
@@ -1440,7 +1472,7 @@ export class Store {
 
   getWorkPlan(id) {
     return workPlanFromRow(
-      this.db.prepare("SELECT * FROM work_plans WHERE id = ?").get(id),
+      this.db.prepare("SELECT * FROM work_plans WHERE id = ? AND privacy_erased_at IS NULL").get(id),
       this.cipher,
     );
   }
@@ -1449,12 +1481,12 @@ export class Store {
     const rows = status
       ? this.db
           .prepare(
-            "SELECT * FROM work_plans WHERE status = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+            "SELECT * FROM work_plans WHERE privacy_erased_at IS NULL AND status = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
           )
           .all(status, limit)
       : this.db
           .prepare(
-            "SELECT * FROM work_plans ORDER BY updated_at DESC, id DESC LIMIT ?",
+            "SELECT * FROM work_plans WHERE privacy_erased_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?",
           )
           .all(limit);
     return rows.map((row) => workPlanFromRow(row, this.cipher));
@@ -1943,14 +1975,17 @@ export class Store {
        ORDER BY ingested_at DESC LIMIT ?`,
     ).all(start, end, limit + 1);
     const taskRows = this.db.prepare(
-      `SELECT * FROM tasks WHERE created_at >= ? AND created_at <= ?
+      `SELECT * FROM tasks WHERE privacy_erased_at IS NULL
+         AND created_at >= ? AND created_at <= ?
        ORDER BY created_at DESC LIMIT ?`,
     ).all(start, end, limit + 1).map((row) => taskFromRow(row, this.cipher));
     const effectRows = this.db.prepare(
-      `SELECT task_id AS taskId, capability, status,
-              receipt_json IS NOT NULL AS receiptPresent
-       FROM side_effects WHERE created_at >= ? AND created_at <= ?
-       ORDER BY created_at DESC LIMIT ?`,
+      `SELECT e.task_id AS taskId, e.capability, e.status,
+              e.receipt_json IS NOT NULL AS receiptPresent
+       FROM side_effects e JOIN tasks t ON t.id = e.task_id
+       WHERE t.privacy_erased_at IS NULL
+         AND e.created_at >= ? AND e.created_at <= ?
+       ORDER BY e.created_at DESC LIMIT ?`,
     ).all(start, end, limit + 1).map((row) => ({
       ...row,
       receiptPresent: Boolean(row.receiptPresent),
@@ -1977,7 +2012,7 @@ export class Store {
   health() {
     const taskCounts = Object.fromEntries(
       this.db
-        .prepare("SELECT status, COUNT(*) AS count FROM tasks GROUP BY status")
+        .prepare("SELECT status, COUNT(*) AS count FROM tasks WHERE privacy_erased_at IS NULL GROUP BY status")
         .all()
         .map((row) => [row.status, Number(row.count)]),
     );
@@ -1988,7 +2023,7 @@ export class Store {
       .all();
     const workPlanCounts = Object.fromEntries(
       this.db
-        .prepare("SELECT status, COUNT(*) AS count FROM work_plans GROUP BY status")
+        .prepare("SELECT status, COUNT(*) AS count FROM work_plans WHERE privacy_erased_at IS NULL GROUP BY status")
         .all()
         .map((row) => [row.status, Number(row.count)]),
     );
@@ -2002,7 +2037,7 @@ export class Store {
       expiredExecutionLeases: Number(
         this.db.prepare(
           `SELECT COUNT(*) AS count FROM work_plans
-           WHERE status IN ('executing','verifying')
+           WHERE privacy_erased_at IS NULL AND status IN ('executing','verifying')
              AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
         ).get(nowIso()).count,
       ),
@@ -2018,6 +2053,287 @@ export class Store {
         heartbeatRows.map((row) => [row.key.slice("heartbeat:".length), row.value]),
       ),
     };
+  }
+
+  _privacyErasureCandidates(input, now = new Date()) {
+    const selector = validatePrivacySelector(input, now);
+    const taskStatus = new Set(erasableTaskStatuses);
+    const planStatus = new Set(erasableWorkPlanStatuses);
+    let planRows;
+    if (selector.type === "person") {
+      planRows = this.db.prepare(
+        "SELECT * FROM work_plans WHERE privacy_erased_at IS NULL AND requester_key = ?",
+      ).all(this.cipher.fingerprint(selector.value));
+    } else if (selector.type === "project") {
+      planRows = this.db.prepare(
+        "SELECT * FROM work_plans WHERE privacy_erased_at IS NULL AND project_id = ?",
+      ).all(selector.value);
+    } else {
+      planRows = this.db.prepare(
+        "SELECT * FROM work_plans WHERE privacy_erased_at IS NULL AND updated_at < ?",
+      ).all(selector.value.toISOString());
+    }
+    const sourceTaskIds = new Set();
+    for (const row of planRows) {
+      try {
+        const sourceTaskId = JSON.parse(this.cipher.decrypt(row.plan_ciphertext))?.sourceTaskId;
+        if (sourceTaskId) sourceTaskIds.add(sourceTaskId);
+      } catch {
+        // A malformed stored plan remains in scope but cannot expand task scope.
+      }
+    }
+    let taskRows;
+    if (selector.type === "person") {
+      taskRows = this.db.prepare(
+        "SELECT * FROM tasks WHERE privacy_erased_at IS NULL AND sender_user_id = ?",
+      ).all(selector.value);
+    } else if (selector.type === "project") {
+      const selectTask = this.db.prepare(
+        "SELECT * FROM tasks WHERE privacy_erased_at IS NULL AND id = ?",
+      );
+      taskRows = [...sourceTaskIds].map((id) => selectTask.get(id)).filter(Boolean);
+    } else {
+      taskRows = this.db.prepare(
+        "SELECT * FROM tasks WHERE privacy_erased_at IS NULL AND updated_at < ?",
+      ).all(selector.value.toISOString());
+    }
+    let memoryRows;
+    if (selector.type === "person") {
+      memoryRows = this.db.prepare(
+        "SELECT * FROM memory_items WHERE deleted_at IS NULL AND subject_key = ?",
+      ).all(this.cipher.fingerprint(selector.value));
+    } else if (selector.type === "project") {
+      memoryRows = this.db.prepare(
+        "SELECT * FROM memory_items WHERE deleted_at IS NULL AND project_id = ?",
+      ).all(selector.value);
+    } else {
+      memoryRows = this.db.prepare(
+        "SELECT * FROM memory_items WHERE deleted_at IS NULL AND updated_at < ?",
+      ).all(selector.value.toISOString());
+    }
+    const taskById = new Map(taskRows.map((row) => [row.id, row]));
+    const eligibleTaskIds = new Set(
+      taskRows.filter((row) => taskStatus.has(row.status)).map((row) => row.id),
+    );
+    let messageRows;
+    if (selector.type === "person") {
+      messageRows = this.db.prepare("SELECT * FROM messages WHERE sender_user_id = ?")
+        .all(selector.value);
+    } else if (selector.type === "project") {
+      const selectMessages = this.db.prepare("SELECT * FROM messages WHERE task_id = ?");
+      messageRows = [...sourceTaskIds].flatMap((taskId) => selectMessages.all(taskId));
+    } else {
+      messageRows = this.db.prepare("SELECT * FROM messages WHERE ingested_at < ?")
+        .all(selector.value.toISOString());
+    }
+    const eligibleMessages = [];
+    const blockedMessages = [];
+    for (const row of messageRows) {
+      const linkedTask = row.task_id ? taskById.get(row.task_id) : null;
+      if (
+        (linkedTask && eligibleTaskIds.has(linkedTask.id)) ||
+        (!row.task_id && row.status !== "pending")
+      ) eligibleMessages.push(row);
+      else blockedMessages.push(row);
+    }
+    const blockedCheckpointKeys = [];
+    const checkpointRewrites = [];
+    const checkpointRows = this.db.prepare(
+      "SELECT key, value, updated_at FROM checkpoints WHERE substr(key, 1, 13) = 'scoped_pause:'",
+    ).all();
+    const targetCheckpointKey = selector.type === "person"
+      ? scopedPauseKey(this.cipher, "contact", selector.value)
+      : selector.type === "project"
+        ? scopedPauseKey(this.cipher, "project", selector.value)
+        : null;
+    for (const row of checkpointRows) {
+      if (
+        row.key === targetCheckpointKey ||
+        (selector.type === "time" && row.updated_at < selector.value.toISOString())
+      ) blockedCheckpointKeys.push(row.key);
+      if (selector.type === "person" && row.key !== targetCheckpointKey) {
+        try {
+          const value = JSON.parse(this.cipher.decrypt(row.value));
+          if (value.actor === selector.value) {
+            checkpointRewrites.push({ key: row.key, value: { ...value, actor: "deleted", reason: "" } });
+          }
+        } catch {
+          // Invalid operational checkpoints are left unchanged and do not widen erasure.
+        }
+      }
+    }
+    const identityReferences = [];
+    if (selector.type === "person") {
+      const referenceQueries = [
+        ["tasks.approved_by", "SELECT id FROM tasks WHERE approved_by = ?"],
+        ["approvals.actor", "SELECT id FROM approvals WHERE actor = ?"],
+        ["reviews.reviewer", "SELECT id FROM decision_reviews WHERE reviewer = ?"],
+        ["review_events.reviewer", "SELECT id FROM decision_review_events WHERE reviewer = ?"],
+        ["plans.revision_actor", "SELECT id FROM work_plans WHERE revision_actor = ?"],
+        ["plans.cancel_requested_by", "SELECT id FROM work_plans WHERE cancel_requested_by = ?"],
+        ["plan_approvals.actor", "SELECT id FROM work_plan_approvals WHERE actor = ?"],
+        ["memories.created_by", "SELECT id FROM memory_items WHERE created_by = ?"],
+        ["memories.updated_by", "SELECT id FROM memory_items WHERE updated_by = ?"],
+      ];
+      for (const [kind, sql] of referenceQueries) {
+        for (const row of this.db.prepare(sql).all(selector.value)) {
+          identityReferences.push(`${kind}:${row.id}`);
+        }
+      }
+      for (const row of checkpointRewrites) {
+        identityReferences.push(`checkpoint.actor:${row.key}`);
+      }
+    }
+    const token = (row) =>
+      `${row.id}:${row.status ?? ""}:${row.updated_at ?? row.ingested_at ?? ""}`;
+    const eligible = {
+      tasks: taskRows.filter((row) => taskStatus.has(row.status)).map(token),
+      messages: eligibleMessages.map(token),
+      workPlans: planRows.filter((row) => planStatus.has(row.status)).map(token),
+      memories: memoryRows.map(token),
+      identityReferences: [...new Set(identityReferences)],
+    };
+    const blocked = {
+      tasks: taskRows.filter((row) => !taskStatus.has(row.status)).map(token),
+      messages: blockedMessages.map(token),
+      workPlans: planRows.filter((row) => !planStatus.has(row.status)).map(token),
+      scopedPauses: blockedCheckpointKeys,
+    };
+    return {
+      selector,
+      preview: buildPrivacyErasurePreview({
+        selector,
+        selectorFingerprint: privacySelectorFingerprint(this.cipher, selector),
+        eligible,
+        blocked,
+      }),
+      ids: {
+        tasks: taskRows.filter((row) => taskStatus.has(row.status)).map((row) => row.id),
+        messages: eligibleMessages.map((row) => row.id),
+        workPlans: planRows.filter((row) => planStatus.has(row.status)).map((row) => row.id),
+        memories: memoryRows.map((row) => row.id),
+        checkpointRewrites,
+      },
+    };
+  }
+
+  previewPrivacyErasure(selector, now = new Date()) {
+    return this._privacyErasureCandidates(selector, now).preview;
+  }
+
+  erasePrivacyData(selector, confirmation, actor, now = new Date()) {
+    if (!String(actor ?? "").trim()) throw new Error("Privacy erasure actor is required");
+    return this.transaction(() => {
+      const candidates = this._privacyErasureCandidates(selector, now);
+      if (candidates.preview.blockedTotal > 0) {
+        throw new Error("Privacy erasure is blocked by active or unresolved records");
+      }
+      if (!candidates.preview.confirmation) {
+        throw new Error("Privacy erasure has no eligible data");
+      }
+      if (confirmation !== candidates.preview.confirmation) {
+        throw new Error("Privacy erasure confirmation does not match the current snapshot");
+      }
+      const timestamp = nowIso(now);
+      const encryptedEmpty = this.cipher.encrypt("");
+      const encryptedObject = this.cipher.encrypt("{}");
+      const eraseTask = this.db.prepare(
+        `UPDATE tasks SET sender_user_id = '', conversation_id = '', payload_json = ?,
+           result_json = NULL, last_error = NULL,
+           approved_by = CASE WHEN approved_by IS NULL THEN NULL ELSE 'deleted' END,
+           privacy_erased_at = ?, updated_at = ?
+         WHERE id = ? AND privacy_erased_at IS NULL`,
+      );
+      for (const id of candidates.ids.tasks) {
+        eraseTask.run(encryptedObject, timestamp, timestamp, id);
+        this.db.prepare("UPDATE approvals SET actor = 'deleted', reason = ? WHERE task_id = ?")
+          .run(encryptedEmpty, id);
+        this.db.prepare("UPDATE side_effects SET receipt_json = NULL, last_error = NULL WHERE task_id = ?")
+          .run(id);
+        this.db.prepare("DELETE FROM decision_review_events WHERE task_id = ?").run(id);
+        this.db.prepare("DELETE FROM decision_reviews WHERE task_id = ?").run(id);
+      }
+      const rememberMessage = this.db.prepare(
+        "INSERT OR IGNORE INTO privacy_erased_messages(message_key, erased_at) VALUES (?, ?)",
+      );
+      const deleteMessage = this.db.prepare("DELETE FROM messages WHERE id = ?");
+      for (const id of candidates.ids.messages) {
+        rememberMessage.run(this.cipher.fingerprint(`message:${id}`), timestamp);
+        deleteMessage.run(id);
+      }
+      const erasePlan = this.db.prepare(
+        `UPDATE work_plans SET project_id = 'deleted', requester_key = ?,
+           requester_ciphertext = ?, objective_ciphertext = ?, plan_ciphertext = ?,
+           plan_hash = ?, execution_owner = NULL, lease_expires_at = NULL,
+           cancel_requested_at = NULL, cancel_requested_by = NULL,
+           revision_actor = CASE WHEN revision_actor IS NULL THEN NULL ELSE 'deleted' END,
+           privacy_erased_at = ?, updated_at = ?
+         WHERE id = ? AND privacy_erased_at IS NULL`,
+      );
+      for (const id of candidates.ids.workPlans) {
+        erasePlan.run(
+          this.cipher.fingerprint(`deleted:${id}:${randomUUID()}`),
+          encryptedEmpty,
+          encryptedEmpty,
+          encryptedObject,
+          this.cipher.fingerprint(`deleted-plan:${id}:${randomUUID()}`),
+          timestamp,
+          timestamp,
+          id,
+        );
+        this.db.prepare("UPDATE work_plan_approvals SET actor = 'deleted', reason_ciphertext = ? WHERE work_plan_id = ?")
+          .run(encryptedEmpty, id);
+        this.db.prepare("UPDATE work_plan_steps SET evidence_ciphertext = NULL, error_ciphertext = NULL WHERE work_plan_id = ?")
+          .run(id);
+      }
+      const eraseMemory = this.db.prepare(
+        `UPDATE memory_items SET subject_key = ?, subject_ciphertext = ?, project_id = NULL,
+           statement_ciphertext = ?, source_type = 'deleted', source_id_ciphertext = ?,
+           source_version = NULL, source_access_status = 'revoked', source_access_reason = 'deleted',
+           source_access_checked_at = ?, source_access_expires_at = NULL, scope_ciphertext = ?,
+           confidence = 0, status = 'revoked', sensitivity = 'internal', valid_from = NULL,
+           expires_at = NULL, created_by = 'deleted', updated_by = 'deleted', supersedes_id = NULL,
+           created_at = ?, updated_at = ?, deleted_at = ?
+         WHERE id = ? AND deleted_at IS NULL`,
+      );
+      for (const id of candidates.ids.memories) {
+        this.db.prepare("UPDATE memory_items SET supersedes_id = NULL WHERE supersedes_id = ?").run(id);
+        eraseMemory.run(
+          this.cipher.fingerprint(`deleted:${id}:${randomUUID()}`),
+          encryptedEmpty,
+          encryptedEmpty,
+          encryptedEmpty,
+          timestamp,
+          encryptedObject,
+          timestamp,
+          timestamp,
+          timestamp,
+          id,
+        );
+      }
+      for (const checkpoint of candidates.ids.checkpointRewrites) {
+        this.db.prepare("UPDATE checkpoints SET value = ?, updated_at = ? WHERE key = ?")
+          .run(this.cipher.encrypt(JSON.stringify(checkpoint.value)), timestamp, checkpoint.key);
+      }
+      if (candidates.selector.type === "person") {
+        const value = candidates.selector.value;
+        this.db.prepare("UPDATE tasks SET approved_by = 'deleted' WHERE approved_by = ?").run(value);
+        this.db.prepare("UPDATE approvals SET actor = 'deleted', reason = ? WHERE actor = ?").run(encryptedEmpty, value);
+        this.db.prepare("UPDATE decision_reviews SET reviewer = 'deleted', note_ciphertext = ? WHERE reviewer = ?").run(encryptedEmpty, value);
+        this.db.prepare("UPDATE decision_review_events SET reviewer = 'deleted', note_ciphertext = ? WHERE reviewer = ?").run(encryptedEmpty, value);
+        this.db.prepare("UPDATE work_plans SET revision_actor = 'deleted' WHERE revision_actor = ?").run(value);
+        this.db.prepare("UPDATE work_plans SET cancel_requested_by = 'deleted' WHERE cancel_requested_by = ?").run(value);
+        this.db.prepare("UPDATE work_plan_approvals SET actor = 'deleted', reason_ciphertext = ? WHERE actor = ?").run(encryptedEmpty, value);
+        this.db.prepare("UPDATE memory_items SET created_by = 'deleted' WHERE created_by = ?").run(value);
+        this.db.prepare("UPDATE memory_items SET updated_by = 'deleted' WHERE updated_by = ?").run(value);
+      }
+      return {
+        erased: true,
+        selector: candidates.preview.selector,
+        counts: candidates.preview.counts,
+        erasedAt: timestamp,
+      };
+    });
   }
 
   purgeCompleted({ before }) {
@@ -2038,6 +2354,10 @@ export class Store {
       const deleteMessages = this.db.prepare(
         "DELETE FROM messages WHERE task_id = ?",
       );
+      const selectMessages = this.db.prepare("SELECT id FROM messages WHERE task_id = ?");
+      const rememberMessage = this.db.prepare(
+        "INSERT OR IGNORE INTO privacy_erased_messages(message_key, erased_at) VALUES (?, ?)",
+      );
       const deleteEffects = this.db.prepare(
         "DELETE FROM side_effects WHERE task_id = ?",
       );
@@ -2046,6 +2366,9 @@ export class Store {
       );
       const deleteTask = this.db.prepare("DELETE FROM tasks WHERE id = ?");
       for (const { id } of taskRows) {
+        for (const message of selectMessages.all(id)) {
+          rememberMessage.run(this.cipher.fingerprint(`message:${message.id}`), timestamp);
+        }
         deleteMessages.run(id);
         deleteEffects.run(id);
         deleteApprovals.run(id);

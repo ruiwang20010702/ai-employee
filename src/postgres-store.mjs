@@ -20,6 +20,14 @@ import {
   scopedPauseKey,
 } from "./scoped-pause.mjs";
 import { validateWorkPlanRevision } from "./work-plan.mjs";
+import {
+  buildPrivacyErasurePreview,
+  erasableTaskStatuses,
+  erasableWorkPlanStatuses,
+  jsonContainsAny,
+  privacySelectorFingerprint,
+  validatePrivacySelector,
+} from "./privacy-erasure.mjs";
 
 function toDate(value) {
   if (value instanceof Date) return value;
@@ -185,6 +193,12 @@ export class PostgresStore {
         ) {
           continue;
         }
+        const erased = await client.query(
+          `SELECT 1 FROM privacy_erased_messages
+           WHERE tenant_id = $1 AND message_key = $2`,
+          [this.tenantId, this.cipher.fingerprint(`message:${message.id}`)],
+        );
+        if (erased.rowCount > 0) continue;
         const result = await client.query(
           `
           INSERT INTO messages(
@@ -778,7 +792,7 @@ export class PostgresStore {
 
   async getTask(taskId) {
     const result = await this.pool.query(
-      "SELECT * FROM tasks WHERE id = $1 AND tenant_id = $2",
+      "SELECT * FROM tasks WHERE id = $1 AND tenant_id = $2 AND privacy_erased_at IS NULL",
       [taskId, this.tenantId],
     );
     return taskFromRow(result.rows[0], this.cipher);
@@ -796,7 +810,7 @@ export class PostgresStore {
       result = await this.pool.query(
         `
         SELECT * FROM tasks
-        WHERE tenant_id = $1 AND status = $2
+        WHERE tenant_id = $1 AND privacy_erased_at IS NULL AND status = $2
           AND (created_at, id) < ($3, $4)
         ORDER BY created_at DESC, id DESC
         LIMIT $5
@@ -807,7 +821,7 @@ export class PostgresStore {
       result = await this.pool.query(
           `
           SELECT * FROM tasks
-          WHERE tenant_id = $1 AND status = $2
+          WHERE tenant_id = $1 AND privacy_erased_at IS NULL AND status = $2
           ORDER BY created_at DESC, id DESC
           LIMIT $3 OFFSET $4
         `,
@@ -817,7 +831,7 @@ export class PostgresStore {
       result = await this.pool.query(
           `
           SELECT * FROM tasks
-          WHERE tenant_id = $1
+          WHERE tenant_id = $1 AND privacy_erased_at IS NULL
           ORDER BY created_at DESC, id DESC
           LIMIT $2 OFFSET $3
         `,
@@ -1410,6 +1424,14 @@ export class PostgresStore {
     }
     const id = `plan_${assessment.planHash.slice(0, 24)}`;
     await this.transaction(async (client) => {
+      const erased = await client.query(
+        `SELECT privacy_erased_at FROM work_plans
+         WHERE tenant_id = $1 AND id = $2`,
+        [this.tenantId, id],
+      );
+      if (erased.rows[0]?.privacy_erased_at) {
+        throw new Error("Erased work plan content cannot be recreated unchanged");
+      }
       await client.query(
         `INSERT INTO work_plans(
           id, tenant_id, project_id, requester_key, requester_ciphertext,
@@ -1537,7 +1559,7 @@ export class PostgresStore {
 
   async getWorkPlan(id) {
     const result = await this.pool.query(
-      "SELECT * FROM work_plans WHERE tenant_id = $1 AND id = $2",
+      "SELECT * FROM work_plans WHERE tenant_id = $1 AND id = $2 AND privacy_erased_at IS NULL",
       [this.tenantId, id],
     );
     return workPlanFromRow(result.rows[0], this.cipher);
@@ -1547,13 +1569,13 @@ export class PostgresStore {
     const result = status
       ? await this.pool.query(
           `SELECT * FROM work_plans
-           WHERE tenant_id = $1 AND status = $2
+           WHERE tenant_id = $1 AND privacy_erased_at IS NULL AND status = $2
            ORDER BY updated_at DESC, id DESC LIMIT $3`,
           [this.tenantId, status, limit],
         )
       : await this.pool.query(
           `SELECT * FROM work_plans
-           WHERE tenant_id = $1
+           WHERE tenant_id = $1 AND privacy_erased_at IS NULL
            ORDER BY updated_at DESC, id DESC LIMIT $2`,
           [this.tenantId, limit],
         );
@@ -2018,6 +2040,7 @@ export class PostgresStore {
            FROM decision_reviews r
            JOIN tasks t ON t.tenant_id = r.tenant_id AND t.id = r.task_id
            WHERE r.tenant_id = $1 AND r.task_id = $2
+             AND t.privacy_erased_at IS NULL
            ORDER BY r.updated_at DESC LIMIT $3`,
           [this.tenantId, taskId, limit],
         )
@@ -2026,7 +2049,8 @@ export class PostgresStore {
                   t.sender_user_id_ciphertext, t.conversation_id_ciphertext
            FROM decision_reviews r
            JOIN tasks t ON t.tenant_id = r.tenant_id AND t.id = r.task_id
-           WHERE r.tenant_id = $1 ORDER BY r.updated_at DESC LIMIT $2`,
+           WHERE r.tenant_id = $1 AND t.privacy_erased_at IS NULL
+           ORDER BY r.updated_at DESC LIMIT $2`,
           [this.tenantId, limit],
         );
     return result.rows.map((row) => {
@@ -2176,17 +2200,19 @@ export class PostgresStore {
         [this.tenantId, since, now, limit + 1],
       ),
       this.pool.query(
-        `SELECT * FROM tasks WHERE tenant_id = $1
+        `SELECT * FROM tasks WHERE tenant_id = $1 AND privacy_erased_at IS NULL
            AND created_at >= $2 AND created_at <= $3
          ORDER BY created_at DESC LIMIT $4`,
         [this.tenantId, since, now, limit + 1],
       ),
       this.pool.query(
-        `SELECT task_id AS "taskId", capability, status,
-                receipt_ciphertext IS NOT NULL AS "receiptPresent"
-         FROM side_effects WHERE tenant_id = $1
-           AND created_at >= $2 AND created_at <= $3
-         ORDER BY created_at DESC LIMIT $4`,
+        `SELECT e.task_id AS "taskId", e.capability, e.status,
+                e.receipt_ciphertext IS NOT NULL AS "receiptPresent"
+         FROM side_effects e
+         JOIN tasks t ON t.tenant_id = e.tenant_id AND t.id = e.task_id
+         WHERE e.tenant_id = $1 AND t.privacy_erased_at IS NULL
+           AND e.created_at >= $2 AND e.created_at <= $3
+         ORDER BY e.created_at DESC LIMIT $4`,
         [this.tenantId, since, now, limit + 1],
       ),
       this.getCheckpoint(messageCoverageCheckpointKey),
@@ -2229,19 +2255,20 @@ export class PostgresStore {
           `
           SELECT status, COUNT(*)::bigint AS count
           FROM tasks
-          WHERE tenant_id = $1
+          WHERE tenant_id = $1 AND privacy_erased_at IS NULL
           GROUP BY status
         `,
           [this.tenantId],
         ),
         this.pool.query(
           `SELECT status, COUNT(*)::bigint AS count FROM work_plans
-           WHERE tenant_id = $1 GROUP BY status`,
+           WHERE tenant_id = $1 AND privacy_erased_at IS NULL GROUP BY status`,
           [this.tenantId],
         ),
         this.pool.query(
           `SELECT COUNT(*)::bigint AS count FROM work_plans
-           WHERE tenant_id = $1 AND status IN ('executing','verifying')
+           WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+             AND status IN ('executing','verifying')
              AND lease_expires_at IS NOT NULL AND lease_expires_at <= now()`,
           [this.tenantId],
         ),
@@ -2292,6 +2319,420 @@ export class PostgresStore {
     };
   }
 
+  async _privacyErasureCandidates(input, now = new Date(), client = this.pool, { lock = false } = {}) {
+    const selector = validatePrivacySelector(input, now);
+    const suffix = lock ? " FOR UPDATE" : "";
+    const taskStatus = new Set(erasableTaskStatuses);
+    const planStatus = new Set(erasableWorkPlanStatuses);
+    let planResult;
+    if (selector.type === "person") {
+      planResult = await client.query(
+        `SELECT * FROM work_plans WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+         AND requester_key = $2${suffix}`,
+        [this.tenantId, this.cipher.fingerprint(selector.value)],
+      );
+    } else if (selector.type === "project") {
+      planResult = await client.query(
+        `SELECT * FROM work_plans WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+         AND project_id = $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    } else {
+      planResult = await client.query(
+        `SELECT * FROM work_plans WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+         AND updated_at < $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    }
+    const planRows = planResult.rows;
+    const sourceTaskIds = new Set();
+    for (const row of planRows) {
+      try {
+        const sourceTaskId = JSON.parse(this.cipher.decrypt(row.plan_ciphertext))?.sourceTaskId;
+        if (sourceTaskId) sourceTaskIds.add(sourceTaskId);
+      } catch {
+        // A malformed stored plan remains in scope but cannot expand task scope.
+      }
+    }
+    let taskResult;
+    if (selector.type === "person") {
+      taskResult = await client.query(
+        `SELECT * FROM tasks WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+         AND sender_key = $2${suffix}`,
+        [this.tenantId, this.cipher.fingerprint(selector.value)],
+      );
+    } else if (selector.type === "project") {
+      taskResult = sourceTaskIds.size === 0
+        ? { rows: [] }
+        : await client.query(
+          `SELECT * FROM tasks WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+           AND id = ANY($2::text[])${suffix}`,
+          [this.tenantId, [...sourceTaskIds]],
+        );
+    } else {
+      taskResult = await client.query(
+        `SELECT * FROM tasks WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+         AND updated_at < $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    }
+    const taskRows = taskResult.rows;
+    let memoryResult;
+    if (selector.type === "person") {
+      memoryResult = await client.query(
+        `SELECT * FROM memory_items WHERE tenant_id = $1 AND deleted_at IS NULL
+         AND subject_key = $2${suffix}`,
+        [this.tenantId, this.cipher.fingerprint(selector.value)],
+      );
+    } else if (selector.type === "project") {
+      memoryResult = await client.query(
+        `SELECT * FROM memory_items WHERE tenant_id = $1 AND deleted_at IS NULL
+         AND project_id = $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    } else {
+      memoryResult = await client.query(
+        `SELECT * FROM memory_items WHERE tenant_id = $1 AND deleted_at IS NULL
+         AND updated_at < $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    }
+    const memoryRows = memoryResult.rows;
+    const taskById = new Map(taskRows.map((row) => [row.id, row]));
+    const eligibleTaskIds = new Set(
+      taskRows.filter((row) => taskStatus.has(row.status)).map((row) => row.id),
+    );
+    let messageResult;
+    if (selector.type === "person") {
+      messageResult = await client.query(
+        `SELECT * FROM messages WHERE tenant_id = $1 AND sender_key = $2${suffix}`,
+        [this.tenantId, this.cipher.fingerprint(selector.value)],
+      );
+    } else if (selector.type === "project") {
+      messageResult = sourceTaskIds.size === 0
+        ? { rows: [] }
+        : await client.query(
+          `SELECT * FROM messages WHERE tenant_id = $1 AND task_id = ANY($2::text[])${suffix}`,
+          [this.tenantId, [...sourceTaskIds]],
+        );
+    } else {
+      messageResult = await client.query(
+        `SELECT * FROM messages WHERE tenant_id = $1 AND ingested_at < $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    }
+    const eligibleMessages = [];
+    const blockedMessages = [];
+    for (const row of messageResult.rows) {
+      const linkedTask = row.task_id ? taskById.get(row.task_id) : null;
+      if (
+        (linkedTask && eligibleTaskIds.has(linkedTask.id)) ||
+        (!row.task_id && row.status !== "pending")
+      ) eligibleMessages.push(row);
+      else blockedMessages.push(row);
+    }
+    const checkpointResult = await client.query(
+      `SELECT key, value, updated_at FROM checkpoints
+       WHERE tenant_id = $1 AND left(key, 13) = 'scoped_pause:'${suffix}`,
+      [this.tenantId],
+    );
+    const blockedCheckpoints = [];
+    const checkpointRewrites = [];
+    const targetCheckpointKey = selector.type === "person"
+      ? scopedPauseKey(this.cipher, "contact", selector.value)
+      : selector.type === "project"
+        ? scopedPauseKey(this.cipher, "project", selector.value)
+        : null;
+    for (const row of checkpointResult.rows) {
+      if (
+        row.key === targetCheckpointKey ||
+        (selector.type === "time" && row.updated_at < selector.value)
+      ) blockedCheckpoints.push(row);
+      if (selector.type === "person") {
+        try {
+          const value = JSON.parse(this.cipher.decrypt(row.value));
+          if (value.actor === selector.value && row.key !== targetCheckpointKey) {
+            checkpointRewrites.push({ key: row.key, value: { ...value, actor: "deleted", reason: "" } });
+          }
+        } catch {
+          // Invalid operational checkpoints are left unchanged and do not widen erasure.
+        }
+      }
+    }
+    const identityReferences = [];
+    if (selector.type === "person") {
+      const referenceQueries = [
+        ["tasks.approved_by", "SELECT id FROM tasks WHERE tenant_id = $1 AND approved_by = $2"],
+        ["approvals.actor", "SELECT id FROM approvals WHERE tenant_id = $1 AND actor = $2"],
+        ["reviews.reviewer", "SELECT id FROM decision_reviews WHERE tenant_id = $1 AND reviewer = $2"],
+        ["review_events.reviewer", "SELECT id FROM decision_review_events WHERE tenant_id = $1 AND reviewer = $2"],
+        ["plans.revision_actor", "SELECT id FROM work_plans WHERE tenant_id = $1 AND revision_actor = $2"],
+        ["plans.cancel_requested_by", "SELECT id FROM work_plans WHERE tenant_id = $1 AND cancel_requested_by = $2"],
+        ["plan_approvals.actor", "SELECT id FROM work_plan_approvals WHERE tenant_id = $1 AND actor = $2"],
+        ["memories.created_by", "SELECT id FROM memory_items WHERE tenant_id = $1 AND created_by = $2"],
+        ["memories.updated_by", "SELECT id FROM memory_items WHERE tenant_id = $1 AND updated_by = $2"],
+      ];
+      for (const [kind, sql] of referenceQueries) {
+        const result = await client.query(`${sql}${suffix}`, [this.tenantId, selector.value]);
+        for (const row of result.rows) identityReferences.push(`${kind}:${row.id}`);
+      }
+      for (const row of checkpointRewrites) identityReferences.push(`checkpoint.actor:${row.key}`);
+    }
+    const allAudit = await client.query(
+      `SELECT id, task_id, event_type, actor, details_ciphertext, occurred_at
+       FROM audit_events WHERE tenant_id = $1${
+        selector.type === "time" ? " AND occurred_at < $2" : ""
+      }${suffix}`,
+      selector.type === "time" ? [this.tenantId, selector.value] : [this.tenantId],
+    );
+    const relatedValues = new Set([
+      ...taskRows.map((row) => row.id),
+      ...planRows.map((row) => row.id),
+      ...memoryRows.map((row) => row.id),
+    ]);
+    if (selector.type !== "time") relatedValues.add(selector.value);
+    const auditRows = selector.type === "time"
+      ? allAudit.rows
+      : allAudit.rows.filter((row) => {
+        if (row.task_id && relatedValues.has(row.task_id)) return true;
+        if (selector.type === "person" && row.actor === selector.value) return true;
+        try {
+          return jsonContainsAny(JSON.parse(this.cipher.decrypt(row.details_ciphertext)), relatedValues);
+        } catch {
+          return false;
+        }
+      });
+    const token = (row, id = row.id) =>
+      `${id}:${row.status ?? row.event_type ?? ""}:${
+        row.updated_at?.toISOString?.() ?? row.ingested_at?.toISOString?.() ??
+        row.occurred_at?.toISOString?.() ?? row.updated_at ?? ""
+      }`;
+    const eligible = {
+      tasks: taskRows.filter((row) => taskStatus.has(row.status)).map(token),
+      messages: eligibleMessages.map((row) => token(row, row.platform_message_id)),
+      workPlans: planRows.filter((row) => planStatus.has(row.status)).map(token),
+      memories: memoryRows.map(token),
+      auditEvents: auditRows.map(token),
+      identityReferences: [...new Set(identityReferences)],
+    };
+    const blocked = {
+      tasks: taskRows.filter((row) => !taskStatus.has(row.status)).map(token),
+      messages: blockedMessages.map((row) => token(row, row.platform_message_id)),
+      workPlans: planRows.filter((row) => !planStatus.has(row.status)).map(token),
+      scopedPauses: blockedCheckpoints.map((row) => `${row.key}:${row.updated_at.toISOString()}`),
+    };
+    return {
+      selector,
+      preview: buildPrivacyErasurePreview({
+        selector,
+        selectorFingerprint: privacySelectorFingerprint(this.cipher, selector),
+        eligible,
+        blocked,
+      }),
+      ids: {
+        tasks: taskRows.filter((row) => taskStatus.has(row.status)).map((row) => row.id),
+        messages: eligibleMessages.map((row) => row.platform_message_id),
+        workPlans: planRows.filter((row) => planStatus.has(row.status)).map((row) => row.id),
+        memories: memoryRows.map((row) => row.id),
+        auditEvents: auditRows.map((row) => row.id),
+        checkpointRewrites,
+      },
+    };
+  }
+
+  async previewPrivacyErasure(selector, now = new Date()) {
+    return (await this._privacyErasureCandidates(selector, now)).preview;
+  }
+
+  async erasePrivacyData(selector, confirmation, actor, now = new Date()) {
+    if (!String(actor ?? "").trim()) throw new Error("Privacy erasure actor is required");
+    return this.transaction(async (client) => {
+      await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+      await client.query(
+        `LOCK TABLE tasks, messages, privacy_erased_messages, approvals, side_effects, decision_reviews,
+           decision_review_events, work_plans, work_plan_approvals,
+           work_plan_steps, memory_items, checkpoints, audit_events
+         IN SHARE ROW EXCLUSIVE MODE`,
+      );
+      const candidates = await this._privacyErasureCandidates(selector, now, client, { lock: true });
+      if (candidates.preview.blockedTotal > 0) {
+        throw new Error("Privacy erasure is blocked by active or unresolved records");
+      }
+      if (!candidates.preview.confirmation) {
+        throw new Error("Privacy erasure has no eligible data");
+      }
+      if (confirmation !== candidates.preview.confirmation) {
+        throw new Error("Privacy erasure confirmation does not match the current snapshot");
+      }
+      const encryptedEmpty = this.cipher.encrypt("");
+      const encryptedObject = this.cipher.encrypt("{}");
+      const taskIds = candidates.ids.tasks;
+      if (taskIds.length > 0) {
+        await client.query(
+          `UPDATE tasks SET sender_key = $3, sender_user_id_ciphertext = $4,
+             conversation_key = $5, conversation_id_ciphertext = $4,
+             payload_ciphertext = $6, result_ciphertext = NULL,
+             last_error_ciphertext = NULL,
+             approved_by = CASE WHEN approved_by IS NULL THEN NULL ELSE 'deleted' END,
+             privacy_erased_at = $2, updated_at = $2
+           WHERE tenant_id = $1 AND id = ANY($7::text[]) AND privacy_erased_at IS NULL`,
+          [
+            this.tenantId,
+            now,
+            this.cipher.fingerprint(`deleted-tasks:${randomUUID()}`),
+            encryptedEmpty,
+            this.cipher.fingerprint(`deleted-conversations:${randomUUID()}`),
+            encryptedObject,
+            taskIds,
+          ],
+        );
+        await client.query(
+          `UPDATE approvals SET actor = 'deleted', reason_ciphertext = $3
+           WHERE tenant_id = $1 AND task_id = ANY($2::text[])`,
+          [this.tenantId, taskIds, encryptedEmpty],
+        );
+        await client.query(
+          `UPDATE side_effects SET receipt_ciphertext = NULL, last_error_ciphertext = NULL
+           WHERE tenant_id = $1 AND task_id = ANY($2::text[])`,
+          [this.tenantId, taskIds],
+        );
+        await client.query(
+          `DELETE FROM decision_review_events
+           WHERE tenant_id = $1 AND task_id = ANY($2::text[])`,
+          [this.tenantId, taskIds],
+        );
+        await client.query(
+          `DELETE FROM decision_reviews
+           WHERE tenant_id = $1 AND task_id = ANY($2::text[])`,
+          [this.tenantId, taskIds],
+        );
+      }
+      if (candidates.ids.messages.length > 0) {
+        for (const id of candidates.ids.messages) {
+          await client.query(
+            `INSERT INTO privacy_erased_messages(tenant_id, message_key, erased_at)
+             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+            [this.tenantId, this.cipher.fingerprint(`message:${id}`), now],
+          );
+        }
+        await client.query(
+          `DELETE FROM messages WHERE tenant_id = $1
+           AND platform_message_id = ANY($2::text[])`,
+          [this.tenantId, candidates.ids.messages],
+        );
+      }
+      for (const id of candidates.ids.workPlans) {
+        await client.query(
+          `UPDATE work_plans SET project_id = 'deleted', requester_key = $3,
+             requester_ciphertext = $4, objective_ciphertext = $4,
+             plan_ciphertext = $5, plan_hash = $6, execution_owner = NULL,
+             lease_expires_at = NULL, cancel_requested_at = NULL,
+             cancel_requested_by = NULL,
+             revision_actor = CASE WHEN revision_actor IS NULL THEN NULL ELSE 'deleted' END,
+             privacy_erased_at = $7, updated_at = $7
+           WHERE tenant_id = $1 AND id = $2 AND privacy_erased_at IS NULL`,
+          [
+            this.tenantId,
+            id,
+            this.cipher.fingerprint(`deleted:${id}:${randomUUID()}`),
+            encryptedEmpty,
+            encryptedObject,
+            this.cipher.fingerprint(`deleted-plan:${id}:${randomUUID()}`),
+            now,
+          ],
+        );
+        await client.query(
+          `UPDATE work_plan_approvals SET actor = 'deleted', reason_ciphertext = $3
+           WHERE tenant_id = $1 AND work_plan_id = $2`,
+          [this.tenantId, id, encryptedEmpty],
+        );
+        await client.query(
+          `UPDATE work_plan_steps SET evidence_ciphertext = NULL, error_ciphertext = NULL
+           WHERE tenant_id = $1 AND work_plan_id = $2`,
+          [this.tenantId, id],
+        );
+      }
+      for (const id of candidates.ids.memories) {
+        await client.query(
+          `UPDATE memory_items SET supersedes_id = NULL
+           WHERE tenant_id = $1 AND supersedes_id = $2`,
+          [this.tenantId, id],
+        );
+        await client.query(
+          `UPDATE memory_items SET subject_key = $3, subject_ciphertext = $4,
+             project_id = NULL, statement_ciphertext = $4, source_type = 'deleted',
+             source_id_ciphertext = $4, source_version = NULL,
+             source_access_status = 'revoked', source_access_reason = 'deleted',
+             source_access_checked_at = $5, source_access_expires_at = NULL,
+             scope_ciphertext = $6, confidence = 0, status = 'revoked',
+             sensitivity = 'internal', valid_from = NULL, expires_at = NULL,
+             created_by = 'deleted', updated_by = 'deleted', supersedes_id = NULL,
+             created_at = $5, updated_at = $5, deleted_at = $5
+           WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+          [
+            this.tenantId,
+            id,
+            this.cipher.fingerprint(`deleted:${id}:${randomUUID()}`),
+            encryptedEmpty,
+            now,
+            encryptedObject,
+          ],
+        );
+      }
+      for (const checkpoint of candidates.ids.checkpointRewrites) {
+        await client.query(
+          `UPDATE checkpoints SET value = $3, updated_at = $4
+           WHERE tenant_id = $1 AND key = $2`,
+          [this.tenantId, checkpoint.key, this.cipher.encrypt(JSON.stringify(checkpoint.value)), now],
+        );
+      }
+      if (candidates.ids.auditEvents.length > 0) {
+        await client.query(
+          `UPDATE audit_events SET details_ciphertext = $3, actor = 'deleted'
+           WHERE tenant_id = $1 AND id = ANY($2::bigint[])`,
+          [
+            this.tenantId,
+            candidates.ids.auditEvents,
+            this.cipher.encrypt(JSON.stringify({ erased: true })),
+          ],
+        );
+      }
+      if (candidates.selector.type === "person") {
+        const value = candidates.selector.value;
+        const actorUpdates = [
+          ["UPDATE tasks SET approved_by = 'deleted' WHERE tenant_id = $1 AND approved_by = $2", []],
+          ["UPDATE approvals SET actor = 'deleted', reason_ciphertext = $3 WHERE tenant_id = $1 AND actor = $2", [encryptedEmpty]],
+          ["UPDATE decision_reviews SET reviewer = 'deleted', note_ciphertext = $3 WHERE tenant_id = $1 AND reviewer = $2", [encryptedEmpty]],
+          ["UPDATE decision_review_events SET reviewer = 'deleted', note_ciphertext = $3 WHERE tenant_id = $1 AND reviewer = $2", [encryptedEmpty]],
+          ["UPDATE work_plans SET revision_actor = 'deleted' WHERE tenant_id = $1 AND revision_actor = $2", []],
+          ["UPDATE work_plans SET cancel_requested_by = 'deleted' WHERE tenant_id = $1 AND cancel_requested_by = $2", []],
+          ["UPDATE work_plan_approvals SET actor = 'deleted', reason_ciphertext = $3 WHERE tenant_id = $1 AND actor = $2", [encryptedEmpty]],
+          ["UPDATE memory_items SET created_by = 'deleted' WHERE tenant_id = $1 AND created_by = $2", []],
+          ["UPDATE memory_items SET updated_by = 'deleted' WHERE tenant_id = $1 AND updated_by = $2", []],
+          ["UPDATE audit_events SET actor = 'deleted', details_ciphertext = $3 WHERE tenant_id = $1 AND actor = $2", [this.cipher.encrypt(JSON.stringify({ erased: true }))]],
+        ];
+        for (const [sql, extra] of actorUpdates) {
+          await client.query(sql, [this.tenantId, value, ...extra]);
+        }
+      }
+      await this.audit(client, {
+        eventType: "privacy.erased",
+        actor: "system:privacy",
+        details: {
+          selector: candidates.preview.selector,
+          counts: candidates.preview.counts,
+          requestedByFingerprint: this.cipher.fingerprint(actor).slice(0, 24),
+        },
+      });
+      return {
+        erased: true,
+        selector: candidates.preview.selector,
+        counts: candidates.preview.counts,
+        erasedAt: now.toISOString(),
+      };
+    });
+  }
+
   async purgeCompleted({ before }) {
     const timestamp = before instanceof Date ? before : new Date(before);
     return this.transaction(async (client) => {
@@ -2311,6 +2752,21 @@ export class PostgresStore {
       );
       const ids = selected.rows.map((row) => row.id);
       if (ids.length === 0) return 0;
+      const messages = await client.query(
+        `SELECT platform_message_id FROM messages
+         WHERE tenant_id = $1 AND task_id = ANY($2::text[]) FOR UPDATE`,
+        [this.tenantId, ids],
+      );
+      for (const message of messages.rows) {
+        await client.query(
+          `INSERT INTO privacy_erased_messages(tenant_id, message_key, erased_at)
+           VALUES ($1, $2, now()) ON CONFLICT DO NOTHING`,
+          [
+            this.tenantId,
+            this.cipher.fingerprint(`message:${message.platform_message_id}`),
+          ],
+        );
+      }
       await client.query(
         "DELETE FROM messages WHERE tenant_id = $1 AND task_id = ANY($2::text[])",
         [this.tenantId, ids],
