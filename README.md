@@ -107,6 +107,16 @@ openssl rand -base64 32
 
 引用只允许用于已登记密钥字段。任一密钥不存在、格式错误或钥匙串不可用时，整份配置都不会注入，服务直接停止；不会回退到明文或占位值。外部托管的管理令牌必须在原密钥库轮换，配置文件轮换命令会拒绝覆盖。
 
+macOS 上可先预览再迁移固定的 5 项生产密钥；命令会保留受保护的回滚快照，逐项回读成功后才替换配置：
+
+```bash
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run config:migrate-keychain
+
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run config:migrate-keychain -- --apply
+```
+
 4. 先运行只读生产诊断。它检查配置、密钥、远程数据库 TLS、所需工具、Codex 登录与网络运行状态、项目能力清单和数据库连接，但不修改数据库：
 
 ```bash

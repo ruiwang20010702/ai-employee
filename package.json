@@ -38,6 +38,7 @@
     "projects:create": "node scripts/创建项目配置.mjs",
     "plan:check": "node scripts/评估任务计划.mjs",
     "config:init": "node scripts/初始化生产配置.mjs",
+    "config:migrate-keychain": "node scripts/迁移生产密钥到钥匙串.mjs",
     "config:rotate-admin": "node scripts/轮换管理令牌.mjs",
     "production:doctor": "node scripts/只读生产诊断.mjs",
     "production:codex-probe": "node scripts/验证草稿生成.mjs",
