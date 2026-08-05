@@ -21,37 +21,166 @@ jobs:
     environment: production
     runs-on: [self-hosted, macOS, ai-employee-production]
     timeout-minutes: 15
+    env:
+      AI_EMPLOYEE_DEPLOY_ROOT: ${{ vars.AI_EMPLOYEE_DEPLOY_ROOT }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
-      - run: npm audit --audit-level=high
-      - run: npm run check
+      - name: 限制为主分支已审核提交
+        run: |
+          /usr/bin/git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          export AI_EMPLOYEE_DEPLOY_SHA="$(/usr/bin/git rev-parse HEAD)"
+          echo "AI_EMPLOYEE_DEPLOY_SHA=$AI_EMPLOYEE_DEPLOY_SHA" >> "$GITHUB_ENV"
+      - name: 准备稳定的版本目录
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const os = require("node:os");
+          const path = require("node:path");
+          const rootInput = process.env.AI_EMPLOYEE_DEPLOY_ROOT;
+          if (!rootInput || !path.isAbsolute(rootInput) || /[\0\r\n]/u.test(rootInput)) {
+            throw new Error("AI_EMPLOYEE_DEPLOY_ROOT must be a safe absolute path");
+          }
+          const root = path.resolve(rootInput);
+          if (root === path.parse(root).root || root === path.resolve(os.homedir())) {
+            throw new Error("AI_EMPLOYEE_DEPLOY_ROOT is too broad");
+          }
+          if (!/^[0-9a-f]{40}$/u.test(process.env.AI_EMPLOYEE_DEPLOY_SHA || "")) {
+            throw new Error("Checked-out deployment SHA is invalid");
+          }
+          const releaseName = [
+            process.env.AI_EMPLOYEE_DEPLOY_SHA,
+            process.env.GITHUB_RUN_ID,
+            process.env.GITHUB_RUN_ATTEMPT,
+          ].join("-");
+          const releases = path.join(root, "releases");
+          const release = path.join(releases, releaseName);
+          fs.mkdirSync(releases, { recursive: true, mode: 0o700 });
+          fs.chmodSync(releases, 0o700);
+          fs.mkdirSync(release, { mode: 0o700 });
+          let previous = "";
+          const current = path.join(root, "current");
+          try {
+            const target = fs.realpathSync(current);
+            const relative = path.relative(fs.realpathSync(releases), target);
+            if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+              previous = target;
+            }
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+          }
+          fs.appendFileSync(
+            process.env.GITHUB_ENV,
+            `AI_EMPLOYEE_RELEASE_DIRECTORY=${release}\nAI_EMPLOYEE_PREVIOUS_RELEASE=${previous}\n`,
+          );
+          NODE
+          /usr/bin/git archive --format=tar HEAD |
+            /usr/bin/tar -xf - -C "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+      - run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          npm ci
+      - run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          npm audit --audit-level=high
+      - run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          npm run check
       - name: 注入受保护的生产配置
         env:
           AI_EMPLOYEE_CONFIG_JSON: ${{ secrets.AI_EMPLOYEE_CONFIG_JSON }}
-        run: >-
-          node -e 'const fs=require("node:fs");fs.mkdirSync(".runtime",
-          {recursive:true,mode:0o700});fs.writeFileSync(".runtime/production.json",
-          process.env.AI_EMPLOYEE_CONFIG_JSON+"\n",{mode:0o600})'
+        run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const values = JSON.parse(process.env.AI_EMPLOYEE_CONFIG_JSON || "");
+          const requiredExternal = [
+            "DATABASE_URL",
+            "AI_EMPLOYEE_DATA_KEY",
+            "AI_EMPLOYEE_BACKUP_KEY",
+            "AI_EMPLOYEE_ADMIN_READ_TOKEN",
+            "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
+          ];
+          for (const key of requiredExternal) {
+            if (!/^keychain:\/\//u.test(String(values[key] || ""))) {
+              throw new Error(`macOS remote deployment requires a Keychain reference: ${key}`);
+            }
+          }
+          const runtime = path.join(process.cwd(), ".runtime");
+          const destination = path.join(runtime, "production.json");
+          fs.mkdirSync(runtime, { recursive: true, mode: 0o700 });
+          fs.chmodSync(runtime, 0o700);
+          fs.writeFileSync(destination, `${JSON.stringify(values, null, 2)}\n`, {
+            flag: "wx",
+            mode: 0o600,
+          });
+          NODE
       - name: 只读生产预检
-        env:
-          AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
-        run: npm run production:preflight
+        run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
+          npm run production:preflight
       - name: 执行数据库迁移
-        env:
-          AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
-        run: npm run db:backup && npm run db:migrate
+        run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
+          npm run db:backup
+          npm run db:migrate
+      - name: 标记即将切换常驻服务
+        run: echo "AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED=true" >> "$GITHUB_ENV"
       - name: 安装并重启常驻服务
-        env:
-          AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
-        run: npm run service:install
+        run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
+          npm run service:install
       - name: 验证生产服务
-        env:
-          AI_EMPLOYEE_CONFIG_FILE: ${{ github.workspace }}/.runtime/production.json
-        run: npm run production:verify
+        run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
+          npm run production:verify
+      - name: 固定当前成功版本
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const root = path.resolve(process.env.AI_EMPLOYEE_DEPLOY_ROOT);
+          const release = fs.realpathSync(process.env.AI_EMPLOYEE_RELEASE_DIRECTORY);
+          const releases = fs.realpathSync(path.join(root, "releases"));
+          const relative = path.relative(releases, release);
+          if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+            throw new Error("Release directory escaped the approved root");
+          }
+          const current = path.join(root, "current");
+          const temporary = path.join(
+            root,
+            `.current-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`,
+          );
+          try {
+            fs.lstatSync(current);
+            if (!fs.lstatSync(current).isSymbolicLink()) {
+              throw new Error("Current release marker must remain a symbolic link");
+            }
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+          }
+          fs.symlinkSync(release, temporary);
+          fs.renameSync(temporary, current);
+          NODE
+      - name: 发布失败时恢复上一版本服务
+        if: failure()
+        run: |
+          if [ "$AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED" = "true" ] &&
+            [ -n "$AI_EMPLOYEE_PREVIOUS_RELEASE" ]; then
+            cd "$AI_EMPLOYEE_PREVIOUS_RELEASE"
+            export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_PREVIOUS_RELEASE/.runtime/production.json"
+            npm run service:install
+            npm run production:verify
+          else
+            echo "常驻服务尚未切换，或没有可验证的上一版本；无需执行服务回退。"
+          fi

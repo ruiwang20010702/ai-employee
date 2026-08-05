@@ -1,5 +1,5 @@
 {
-  "DATABASE_URL": "env://AI_EMPLOYEE_SECRET_DATABASE_URL",
+  "DATABASE_URL": "keychain://ai-employee-production/database-url",
   "DATABASE_SSL": true,
   "AI_EMPLOYEE_DATA_KEY": "keychain://ai-employee-production/data-key",
   "AI_EMPLOYEE_BACKUP_KEY": "keychain://ai-employee-production/backup-key",
@@ -10,7 +10,7 @@
   "DINGTALK_TARGET_USER_IDS": "replace_with_allowed_user_ids",
   "DINGTALK_TARGET_GROUP_IDS": "",
   "DINGTALK_SELF_USER_ID": "replace_with_self_user_id",
-  "AI_EMPLOYEE_PROJECTS_DIRECTORY": "/absolute/path/to/ai员工/.runtime/projects",
+  "AI_EMPLOYEE_PROJECTS_DIRECTORY": "/absolute/stable/path/to/ai-employee-production/projects",
   "AI_EMPLOYEE_BACKUP_DIRECTORY": "/absolute/path/to/offsite-synced-backups",
   "DWS_PATH": "dws",
   "CODEX_PATH": "codex",

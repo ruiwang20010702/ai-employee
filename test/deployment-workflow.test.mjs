@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const workflowUrl = new URL(
+  "../.github/workflows/生产发布.yml",
+  import.meta.url,
+);
+
+test("生产发布使用稳定版本目录、外部密钥门禁和失败回退", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+
+  assert.match(workflow, /AI_EMPLOYEE_DEPLOY_ROOT/u);
+  assert.match(workflow, /AI_EMPLOYEE_RELEASE_DIRECTORY/u);
+  assert.match(workflow, /git archive --format=tar HEAD/u);
+  assert.match(workflow, /merge-base --is-ancestor HEAD refs\/remotes\/origin\/main/u);
+  assert.match(workflow, /AI_EMPLOYEE_DEPLOY_SHA/u);
+  assert.match(workflow, /Remote production config requires|macOS remote deployment requires/u);
+  assert.match(workflow, /发布失败时恢复上一版本服务/u);
+  assert.match(workflow, /AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED/u);
+  assert.equal(
+    workflow.includes("${{ github.workspace }}/.runtime/production.json"),
+    false,
+  );
+});

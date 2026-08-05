@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, chmod, writeFile } from "node:fs/promises";
+import { mkdtemp, chmod, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { applyProductionConfigFile } from "../src/production-config-file.mjs";
 import { loadConfig } from "../src/config.mjs";
@@ -25,6 +26,26 @@ test("生产配置只接受白名单标量并写入指定环境", async () => {
   assert.equal(environment.DATABASE_URL, "postgresql://example");
   assert.equal(environment.DATABASE_POOL_MAX, "12");
   assert.equal(environment.DATABASE_SSL, "true");
+});
+
+test("GitHub 生产示例的五项密钥统一使用正式钥匙串服务", async () => {
+  const examplePath = fileURLToPath(
+    new URL("../deploy/GitHub生产配置.example.json", import.meta.url),
+  );
+  const values = JSON.parse(await readFile(examplePath, "utf8"));
+  const expectedAccounts = {
+    DATABASE_URL: "database-url",
+    AI_EMPLOYEE_DATA_KEY: "data-key",
+    AI_EMPLOYEE_BACKUP_KEY: "backup-key",
+    AI_EMPLOYEE_ADMIN_READ_TOKEN: "admin-read-token",
+    AI_EMPLOYEE_ADMIN_WRITE_TOKEN: "admin-write-token",
+  };
+  for (const [key, account] of Object.entries(expectedAccounts)) {
+    assert.equal(
+      values[key],
+      `keychain://ai-employee-production/${account}`,
+    );
+  }
 });
 
 test("生产配置拒绝过宽文件权限", async () => {
