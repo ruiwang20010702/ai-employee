@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DataCipher } from "./crypto.mjs";
 import { splitMessageBursts } from "./message-bundling.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "./memory-policy.mjs";
+import { memoryDeletionConfirmation } from "./memory-portability.mjs";
 import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
 import { buildPlanResultDraft } from "./plan-result-notification.mjs";
 import { buildOperationalMetrics } from "./operational-metrics.mjs";
@@ -1169,6 +1170,46 @@ export class Store {
       .run(nowIso(now), actor, id);
     if (result.changes !== 1) throw new Error("Memory cannot be revoked");
     return "revoked";
+  }
+
+  deleteMemory(id, actor, confirmation, now = new Date()) {
+    if (confirmation !== memoryDeletionConfirmation(id)) {
+      throw new Error("Memory deletion confirmation does not match");
+    }
+    return this.transaction(() => {
+      const current = this.db
+        .prepare("SELECT id FROM memory_items WHERE id = ? AND deleted_at IS NULL")
+        .get(id);
+      if (!current) throw new Error("Memory cannot be deleted");
+      const timestamp = nowIso(now);
+      const result = this.db.prepare(
+        `UPDATE memory_items SET
+           subject_key = ?, subject_ciphertext = ?, project_id = NULL,
+           statement_ciphertext = ?, source_type = 'deleted',
+           source_id_ciphertext = ?, source_version = NULL,
+           scope_ciphertext = ?, confidence = 0, status = 'revoked',
+           sensitivity = 'internal', valid_from = NULL, expires_at = NULL,
+           created_by = 'deleted', updated_by = 'deleted', supersedes_id = NULL,
+           created_at = ?, updated_at = ?, deleted_at = ?
+         WHERE id = ? AND deleted_at IS NULL`,
+      ).run(
+        this.cipher.fingerprint(`deleted:${id}:${randomUUID()}`),
+        this.cipher.encrypt(""),
+        this.cipher.encrypt(""),
+        this.cipher.encrypt(""),
+        this.cipher.encrypt("{}"),
+        timestamp,
+        timestamp,
+        timestamp,
+        id,
+      );
+      if (result.changes !== 1) throw new Error("Memory cannot be deleted");
+      return "deleted";
+    });
+  }
+
+  recordMemoryExport() {
+    return "recorded";
   }
 
   listMemories({

@@ -147,6 +147,11 @@ function memorySummary(memory) {
     status: memory.status,
     sensitivity: memory.sensitivity,
     projectId: memory.project_id,
+    sourceType: memory.source_type,
+    sourceId: memory.source_id,
+    sourceVersion: memory.source_version,
+    scope: memory.scope,
+    confidence: memory.confidence,
     expiresAt: memory.expires_at,
     updatedAt: memory.updated_at,
   };

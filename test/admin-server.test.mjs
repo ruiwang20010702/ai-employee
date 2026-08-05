@@ -149,6 +149,27 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     const capabilityBody = await capabilities.json();
     assert.equal(capabilityBody.catalog.some((item) => item.name === "production_deploy"), true);
     assert.equal(capabilityBody.global.find((item) => item.name === "work_plan_execution").enabled, false);
+    store.listMemories = async () => [{
+      id: "memory_1",
+      type: "project",
+      subject: "项目口径",
+      statement: "需要核对来源。",
+      status: "confirmed",
+      sensitivity: "internal",
+      project_id: "project_1",
+      source_type: "document",
+      source_id: "doc-1",
+      source_version: "2",
+      scope: { factKey: "release-rule" },
+      confidence: 0.9,
+      expires_at: null,
+      updated_at: "2026-08-04T00:00:00Z",
+    }];
+    const memories = await fetch(`${base}/api/memories`, { headers: read });
+    const memoryBody = await memories.json();
+    assert.equal(memoryBody.items[0].sourceType, "document");
+    assert.equal(memoryBody.items[0].sourceId, "doc-1");
+    assert.deepEqual(memoryBody.items[0].scope, { factKey: "release-rule" });
     const operations = await fetch(`${base}/api/operations`, { headers: read });
     assert.equal(operations.status, 200);
     assert.equal((await operations.json()).messageDetection.p95Ms, 1000);

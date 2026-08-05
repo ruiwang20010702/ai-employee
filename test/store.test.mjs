@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { memoryDeletionConfirmation } from "../src/memory-portability.mjs";
 import { Store } from "../src/store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 
@@ -451,6 +452,40 @@ test("冲突记忆必须显式替代旧事实且重复候选不能确认", async
   const report = store.memoryConflictMetrics();
   assert.equal(report.activeConflictGroups, 0);
   assert.equal(report.conflictCandidates, 1);
+});
+
+test("记忆永久删除要求绑定确认值并擦除全部业务正文", async (t) => {
+  const store = await fixture(t);
+  const id = store.proposeMemory({
+    type: "person",
+    subject: "敏感联系人",
+    statement: "不再保留的个人信息。",
+    sourceType: "chat",
+    sourceId: "private-chat-1",
+    scope: { relation: "private" },
+    createdBy: "owner",
+    sensitivity: "confidential",
+  });
+  assert.throws(
+    () => store.deleteMemory(id, "owner", "DELETE-WRONG"),
+    /confirmation/u,
+  );
+  assert.equal(
+    store.deleteMemory(id, "owner", memoryDeletionConfirmation(id)),
+    "deleted",
+  );
+  assert.equal(store.listMemories({ limit: 100 }).length, 0);
+  const row = store.db.prepare("SELECT * FROM memory_items WHERE id = ?").get(id);
+  assert.equal(row.deleted_at != null, true);
+  assert.equal(store.cipher.decrypt(row.subject_ciphertext), "");
+  assert.equal(store.cipher.decrypt(row.statement_ciphertext), "");
+  assert.equal(store.cipher.decrypt(row.source_id_ciphertext), "");
+  assert.deepEqual(JSON.parse(store.cipher.decrypt(row.scope_ciphertext)), {});
+  assert.equal(row.project_id, null);
+  assert.throws(
+    () => store.deleteMemory(id, "owner", memoryDeletionConfirmation(id)),
+    /cannot be deleted/u,
+  );
 });
 
 function assessedPlan(description = "形成代码补丁") {

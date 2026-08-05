@@ -2,7 +2,7 @@ import { loadConfig } from "./config.mjs";
 import { createProductionStore } from "./production-store.mjs";
 import { applyProductionConfigFile } from "./production-config-file.mjs";
 import { readStdin } from "./stdin.mjs";
-import { readFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { validateProjectManifest } from "./capability-policy.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
@@ -12,6 +12,12 @@ import {
   evaluateDecisionQuality,
   evaluateDecisionReviewCoverage,
 } from "./decision-quality.mjs";
+import {
+  createMemoryExport,
+  memoryDeletionConfirmation,
+  validateMemoryExportMode,
+  writeMemoryExport,
+} from "./memory-portability.mjs";
 
 const [command = "list", argument, ...rest] = process.argv.slice(2);
 if (process.env.AI_EMPLOYEE_CONFIG_FILE) {
@@ -107,15 +113,78 @@ try {
     });
     print({ id, status: "proposed" });
   } else if (command === "memory-confirm" || command === "memory-revoke") {
-    if (!argument) throw new Error(`Usage: control ${command} <memoryId>`);
+    if (!argument) {
+      throw new Error(
+        command === "memory-confirm"
+          ? "Usage: control memory-confirm <memoryId> [supersedesMemoryId]"
+          : "Usage: control memory-revoke <memoryId>",
+      );
+    }
     const actor = process.env.AI_EMPLOYEE_APPROVER ?? "local-user";
     const status =
       command === "memory-confirm"
-        ? await store.confirmMemory(argument, actor)
+        ? await store.confirmMemory(argument, actor, new Date(), {
+            supersedesId: rest[0] ?? null,
+          })
         : await store.revokeMemory(argument, actor);
     print({ id: argument, status });
   } else if (command === "memory-list") {
     print(await store.listMemories({ status: argument, limit: 100 }));
+  } else if (command === "memory-delete-preview") {
+    if (!argument) throw new Error("Usage: control memory-delete-preview <memoryId>");
+    print({
+      id: argument,
+      confirmation: memoryDeletionConfirmation(argument),
+      warning: "This permanently erases memory content and cannot be undone.",
+    });
+  } else if (command === "memory-delete") {
+    if (!argument || !rest[0]) {
+      throw new Error("Usage: control memory-delete <memoryId> <confirmation>");
+    }
+    print({
+      id: argument,
+      status: await store.deleteMemory(
+        argument,
+        config.approver,
+        rest[0],
+      ),
+    });
+  } else if (command === "memory-export") {
+    const [projectScope = "all", mode = "metadata", confirmation] = rest;
+    if (!argument) {
+      throw new Error(
+        "Usage: control memory-export <absolute.json> <projectId|all> <metadata|content> [EXPORT-CONTENT]",
+      );
+    }
+    const includeContent = validateMemoryExportMode(mode, confirmation);
+    const projectId = projectScope === "all" ? null : projectScope;
+    const memories = await store.listMemories({
+      projectId: projectId ?? undefined,
+      // Fetch one extra row so an oversized export fails instead of silently
+      // producing a truncated file.
+      limit: 10_001,
+    });
+    const payload = createMemoryExport(memories, { projectId, includeContent });
+    const destination = await writeMemoryExport(argument, payload);
+    try {
+      await store.recordMemoryExport({
+        actor: config.approver,
+        projectId,
+        includeContent,
+        count: payload.itemCount,
+        destination,
+      });
+    } catch (error) {
+      await unlink(destination).catch(() => {});
+      throw error;
+    }
+    print({
+      exported: true,
+      path: destination,
+      itemCount: payload.itemCount,
+      contentIncluded: payload.contentIncluded,
+      mode: "600",
+    });
   } else if (command === "memory-search") {
     const query = (await readStdin()).trim();
     print(
@@ -280,7 +349,7 @@ try {
     print(quality);
   } else {
     throw new Error(
-      "Commands: list, show, approve, reject, retry, dismiss-dead, resolve-sent, resolve-not-sent, purge, pause, resume, scope-list, scope-pause, scope-resume, memory-propose, memory-confirm, memory-revoke, memory-list, memory-search, plan-register, plan-show, plan-revise, plan-approve, plan-reject, plan-cancel, plan-execute, plan-evidence, review-label, review-report",
+      "Commands: list, show, approve, reject, retry, dismiss-dead, resolve-sent, resolve-not-sent, purge, pause, resume, scope-list, scope-pause, scope-resume, memory-propose, memory-confirm, memory-revoke, memory-list, memory-search, memory-delete-preview, memory-delete, memory-export, plan-register, plan-show, plan-revise, plan-approve, plan-reject, plan-cancel, plan-execute, plan-evidence, review-label, review-report",
     );
   }
 } finally {

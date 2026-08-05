@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { memoryDeletionConfirmation } from "../src/memory-portability.mjs";
 import { migrate } from "../src/migrate.mjs";
 import { createPostgresPool } from "../src/postgres.mjs";
 import { PostgresStore } from "../src/postgres-store.mjs";
@@ -459,6 +460,72 @@ integration("PostgreSQL 冲突记忆必须显式替代且不产生双活事实",
   const report = await store.memoryConflictMetrics();
   assert.equal(report.activeConflictGroups, 0);
   assert.equal((await store.listMemories({ status: "confirmed" })).length, 1);
+});
+
+integration("PostgreSQL 记忆永久删除擦除正文并保留无正文审计", async (t) => {
+  const store = await fixture(t);
+  const id = await store.proposeMemory({
+    type: "person",
+    subject: "待删除联系人",
+    statement: "待删除的敏感陈述。",
+    sourceType: "chat",
+    sourceId: "private-source",
+    scope: { relation: "private" },
+    sensitivity: "confidential",
+    createdBy: "owner",
+  });
+  await assert.rejects(
+    store.deleteMemory(id, "owner", "DELETE-WRONG"),
+    /confirmation/u,
+  );
+  assert.equal(
+    await store.deleteMemory(id, "owner", memoryDeletionConfirmation(id)),
+    "deleted",
+  );
+  assert.equal((await store.listMemories({ limit: 100 })).length, 0);
+  const raw = await store.pool.query(
+    `SELECT * FROM memory_items WHERE tenant_id = $1 AND id = $2`,
+    [store.tenantId, id],
+  );
+  assert.equal(raw.rowCount, 1);
+  assert.equal(store.cipher.decrypt(raw.rows[0].subject_ciphertext), "");
+  assert.equal(store.cipher.decrypt(raw.rows[0].statement_ciphertext), "");
+  assert.equal(store.cipher.decrypt(raw.rows[0].source_id_ciphertext), "");
+  assert.deepEqual(JSON.parse(store.cipher.decrypt(raw.rows[0].scope_ciphertext)), {});
+  assert.equal(raw.rows[0].project_id, null);
+  const audit = await store.pool.query(
+    `SELECT actor, details_ciphertext FROM audit_events
+     WHERE tenant_id = $1 AND event_type = 'memory.deleted'
+     ORDER BY occurred_at DESC LIMIT 1`,
+    [store.tenantId],
+  );
+  assert.equal(audit.rowCount, 1);
+  const details = JSON.parse(store.cipher.decrypt(audit.rows[0].details_ciphertext));
+  assert.deepEqual(details, { memoryId: id, erased: true });
+  assert.equal(JSON.stringify(details).includes("敏感"), false);
+});
+
+integration("PostgreSQL 记忆导出审计不保存目标路径或正文", async (t) => {
+  const store = await fixture(t);
+  await store.recordMemoryExport({
+    actor: "owner",
+    projectId: "project_1",
+    includeContent: true,
+    count: 2,
+    destination: "/private/export/memories.json",
+  });
+  const audit = await store.pool.query(
+    `SELECT details_ciphertext FROM audit_events
+     WHERE tenant_id = $1 AND event_type = 'memory.exported'
+     ORDER BY occurred_at DESC LIMIT 1`,
+    [store.tenantId],
+  );
+  const details = JSON.parse(store.cipher.decrypt(audit.rows[0].details_ciphertext));
+  assert.equal(details.projectId, "project_1");
+  assert.equal(details.includeContent, true);
+  assert.equal(details.count, 2);
+  assert.match(details.destinationFingerprint, /^[a-f0-9]{64}$/u);
+  assert.equal(JSON.stringify(details).includes("/private/export"), false);
 });
 
 integration("PostgreSQL 任务计划审批绑定哈希并只能消费一次", async (t) => {

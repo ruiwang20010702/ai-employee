@@ -3,6 +3,7 @@ import { DataCipher } from "./crypto.mjs";
 import { checkPostgres, createPostgresPool } from "./postgres.mjs";
 import { splitMessageBursts } from "./message-bundling.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "./memory-policy.mjs";
+import { memoryDeletionConfirmation } from "./memory-portability.mjs";
 import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
 import { buildPlanResultDraft } from "./plan-result-notification.mjs";
 import { buildOperationalMetrics } from "./operational-metrics.mjs";
@@ -1189,6 +1190,71 @@ export class PostgresStore {
         details: { memoryId: id },
       });
       return "revoked";
+    });
+  }
+
+  async deleteMemory(id, actor, confirmation, now = new Date()) {
+    if (confirmation !== memoryDeletionConfirmation(id)) {
+      throw new Error("Memory deletion confirmation does not match");
+    }
+    return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT id FROM memory_items
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+         FOR UPDATE`,
+        [this.tenantId, id],
+      );
+      if (selected.rowCount !== 1) throw new Error("Memory cannot be deleted");
+      const result = await client.query(
+        `UPDATE memory_items SET
+           subject_key = $3, subject_ciphertext = $4, project_id = NULL,
+           statement_ciphertext = $5, source_type = 'deleted',
+           source_id_ciphertext = $6, source_version = NULL,
+           scope_ciphertext = $7, confidence = 0, status = 'revoked',
+           sensitivity = 'internal', valid_from = NULL, expires_at = NULL,
+           created_by = 'deleted', updated_by = 'deleted', supersedes_id = NULL,
+           created_at = $8, updated_at = $8, deleted_at = $8
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+        [
+          this.tenantId,
+          id,
+          this.cipher.fingerprint(`deleted:${id}:${randomUUID()}`),
+          this.cipher.encrypt(""),
+          this.cipher.encrypt(""),
+          this.cipher.encrypt(""),
+          this.cipher.encrypt("{}"),
+          now,
+        ],
+      );
+      if (result.rowCount !== 1) throw new Error("Memory cannot be deleted");
+      await this.audit(client, {
+        eventType: "memory.deleted",
+        actor,
+        details: { memoryId: id, erased: true },
+      });
+      return "deleted";
+    });
+  }
+
+  async recordMemoryExport({
+    actor,
+    projectId,
+    includeContent,
+    count,
+    destination,
+  }, now = new Date()) {
+    return this.transaction(async (client) => {
+      await this.audit(client, {
+        eventType: "memory.exported",
+        actor,
+        details: {
+          projectId,
+          includeContent,
+          count,
+          destinationFingerprint: this.cipher.fingerprint(destination),
+        },
+      });
+      return { recorded: true, at: now.toISOString() };
     });
   }
 
