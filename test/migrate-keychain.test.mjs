@@ -79,8 +79,8 @@ test("应用迁移后逐项回读并原子替换为钥匙串引用", async () =>
   assert.equal((await stat(result.rollbackSnapshot)).mode & 0o777, 0o600);
 });
 
-test("任一钥匙串写入或回读失败时保留原配置且错误不泄露密钥", async () => {
-  const { configPath } = await fixture();
+test("任一钥匙串写入或回读失败时保留原配置、不留快照且错误不泄露密钥", async () => {
+  const { directory, configPath } = await fixture();
   const keychain = memoryKeychain();
   let error;
   try {
@@ -104,6 +104,10 @@ test("任一钥匙串写入或回读失败时保留原配置且错误不泄露�
     assert.equal(error.message.includes(secret), false);
   }
   assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), sourceValues);
+  await assert.rejects(
+    stat(join(directory, "keychain-migration-backups")),
+    { code: "ENOENT" },
+  );
 });
 
 test("已迁移配置重复执行只做回读验证", async () => {

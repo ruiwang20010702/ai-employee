@@ -169,15 +169,6 @@ export async function migrateProductionSecretsToKeychain({
     };
   }
 
-  const directory = dirname(destination);
-  const backupDirectory = join(directory, "keychain-migration-backups");
-  const timestamp = now.toISOString().replaceAll(/[:.]/gu, "-");
-  const rollbackSnapshot = join(backupDirectory, `production-${timestamp}.json`);
-  await mkdir(backupDirectory, { recursive: true, mode: 0o700 });
-  await chmod(backupDirectory, 0o700);
-  await copyFile(destination, rollbackSnapshot, constants.COPYFILE_EXCL);
-  await chmod(rollbackSnapshot, 0o600);
-
   for (const [key, account] of keychainMigrationEntries) {
     if (!secrets.has(key)) continue;
     try {
@@ -195,7 +186,15 @@ export async function migrateProductionSecretsToKeychain({
   for (const [key, account] of keychainMigrationEntries) {
     next[key] = `keychain://${service}/${account}`;
   }
+  const directory = dirname(destination);
+  const backupDirectory = join(directory, "keychain-migration-backups");
+  const timestamp = now.toISOString().replaceAll(/[:.]/gu, "-");
+  const rollbackSnapshot = join(backupDirectory, `production-${timestamp}.json`);
   const temporaryPath = join(directory, `.production-keychain-${randomUUID()}.tmp`);
+  await mkdir(backupDirectory, { recursive: true, mode: 0o700 });
+  await chmod(backupDirectory, 0o700);
+  await copyFile(destination, rollbackSnapshot, constants.COPYFILE_EXCL);
+  await chmod(rollbackSnapshot, 0o600);
   try {
     await writeProtectedJson(temporaryPath, next);
     await applyProductionConfigFile({
