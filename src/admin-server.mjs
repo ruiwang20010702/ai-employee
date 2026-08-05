@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { access, constants } from "node:fs/promises";
@@ -213,6 +213,45 @@ function privacyPreviewSummary(preview) {
     blockedTotal,
     confirmation,
     snapshotDigest,
+  };
+}
+
+function targetFingerprint(config, kind, value) {
+  return createHmac("sha256", config.dataKey ?? config.adminWriteToken)
+    .update(`admin-target:${kind}:${value}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+async function targetSnapshot(config, store) {
+  const definitions = [
+    ...config.targetUserIds.map((value) => ({ kind: "user", value })),
+    ...config.targetGroupIds.map((value) => ({ kind: "group", value })),
+  ];
+  const items = await Promise.all(definitions.map(async ({ kind, value }) => ({
+    kind,
+    fingerprint: targetFingerprint(config, kind, value),
+    paused: Boolean(await store.isScopedPaused?.(
+      kind === "user" ? "contact" : "group",
+      value,
+    )),
+    replyEnabled: kind === "user"
+      ? config.capabilities.has("send_message")
+      : config.capabilities.has("send_message") &&
+        config.capabilities.has("send_group_message"),
+  })));
+  return {
+    counts: {
+      users: config.targetUserIds.length,
+      groups: config.targetGroupIds.length,
+    },
+    rules: {
+      privateTrigger: "whitelist_message",
+      groupTrigger: "whitelist_mention_only",
+      mentionRequiresReply: false,
+      identifiers: "hmac_fingerprint_only",
+    },
+    items,
   };
 }
 
@@ -462,6 +501,10 @@ export async function startAdminServer({
         json(response, 200, { items: await store.listScopedPauses() });
         return;
       }
+      if (request.method === "GET" && url.pathname === "/api/targets") {
+        json(response, 200, await targetSnapshot(config, store));
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/api/capabilities") {
         json(response, 200, await capabilitySnapshot(config));
         return;
@@ -515,6 +558,33 @@ export async function startAdminServer({
         );
         return;
       }
+      const targetPause = url.pathname.match(
+        /^\/api\/targets\/(user|group)\/([a-f0-9]{16})\/pause$/u,
+      );
+      if (request.method === "POST" && targetPause) {
+        const body = await readJson(request, 4_096);
+        if (typeof body.paused !== "boolean") {
+          throw Object.assign(new Error("paused_must_be_boolean"), { status: 400 });
+        }
+        const kind = targetPause[1];
+        const fingerprint = targetPause[2];
+        const values = kind === "user" ? config.targetUserIds : config.targetGroupIds;
+        const value = values.find(
+          (candidate) => targetFingerprint(config, kind, candidate) === fingerprint,
+        );
+        if (!value) {
+          throw Object.assign(new Error("target_not_found"), { status: 404 });
+        }
+        const paused = await store.setScopedPause({
+          type: kind === "user" ? "contact" : "group",
+          value,
+          paused: body.paused,
+          actor: "admin-ui",
+          reason: String(body.reason ?? ""),
+        });
+        json(response, 200, { paused });
+        return;
+      }
 
       const taskDecision = url.pathname.match(/^\/api\/tasks\/([^/]+)\/decision$/u);
       const taskRetry = url.pathname.match(/^\/api\/tasks\/([^/]+)\/retry$/u);
@@ -535,6 +605,8 @@ export async function startAdminServer({
         );
         if (paused && type === "contact") {
           allowed = (config.targetUserIds ?? []).includes(value);
+        } else if (paused && type === "group") {
+          allowed = (config.targetGroupIds ?? []).includes(value);
         } else if (paused && type === "project") {
           const projects = await manifestLoader(config.projectsDirectory);
           allowed = projects.has(value);

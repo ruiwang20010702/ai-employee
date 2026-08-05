@@ -68,6 +68,20 @@ export async function reconcileManualReplies({
   return cancelled;
 }
 
+async function replyPauseReason(store, task, isGroup) {
+  if (!store.isScopedPaused) return null;
+  if (await store.isScopedPaused("contact", task.sender_user_id)) {
+    return "contact_paused";
+  }
+  if (
+    isGroup &&
+    await store.isScopedPaused("group", task.conversation_id)
+  ) {
+    return "group_paused";
+  }
+  return null;
+}
+
 export async function processDraftTask({
   store,
   dws,
@@ -78,11 +92,13 @@ export async function processDraftTask({
   if (!config.capabilities.has("draft_reply")) return false;
   const task = await store.claimTask();
   if (!task) return false;
-  if (await store.isScopedPaused?.("contact", task.sender_user_id)) {
+  const isGroup = (config.targetGroupIds ?? []).includes(task.conversation_id);
+  const pausedReason = await replyPauseReason(store, task, isGroup);
+  if (pausedReason) {
     await store.deferTaskForPause(task.id);
     log("worker.task_deferred", {
       taskId: task.id,
-      reason: "contact_paused",
+      reason: pausedReason,
     });
     return true;
   }
@@ -104,7 +120,6 @@ export async function processDraftTask({
       });
       return true;
     }
-    const isGroup = (config.targetGroupIds ?? []).includes(task.conversation_id);
     if (config.selfUserId) {
       try {
         const manual = await dws.hasManualReply({
@@ -221,15 +236,16 @@ export async function processApprovedTask({ store, dws, config }) {
 
   const task = await store.claimApprovedTask();
   if (!task) return false;
-  if (await store.isScopedPaused?.("contact", task.sender_user_id)) {
-    await store.returnApprovedTask(task.id, "contact_paused");
+  const isGroup = (config.targetGroupIds ?? []).includes(task.conversation_id);
+  const pausedReason = await replyPauseReason(store, task, isGroup);
+  if (pausedReason) {
+    await store.returnApprovedTask(task.id, pausedReason);
     log("worker.send_deferred", {
       taskId: task.id,
-      reason: "contact_paused",
+      reason: pausedReason,
     });
     return true;
   }
-  const isGroup = (config.targetGroupIds ?? []).includes(task.conversation_id);
   if (isGroup && !config.capabilities.has("send_group_message")) {
     await store.returnApprovedTask(
       task.id,

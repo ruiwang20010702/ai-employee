@@ -1,10 +1,12 @@
-const allowedScopeTypes = new Set(["contact", "project", "capability"]);
+const allowedScopeTypes = new Set(["contact", "group", "project", "capability"]);
 
 export function normalizePauseScope(type, value) {
   const normalizedType = String(type ?? "").trim().toLowerCase();
   const normalizedValue = String(value ?? "").trim();
   if (!allowedScopeTypes.has(normalizedType)) {
-    throw new Error("Pause scope type must be contact, project, or capability");
+    throw new Error(
+      "Pause scope type must be contact, group, project, or capability",
+    );
   }
   if (
     !normalizedValue ||

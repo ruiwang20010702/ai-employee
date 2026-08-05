@@ -10,6 +10,7 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.ok(script);
   assert.doesNotThrow(() => new Function(script));
   assert.match(script, /plan-revise/u);
+  assert.match(script, /\/api\/targets\//u);
   assert.match(script, /\/api\/privacy\/preview/u);
   assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
 });
@@ -44,6 +45,11 @@ function fixture() {
     async listMemories() { return []; },
     async memoryConflictMetrics() { return { candidates: 0, conflictCandidates: 0, duplicateCandidates: 0, activeConflictGroups: 0, conflictRate: null, healthy: true, items: [] }; },
     async listScopedPauses() { return scopedPauses; },
+    async isScopedPaused(type, value) {
+      return scopedPauses.some(
+        (item) => item.type === type && item.value === value,
+      );
+    },
     async operationalMetrics() {
       return {
         availability: { availability: 1, targetMet: null, recordedSamples: 10, missingSamples: 0, trackingCoverage: 0.01, windowComplete: false },
@@ -270,6 +276,78 @@ test("局部暂停只允许已配置范围并可恢复", async () => {
     });
     assert.equal(resumed.status, 200);
     assert.equal(decisions.at(-1).paused, false);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("监听范围只返回脱敏指纹并可暂停已配置联系人和群聊", async () => {
+  const { store, config, decisions } = fixture();
+  const service = await startAdminServer({ store, config });
+  const { port } = service.server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const readHeaders = { authorization: "Bearer read-secret" };
+  const writeHeaders = {
+    ...readHeaders,
+    "x-ai-employee-write-token": "write-secret",
+    "content-type": "application/json",
+  };
+  try {
+    const response = await fetch(`${base}/api/targets`, { headers: readHeaders });
+    assert.equal(response.status, 200);
+    const snapshot = await response.json();
+    assert.deepEqual(snapshot.counts, { users: 1, groups: 1 });
+    assert.equal(snapshot.rules.groupTrigger, "whitelist_mention_only");
+    assert.equal(snapshot.rules.mentionRequiresReply, false);
+    assert.equal(snapshot.items.length, 2);
+    assert.equal(snapshot.items.every((item) => /^[a-f0-9]{16}$/u.test(item.fingerprint)), true);
+    assert.doesNotMatch(JSON.stringify(snapshot), /contact_1|group_1/u);
+
+    const group = snapshot.items.find((item) => item.kind === "group");
+    const readOnly = await fetch(
+      `${base}/api/targets/group/${group.fingerprint}/pause`,
+      {
+        method: "POST",
+        headers: { ...readHeaders, "content-type": "application/json" },
+        body: JSON.stringify({ paused: true }),
+      },
+    );
+    assert.equal(readOnly.status, 403);
+
+    const paused = await fetch(
+      `${base}/api/targets/group/${group.fingerprint}/pause`,
+      {
+        method: "POST",
+        headers: writeHeaders,
+        body: JSON.stringify({ paused: true, reason: "会议期间静默" }),
+      },
+    );
+    assert.equal(paused.status, 200);
+    assert.equal((await paused.json()).paused, true);
+    assert.deepEqual(decisions.at(-1), {
+      type: "group",
+      value: "group_1",
+      paused: true,
+      actor: "admin-ui",
+      reason: "会议期间静默",
+    });
+
+    const refreshed = await fetch(`${base}/api/targets`, { headers: readHeaders });
+    const refreshedGroup = (await refreshed.json()).items.find(
+      (item) => item.kind === "group",
+    );
+    assert.equal(refreshedGroup.paused, true);
+
+    const missing = await fetch(
+      `${base}/api/targets/group/${"0".repeat(16)}/pause`,
+      {
+        method: "POST",
+        headers: writeHeaders,
+        body: JSON.stringify({ paused: true }),
+      },
+    );
+    assert.equal(missing.status, 404);
+    assert.equal((await missing.json()).error, "target_not_found");
   } finally {
     await service.stop("test");
   }

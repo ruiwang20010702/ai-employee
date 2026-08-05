@@ -116,6 +116,27 @@ test("联系人暂停时不调用 Codex 且不消耗重试次数", async (t) => 
   assert.equal(store.getTask(taskId).attempts, 0);
 });
 
+test("群聊暂停时不调用 Codex 且不消耗重试次数", async (t) => {
+  const store = await fixture(t);
+  const taskId = enqueue(store, "paused-group");
+  store.setScopedPause({
+    type: "group",
+    value: "c1",
+    paused: true,
+    actor: "operator",
+  });
+  let generated = false;
+  await processDraftTask({
+    store,
+    dws: {},
+    config: { ...baseConfig, targetGroupIds: ["c1"] },
+    async generator() { generated = true; },
+  });
+  assert.equal(generated, false);
+  assert.equal(store.getTask(taskId).status, "queued");
+  assert.equal(store.getTask(taskId).attempts, 0);
+});
+
 test("明确工作请求只创建计划提案而不自动执行", async (t) => {
   const store = await fixture(t);
   const taskId = enqueue(store, "work-request");
@@ -213,6 +234,46 @@ test("联系人暂停时已批准草稿也不会发送", async (t) => {
   assert.equal(sent, false);
   assert.equal(store.getTask(taskId).status, "approved");
   assert.equal(store.getTask(taskId).last_error, "contact_paused");
+});
+
+test("群聊暂停时已批准草稿也不会发送", async (t) => {
+  const store = await fixture(t);
+  const taskId = enqueue(store, "paused-group-send");
+  store.claimTask({ now: new Date("2026-07-31T10:00:00.010Z") });
+  store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "暂不发送",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "测试",
+  });
+  store.decideTask(taskId, { decision: "approved", actor: "tester" });
+  store.setScopedPause({
+    type: "group",
+    value: "c1",
+    paused: true,
+    actor: "operator",
+  });
+  let sent = false;
+  await processApprovedTask({
+    store,
+    config: {
+      ...baseConfig,
+      selfUserId: "self",
+      capabilities: new Set([
+        "draft_reply",
+        "send_message",
+        "send_group_message",
+      ]),
+      targetGroupIds: ["c1"],
+    },
+    dws: {
+      async sendGroupText() { sent = true; },
+    },
+  });
+  assert.equal(sent, false);
+  assert.equal(store.getTask(taskId).status, "approved");
+  assert.equal(store.getTask(taskId).last_error, "group_paused");
 });
 
 test("审批、人工回复检查和幂等键全部满足后才发送", async (t) => {

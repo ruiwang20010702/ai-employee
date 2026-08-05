@@ -112,7 +112,7 @@ integration("PostgreSQL Worker 租约使用 SKIP LOCKED 防止重复领取", asy
   assert.equal((first ?? second).id, taskId);
 });
 
-integration("PostgreSQL 局部暂停加密保存并审计恢复", async (t) => {
+integration("PostgreSQL 联系人和群聊局部暂停加密保存并审计恢复", async (t) => {
   const store = await fixture(t);
   await store.setScopedPause({
     type: "contact",
@@ -136,6 +136,31 @@ integration("PostgreSQL 局部暂停加密保存并审计恢复", async (t) => {
     actor: "integration-operator",
   });
   assert.equal(await store.isScopedPaused("contact", "u1"), false);
+  await store.setScopedPause({
+    type: "group",
+    value: "group-1",
+    paused: true,
+    actor: "integration-operator",
+    reason: "群聊静默",
+  });
+  assert.equal(await store.isScopedPaused("group", "group-1"), true);
+  const groupRaw = await store.pool.query(
+    `SELECT key, value FROM checkpoints
+     WHERE tenant_id = $1 AND left(key, 19) = 'scoped_pause:group:'`,
+    [store.tenantId],
+  );
+  assert.equal(groupRaw.rowCount, 1);
+  assert.doesNotMatch(
+    `${groupRaw.rows[0].key}${groupRaw.rows[0].value}`,
+    /群聊静默|group-1/u,
+  );
+  await store.setScopedPause({
+    type: "group",
+    value: "group-1",
+    paused: false,
+    actor: "integration-operator",
+  });
+  assert.equal(await store.isScopedPaused("group", "group-1"), false);
   const audit = await store.pool.query(
     `SELECT event_type FROM audit_events
      WHERE tenant_id = $1 AND event_type LIKE 'scope.%'
@@ -144,7 +169,7 @@ integration("PostgreSQL 局部暂停加密保存并审计恢复", async (t) => {
   );
   assert.deepEqual(
     audit.rows.map((row) => row.event_type),
-    ["scope.paused", "scope.resumed"],
+    ["scope.paused", "scope.resumed", "scope.paused", "scope.resumed"],
   );
 });
 
