@@ -18,6 +18,11 @@ import {
   validateMemoryExportMode,
   writeMemoryExport,
 } from "./memory-portability.mjs";
+import {
+  checkMemorySourceAccess,
+  reconcileMemorySources,
+} from "./memory-source-access.mjs";
+import { loadProjectManifests } from "./project-manifests.mjs";
 
 const [command = "list", argument, ...rest] = process.argv.slice(2);
 if (process.env.AI_EMPLOYEE_CONFIG_FILE) {
@@ -28,6 +33,20 @@ const store = await createProductionStore(config);
 
 function print(value) {
   console.log(JSON.stringify(value, null, 2));
+}
+
+async function refreshMemorySource(memory) {
+  const change = await checkMemorySourceAccess(memory, {
+    projects: await loadProjectManifests(config.projectsDirectory),
+    gbrainPath: config.gbrainPath,
+    leaseMs: config.memorySourceLeaseMs,
+  });
+  await store.setMemorySourceAccess(
+    memory.id,
+    change,
+    "system:memory-source",
+  );
+  return change;
 }
 
 try {
@@ -121,6 +140,16 @@ try {
       );
     }
     const actor = process.env.AI_EMPLOYEE_APPROVER ?? "local-user";
+    if (command === "memory-confirm") {
+      const memory = await store.getMemory(argument);
+      if (!memory) throw new Error(`Memory not found: ${argument}`);
+      if (memory?.source_type === "gbrain") {
+        const sourceAccess = await refreshMemorySource(memory);
+        if (sourceAccess.status !== "verified") {
+          throw new Error(`Memory source access is not verified: ${sourceAccess.reason}`);
+        }
+      }
+    }
     const status =
       command === "memory-confirm"
         ? await store.confirmMemory(argument, actor, new Date(), {
@@ -130,6 +159,24 @@ try {
     print({ id: argument, status });
   } else if (command === "memory-list") {
     print(await store.listMemories({ status: argument, limit: 100 }));
+  } else if (command === "memory-source-check") {
+    if (!argument || argument === "all") {
+      const report = await reconcileMemorySources({
+        store,
+        projects: await loadProjectManifests(config.projectsDirectory),
+        gbrainPath: config.gbrainPath,
+        leaseMs: config.memorySourceLeaseMs,
+        limit: config.memorySourceLimit,
+      });
+      print(report);
+    } else {
+      const memory = await store.getMemory(argument);
+      if (!memory || memory.source_type !== "gbrain") {
+        throw new Error("gbrain memory not found");
+      }
+      const change = await refreshMemorySource(memory);
+      print({ id: memory.id, ...change });
+    }
   } else if (command === "memory-delete-preview") {
     if (!argument) throw new Error("Usage: control memory-delete-preview <memoryId>");
     print({
@@ -349,7 +396,7 @@ try {
     print(quality);
   } else {
     throw new Error(
-      "Commands: list, show, approve, reject, retry, dismiss-dead, resolve-sent, resolve-not-sent, purge, pause, resume, scope-list, scope-pause, scope-resume, memory-propose, memory-confirm, memory-revoke, memory-list, memory-search, memory-delete-preview, memory-delete, memory-export, plan-register, plan-show, plan-revise, plan-approve, plan-reject, plan-cancel, plan-execute, plan-evidence, review-label, review-report",
+      "Commands: list, show, approve, reject, retry, dismiss-dead, resolve-sent, resolve-not-sent, purge, pause, resume, scope-list, scope-pause, scope-resume, memory-propose, memory-confirm, memory-revoke, memory-list, memory-search, memory-source-check, memory-delete-preview, memory-delete, memory-export, plan-register, plan-show, plan-revise, plan-approve, plan-reject, plan-cancel, plan-execute, plan-evidence, review-label, review-report",
     );
   }
 } finally {

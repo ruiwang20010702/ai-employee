@@ -160,6 +160,10 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
       source_type: "document",
       source_id: "doc-1",
       source_version: "2",
+      source_access_status: "not_required",
+      source_access_reason: null,
+      source_access_checked_at: null,
+      source_access_expires_at: null,
       scope: { factKey: "release-rule" },
       confidence: 0.9,
       expires_at: null,
@@ -169,6 +173,7 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     const memoryBody = await memories.json();
     assert.equal(memoryBody.items[0].sourceType, "document");
     assert.equal(memoryBody.items[0].sourceId, "doc-1");
+    assert.equal(memoryBody.items[0].sourceAccessStatus, "not_required");
     assert.deepEqual(memoryBody.items[0].scope, { factKey: "release-rule" });
     const operations = await fetch(`${base}/api/operations`, { headers: read });
     assert.equal(operations.status, 200);

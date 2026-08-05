@@ -4,6 +4,7 @@ import { checkPostgres, createPostgresPool } from "./postgres.mjs";
 import { splitMessageBursts } from "./message-bundling.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "./memory-policy.mjs";
 import { memoryDeletionConfirmation } from "./memory-portability.mjs";
+import { validateSourceAccessChange } from "./memory-source-access.mjs";
 import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
 import { buildPlanResultDraft } from "./plan-result-notification.mjs";
 import { buildOperationalMetrics } from "./operational-metrics.mjs";
@@ -1070,10 +1071,11 @@ export class PostgresStore {
         INSERT INTO memory_items(
           id, tenant_id, type, subject_key, subject_ciphertext, project_id,
           statement_ciphertext, source_type, source_id_ciphertext,
-          source_version, scope_ciphertext, confidence, status,
+          source_version, source_access_status, source_access_reason,
+          scope_ciphertext, confidence, status,
           sensitivity, expires_at, created_by, updated_by, supersedes_id,
           created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'proposed',$13,$14,$15,$15,$16,$17,$17)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'proposed',$15,$16,$17,$17,$18,$19,$19)
       `,
         [
           id,
@@ -1086,6 +1088,8 @@ export class PostgresStore {
           memory.sourceType,
           this.cipher.encrypt(memory.sourceId),
           memory.sourceVersion,
+          memory.sourceType === "gbrain" ? "unverified" : "not_required",
+          memory.sourceType === "gbrain" ? "awaiting_source_check" : null,
           this.cipher.encrypt(JSON.stringify(memory.scope)),
           memory.confidence,
           memory.sensitivity,
@@ -1114,12 +1118,23 @@ export class PostgresStore {
       if (selected.rowCount === 0) throw new Error(`Memory not found: ${id}`);
       const memory = selected.rows[0];
       if (memory.status !== "proposed") throw new Error("Memory is not proposed");
+      if (
+        memory.source_type === "gbrain" &&
+        (memory.source_access_status !== "verified" ||
+          !memory.source_access_expires_at ||
+          new Date(memory.source_access_expires_at) <= now)
+      ) {
+        throw new Error("gbrain memory source access must be verified before confirmation");
+      }
       const activeResult = await client.query(
         `SELECT * FROM memory_items
          WHERE tenant_id = $1 AND status = 'confirmed' AND deleted_at IS NULL
            AND type = $2 AND subject_key = $3
            AND project_id IS NOT DISTINCT FROM $4
            AND (expires_at IS NULL OR expires_at > $5)
+           AND (source_type <> 'gbrain' OR (
+             source_access_status = 'verified' AND source_access_expires_at > $5
+           ))
          ORDER BY updated_at DESC FOR UPDATE`,
         [this.tenantId, memory.type, memory.subject_key, memory.project_id, now],
       );
@@ -1193,6 +1208,63 @@ export class PostgresStore {
     });
   }
 
+  async setMemorySourceAccess(id, change, actor) {
+    const normalized = validateSourceAccessChange(change);
+    return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT source_access_status, source_access_reason, source_version
+         FROM memory_items
+         WHERE tenant_id = $1 AND id = $2 AND source_type = 'gbrain'
+           AND deleted_at IS NULL
+         FOR UPDATE`,
+        [this.tenantId, id],
+      );
+      if (selected.rowCount !== 1) {
+        throw new Error("Memory source access cannot be updated");
+      }
+      const result = await client.query(
+        `UPDATE memory_items SET
+           source_access_status = $3, source_access_reason = $4,
+           source_access_checked_at = $5, source_access_expires_at = $6,
+           source_version = COALESCE(source_version, $7)
+         WHERE tenant_id = $1 AND id = $2 AND source_type = 'gbrain'
+           AND deleted_at IS NULL`,
+        [
+          this.tenantId,
+          id,
+          normalized.status,
+          normalized.reason,
+          normalized.checkedAt,
+          normalized.expiresAt,
+          normalized.sourceVersion,
+        ],
+      );
+      if (result.rowCount !== 1) {
+        throw new Error("Memory source access cannot be updated");
+      }
+      const previous = selected.rows[0];
+      const resultingSourceVersion =
+        previous.source_version ?? normalized.sourceVersion;
+      const statusChanged =
+        previous.source_access_status !== normalized.status ||
+        previous.source_access_reason !== normalized.reason ||
+        previous.source_version !== resultingSourceVersion;
+      if (statusChanged) {
+        await this.audit(client, {
+          eventType: "memory.source_access_checked",
+          actor,
+          details: {
+            memoryId: id,
+            status: normalized.status,
+            reason: normalized.reason,
+            expiresAt: normalized.expiresAt?.toISOString() ?? null,
+          },
+        });
+      }
+      return normalized.status;
+    });
+  }
+
   async deleteMemory(id, actor, confirmation, now = new Date()) {
     if (confirmation !== memoryDeletionConfirmation(id)) {
       throw new Error("Memory deletion confirmation does not match");
@@ -1210,6 +1282,8 @@ export class PostgresStore {
            subject_key = $3, subject_ciphertext = $4, project_id = NULL,
            statement_ciphertext = $5, source_type = 'deleted',
            source_id_ciphertext = $6, source_version = NULL,
+           source_access_status = 'revoked', source_access_reason = 'deleted',
+           source_access_checked_at = $8, source_access_expires_at = NULL,
            scope_ciphertext = $7, confidence = 0, status = 'revoked',
            sensitivity = 'internal', valid_from = NULL, expires_at = NULL,
            created_by = 'deleted', updated_by = 'deleted', supersedes_id = NULL,
@@ -1258,12 +1332,23 @@ export class PostgresStore {
     });
   }
 
+  async getMemory(id) {
+    const result = await this.pool.query(
+      `SELECT * FROM memory_items
+       WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+      [this.tenantId, id],
+    );
+    return result.rows[0] ? memoryFromRow(result.rows[0], this.cipher) : null;
+  }
+
   async listMemories({
     type,
     subject,
     projectId,
     status,
+    statuses,
     sensitivity,
+    sourceType,
     limit = 100,
   } = {}) {
     const parameters = [this.tenantId];
@@ -1276,7 +1361,15 @@ export class PostgresStore {
     if (subject) add("subject_key =", this.cipher.fingerprint(subject));
     if (projectId) add("project_id =", projectId);
     if (status) add("status =", status);
+    if (statuses) {
+      if (!Array.isArray(statuses) || statuses.length === 0) {
+        throw new Error("Memory statuses must be a non-empty array");
+      }
+      add("status = ANY(", statuses);
+      clauses[clauses.length - 1] += ")";
+    }
     if (sensitivity) add("sensitivity =", sensitivity);
+    if (sourceType) add("source_type =", sourceType);
     parameters.push(limit);
     const result = await this.pool.query(
       `SELECT * FROM memory_items WHERE ${clauses.join(" AND ")}

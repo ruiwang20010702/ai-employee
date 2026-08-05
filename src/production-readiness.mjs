@@ -181,9 +181,11 @@ export async function checkProductionReadiness({
 } = {}) {
   validateProductionReadinessConfig(config, environment);
   let projects = new Map();
-  if (config.capabilities.has("work_plan_execution")) {
+  const sourceReconciliationRequired =
+    config.requiredOperationalChecks?.includes("memory-source:last-success") ?? false;
+  if (config.capabilities.has("work_plan_execution") || sourceReconciliationRequired) {
     projects = await manifestLoader(config.projectsDirectory);
-    if (projects.size === 0) {
+    if (config.capabilities.has("work_plan_execution") && projects.size === 0) {
       throw new Error(
         "work_plan_execution requires at least one valid project manifest",
       );

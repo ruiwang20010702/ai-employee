@@ -39,6 +39,11 @@ const services = [
     intervalSeconds: 3_600,
   },
   {
+    component: "memory-source",
+    label: "com.ai-employee.memory-source",
+    intervalSeconds: 300,
+  },
+  {
     component: "backup",
     label: "com.ai-employee.backup",
     schedule: { Hour: 2, Minute: 15 },
@@ -59,9 +64,11 @@ function plist({ component, label, intervalSeconds }) {
       ? join(projectRoot, "scripts", "备份数据库.mjs")
       : component === "reconciliation"
         ? join(projectRoot, "scripts", "消息覆盖对账.mjs")
+        : component === "memory-source"
+          ? join(projectRoot, "scripts", "校验记忆来源.mjs")
       : join(projectRoot, "src", "service-launcher.mjs");
   const componentArgument =
-    component === "backup" || component === "reconciliation"
+    component === "backup" || component === "reconciliation" || component === "memory-source"
       ? ""
       : `\n    <string>${escapeXml(component)}</string>`;
   const lifecycle =
@@ -73,7 +80,7 @@ function plist({ component, label, intervalSeconds }) {
     <key>Minute</key>
     <integer>15</integer>
   </dict>`
-      : component === "reconciliation"
+      : component === "reconciliation" || component === "memory-source"
         ? `  <key>RunAtLoad</key>
   <true/>
   <key>StartInterval</key>

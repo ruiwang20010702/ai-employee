@@ -7,6 +7,7 @@ import { DataCipher } from "./crypto.mjs";
 import { splitMessageBursts } from "./message-bundling.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "./memory-policy.mjs";
 import { memoryDeletionConfirmation } from "./memory-portability.mjs";
+import { validateSourceAccessChange } from "./memory-source-access.mjs";
 import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
 import { buildPlanResultDraft } from "./plan-result-notification.mjs";
 import { buildOperationalMetrics } from "./operational-metrics.mjs";
@@ -185,6 +186,10 @@ export class Store {
         source_type TEXT NOT NULL,
         source_id_ciphertext TEXT NOT NULL,
         source_version TEXT,
+        source_access_status TEXT NOT NULL DEFAULT 'not_required',
+        source_access_reason TEXT,
+        source_access_checked_at TEXT,
+        source_access_expires_at TEXT,
         scope_ciphertext TEXT NOT NULL,
         confidence REAL NOT NULL,
         status TEXT NOT NULL,
@@ -1075,10 +1080,11 @@ export class Store {
         INSERT INTO memory_items(
           id, type, subject_key, subject_ciphertext, project_id,
           statement_ciphertext, source_type, source_id_ciphertext,
-          source_version, scope_ciphertext, confidence, status,
+          source_version, source_access_status, source_access_reason,
+          scope_ciphertext, confidence, status,
           sensitivity, expires_at, created_by, updated_by, supersedes_id,
           created_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,'proposed',?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'proposed',?,?,?,?,?,?,?)
       `,
       )
       .run(
@@ -1091,6 +1097,8 @@ export class Store {
         memory.sourceType,
         this.cipher.encrypt(memory.sourceId),
         memory.sourceVersion,
+        memory.sourceType === "gbrain" ? "unverified" : "not_required",
+        memory.sourceType === "gbrain" ? "awaiting_source_check" : null,
         this.cipher.encrypt(JSON.stringify(memory.scope)),
         memory.confidence,
         memory.sensitivity,
@@ -1111,13 +1119,30 @@ export class Store {
         .get(id);
       if (!memory) throw new Error(`Memory not found: ${id}`);
       if (memory.status !== "proposed") throw new Error("Memory is not proposed");
+      if (
+        memory.source_type === "gbrain" &&
+        (memory.source_access_status !== "verified" ||
+          !memory.source_access_expires_at ||
+          new Date(memory.source_access_expires_at) <= now)
+      ) {
+        throw new Error("gbrain memory source access must be verified before confirmation");
+      }
       const active = this.db.prepare(
         `SELECT * FROM memory_items
          WHERE status = 'confirmed' AND deleted_at IS NULL
            AND type = ? AND subject_key = ? AND project_id IS ?
            AND (expires_at IS NULL OR expires_at > ?)
+           AND (source_type <> 'gbrain' OR (
+             source_access_status = 'verified' AND source_access_expires_at > ?
+           ))
          ORDER BY updated_at DESC`,
-      ).all(memory.type, memory.subject_key, memory.project_id, nowIso(now));
+      ).all(
+        memory.type,
+        memory.subject_key,
+        memory.project_id,
+        nowIso(now),
+        nowIso(now),
+      );
       const candidate = memoryFromRow(memory, this.cipher);
       const factKey = memoryFactKey(candidate);
       const comparable = factKey
@@ -1172,6 +1197,26 @@ export class Store {
     return "revoked";
   }
 
+  setMemorySourceAccess(id, change) {
+    const normalized = validateSourceAccessChange(change);
+    const result = this.db.prepare(
+      `UPDATE memory_items SET
+         source_access_status = ?, source_access_reason = ?,
+         source_access_checked_at = ?, source_access_expires_at = ?,
+         source_version = COALESCE(source_version, ?)
+       WHERE id = ? AND source_type = 'gbrain' AND deleted_at IS NULL`,
+    ).run(
+      normalized.status,
+      normalized.reason,
+      normalized.checkedAt.toISOString(),
+      normalized.expiresAt?.toISOString() ?? null,
+      normalized.sourceVersion,
+      id,
+    );
+    if (result.changes !== 1) throw new Error("Memory source access cannot be updated");
+    return normalized.status;
+  }
+
   deleteMemory(id, actor, confirmation, now = new Date()) {
     if (confirmation !== memoryDeletionConfirmation(id)) {
       throw new Error("Memory deletion confirmation does not match");
@@ -1187,6 +1232,8 @@ export class Store {
            subject_key = ?, subject_ciphertext = ?, project_id = NULL,
            statement_ciphertext = ?, source_type = 'deleted',
            source_id_ciphertext = ?, source_version = NULL,
+           source_access_status = 'revoked', source_access_reason = 'deleted',
+           source_access_checked_at = ?, source_access_expires_at = NULL,
            scope_ciphertext = ?, confidence = 0, status = 'revoked',
            sensitivity = 'internal', valid_from = NULL, expires_at = NULL,
            created_by = 'deleted', updated_by = 'deleted', supersedes_id = NULL,
@@ -1197,6 +1244,7 @@ export class Store {
         this.cipher.encrypt(""),
         this.cipher.encrypt(""),
         this.cipher.encrypt(""),
+        timestamp,
         this.cipher.encrypt("{}"),
         timestamp,
         timestamp,
@@ -1212,12 +1260,21 @@ export class Store {
     return "recorded";
   }
 
+  getMemory(id) {
+    const row = this.db
+      .prepare("SELECT * FROM memory_items WHERE id = ? AND deleted_at IS NULL")
+      .get(id);
+    return row ? memoryFromRow(row, this.cipher) : null;
+  }
+
   listMemories({
     type,
     subject,
     projectId,
     status,
+    statuses,
     sensitivity,
+    sourceType,
     limit = 100,
   } = {}) {
     const clauses = ["deleted_at IS NULL"];
@@ -1238,9 +1295,20 @@ export class Store {
       clauses.push("status = ?");
       parameters.push(status);
     }
+    if (statuses) {
+      if (!Array.isArray(statuses) || statuses.length === 0) {
+        throw new Error("Memory statuses must be a non-empty array");
+      }
+      clauses.push(`status IN (${statuses.map(() => "?").join(",")})`);
+      parameters.push(...statuses);
+    }
     if (sensitivity) {
       clauses.push("sensitivity = ?");
       parameters.push(sensitivity);
+    }
+    if (sourceType) {
+      clauses.push("source_type = ?");
+      parameters.push(sourceType);
     }
     const rows = this.db
       .prepare(

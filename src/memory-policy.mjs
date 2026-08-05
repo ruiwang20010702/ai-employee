@@ -41,12 +41,20 @@ export function validateMemoryProposal(input) {
   ) {
     throw new Error("scope.factKey must be a non-empty string up to 200 characters");
   }
+  const sourceType = required(input.sourceType, "sourceType");
+  const projectId = input.projectId ? required(input.projectId, "projectId") : null;
+  if (
+    sourceType === "gbrain" &&
+    (!projectId || !["project", "knowledge"].includes(type))
+  ) {
+    throw new Error("gbrain memories require a project and project or knowledge type");
+  }
   return {
     type,
     subject: required(input.subject, "subject"),
-    projectId: input.projectId ? required(input.projectId, "projectId") : null,
+    projectId,
     statement: required(input.statement, "statement"),
-    sourceType: required(input.sourceType, "sourceType"),
+    sourceType,
     sourceId: required(input.sourceId, "sourceId"),
     sourceVersion: input.sourceVersion ? String(input.sourceVersion) : null,
     scope: { ...scope, ...(scope.factKey ? { factKey: scope.factKey.trim() } : {}) },
@@ -62,6 +70,10 @@ export function memoryIsUsable(memory, now = new Date()) {
   return (
     memory?.status === "confirmed" &&
     !memory.deleted_at &&
-    (!memory.expires_at || new Date(memory.expires_at) > now)
+    (!memory.expires_at || new Date(memory.expires_at) > now) &&
+    (memory.source_type !== "gbrain" ||
+      (memory.source_access_status === "verified" &&
+        memory.source_access_expires_at &&
+        new Date(memory.source_access_expires_at) > now))
   );
 }

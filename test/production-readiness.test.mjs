@@ -198,6 +198,27 @@ test("生产计划启用知识页读取时预检强制验证 gbrain", async () =
   assert.equal(calls.some(([name]) => name === "gbrain-runtime"), true);
 });
 
+test("启用记忆来源复核时按项目知识能力预检 gbrain", async () => {
+  const calls = [];
+  const result = await checkProductionReadiness({
+    config: validConfig({
+      requiredOperationalChecks: ["memory-source:last-success"],
+    }),
+    environment: { AI_EMPLOYEE_BACKUP_KEY: backupKey },
+    manifestLoader: async () => new Map([["project", {
+      capabilities: { knowledge_read: { mode: "automatic" } },
+    }]]),
+    executableChecker: async (name) => calls.push(name),
+    codexChecker: async () => ({ status: "ok" }),
+    dwsChecker: async () => ({ authenticated: true }),
+    gbrainChecker: async () => ({ required: true, version: "0.30.2" }),
+    createPool: () => ({ async end() {} }),
+    checkDatabase: async () => ({ database: true }),
+  });
+  assert.equal(calls.includes("gbrain"), true);
+  assert.equal(result.gbrainRuntime.required, true);
+});
+
 test("未启用知识页读取时预检不要求安装 gbrain", async () => {
   const calls = [];
   const result = await checkProductionReadiness({

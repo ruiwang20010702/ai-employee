@@ -146,6 +146,32 @@ test("消息对账宽限期必须短于对账窗口", () => {
   }
 });
 
+test("记忆来源访问租约和单次复核数量有安全上限", () => {
+  const names = [
+    "AI_EMPLOYEE_MEMORY_SOURCE_LEASE_MS",
+    "AI_EMPLOYEE_MEMORY_SOURCE_LIMIT",
+  ];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.AI_EMPLOYEE_MEMORY_SOURCE_LEASE_MS = "3600001";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /600000-3600000/u,
+    );
+    process.env.AI_EMPLOYEE_MEMORY_SOURCE_LEASE_MS = "900000";
+    process.env.AI_EMPLOYEE_MEMORY_SOURCE_LIMIT = "5001";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must be <= 5000/u,
+    );
+  } finally {
+    for (const name of names) {
+      if (previous[name] == null) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
 test("入口可用性采样频率和保留窗口必须可形成完整月度口径", () => {
   const names = [
     "AI_EMPLOYEE_ALERT_INTERVAL_MS",

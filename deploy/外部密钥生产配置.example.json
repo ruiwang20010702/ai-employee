@@ -15,5 +15,8 @@
   "DWS_PATH": "dws",
   "CODEX_PATH": "codex",
   "GBRAIN_PATH": "gbrain",
+  "AI_EMPLOYEE_MEMORY_SOURCE_LEASE_MS": 900000,
+  "AI_EMPLOYEE_MEMORY_SOURCE_LIMIT": 500,
+  "AI_EMPLOYEE_REQUIRED_OPERATIONAL_CHECKS": "listener:last-full-success,worker:manual-reply:last-success,memory-source:last-success",
   "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply"
 }

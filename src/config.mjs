@@ -120,6 +120,20 @@ export function loadConfig({
   if (reconciliationLimit > 100_000) {
     throw new Error("AI_EMPLOYEE_RECONCILIATION_LIMIT must be <= 100000");
   }
+  const memorySourceLeaseMs = positiveNumber(
+    "AI_EMPLOYEE_MEMORY_SOURCE_LEASE_MS",
+    900_000,
+  );
+  if (memorySourceLeaseMs < 600_000 || memorySourceLeaseMs > 3_600_000) {
+    throw new Error("AI_EMPLOYEE_MEMORY_SOURCE_LEASE_MS must be 600000-3600000");
+  }
+  const memorySourceLimit = positiveInteger(
+    "AI_EMPLOYEE_MEMORY_SOURCE_LIMIT",
+    500,
+  );
+  if (memorySourceLimit > 5_000) {
+    throw new Error("AI_EMPLOYEE_MEMORY_SOURCE_LIMIT must be <= 5000");
+  }
   const alertIntervalMs = positiveNumber(
     "AI_EMPLOYEE_ALERT_INTERVAL_MS",
     60_000,
@@ -144,6 +158,15 @@ export function loadConfig({
   if (availabilityRetentionMs <= availabilityWindowMs) {
     throw new Error(
       "AI_EMPLOYEE_AVAILABILITY_RETENTION_MS must exceed AI_EMPLOYEE_AVAILABILITY_WINDOW_MS",
+    );
+  }
+  const externalCheckStaleMs = positiveNumber(
+    "AI_EMPLOYEE_EXTERNAL_CHECK_STALE_MS",
+    600_000,
+  );
+  if (externalCheckStaleMs >= memorySourceLeaseMs) {
+    throw new Error(
+      "AI_EMPLOYEE_EXTERNAL_CHECK_STALE_MS must be shorter than AI_EMPLOYEE_MEMORY_SOURCE_LEASE_MS",
     );
   }
   const requiredComponents = commaSeparated(
@@ -216,6 +239,8 @@ export function loadConfig({
       "AI_EMPLOYEE_RECONCILIATION_STALE_MS",
       7_200_000,
     ),
+    memorySourceLeaseMs,
+    memorySourceLimit,
     requireMessageReconciliation: boolean(
       "AI_EMPLOYEE_REQUIRE_MESSAGE_RECONCILIATION",
       false,
@@ -230,10 +255,7 @@ export function loadConfig({
       "AI_EMPLOYEE_HEARTBEAT_STALE_MS",
       90_000,
     ),
-    externalCheckStaleMs: positiveNumber(
-      "AI_EMPLOYEE_EXTERNAL_CHECK_STALE_MS",
-      600_000,
-    ),
+    externalCheckStaleMs,
     healthHost: process.env.AI_EMPLOYEE_HEALTH_HOST ?? "127.0.0.1",
     healthPort: portNumber("AI_EMPLOYEE_HEALTH_PORT", 9464),
     healthAuthToken: process.env.AI_EMPLOYEE_HEALTH_AUTH_TOKEN?.trim() || null,
@@ -255,7 +277,7 @@ export function loadConfig({
     requiredComponents,
     requiredOperationalChecks: commaSeparated(
       "AI_EMPLOYEE_REQUIRED_OPERATIONAL_CHECKS",
-      "listener:last-full-success,worker:manual-reply:last-success",
+      "listener:last-full-success,worker:manual-reply:last-success,memory-source:last-success",
     ),
     maxTaskAttempts: positiveInteger("AI_EMPLOYEE_MAX_TASK_ATTEMPTS", 5),
     shadowMinimumSamples: positiveInteger(

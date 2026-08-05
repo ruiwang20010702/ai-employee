@@ -443,6 +443,68 @@ integration("PostgreSQL 正式记忆包含确认、来源、过期和撤销门�
   assert.equal((await store.searchMemories({ query: "验证" })).length, 0);
 });
 
+integration("PostgreSQL gbrain 记忆来源访问租约控制确认和检索", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-05T08:00:00.000Z");
+  const id = await store.proposeMemory({
+    type: "knowledge",
+    subject: "项目知识",
+    projectId: "test_project",
+    statement: "只在来源仍可访问时使用。",
+    sourceType: "gbrain",
+    sourceId: "projects/test/rule",
+    createdBy: "integration-test",
+  }, now);
+  await assert.rejects(
+    store.confirmMemory(id, "approver", now),
+    /source access must be verified/u,
+  );
+  await store.setMemorySourceAccess(id, {
+    status: "verified",
+    reason: "exact_source_verified",
+    checkedAt: now,
+    expiresAt: new Date(now.getTime() + 900_000),
+    sourceVersion: "live-v1",
+  }, "system:memory-source", now);
+  assert.equal((await store.getMemory(id)).source_version, "live-v1");
+  await store.confirmMemory(id, "approver", now);
+  assert.equal((await store.searchMemories({
+    type: "knowledge",
+    now: new Date(now.getTime() + 899_999),
+  })).length, 1);
+  assert.equal((await store.searchMemories({
+    type: "knowledge",
+    now: new Date(now.getTime() + 900_000),
+  })).length, 0);
+  await store.setMemorySourceAccess(id, {
+    status: "verified",
+    reason: "exact_source_verified",
+    checkedAt: new Date(now.getTime() + 900_000),
+    expiresAt: new Date(now.getTime() + 1_800_000),
+    sourceVersion: "live-v1",
+  }, "system:memory-source");
+  await store.setMemorySourceAccess(id, {
+    status: "revoked",
+    reason: "knowledge_read_disabled",
+    checkedAt: new Date(now.getTime() + 900_001),
+  }, "system:memory-source");
+  const audit = await store.pool.query(
+    `SELECT details_ciphertext FROM audit_events
+     WHERE tenant_id = $1 AND event_type = 'memory.source_access_checked'
+     ORDER BY occurred_at DESC LIMIT 1`,
+    [store.tenantId],
+  );
+  const details = JSON.parse(store.cipher.decrypt(audit.rows[0].details_ciphertext));
+  assert.equal(details.status, "revoked");
+  assert.equal(JSON.stringify(details).includes("只在来源"), false);
+  const auditCount = await store.pool.query(
+    `SELECT COUNT(*)::int AS count FROM audit_events
+     WHERE tenant_id = $1 AND event_type = 'memory.source_access_checked'`,
+    [store.tenantId],
+  );
+  assert.equal(auditCount.rows[0].count, 2);
+});
+
 integration("PostgreSQL 冲突记忆必须显式替代且不产生双活事实", async (t) => {
   const store = await fixture(t);
   const base = {

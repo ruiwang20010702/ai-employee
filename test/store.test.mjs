@@ -406,6 +406,47 @@ test("记忆必须确认后才能检索，过期和撤销后立即失效", async
   );
 });
 
+test("gbrain 记忆必须持有未过期来源访问租约", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-05T08:00:00.000Z");
+  const id = store.proposeMemory({
+    type: "knowledge",
+    subject: "项目规则",
+    projectId: "project_1",
+    statement: "上线前必须复核。",
+    sourceType: "gbrain",
+    sourceId: "projects/one/rule",
+    createdBy: "owner",
+  }, now);
+  assert.throws(
+    () => store.confirmMemory(id, "owner", now),
+    /source access must be verified/u,
+  );
+  store.setMemorySourceAccess(id, {
+    status: "verified",
+    reason: "exact_source_verified",
+    checkedAt: now,
+    expiresAt: new Date(now.getTime() + 900_000),
+    sourceVersion: "live-v1",
+  }, "system:memory-source", now);
+  assert.equal(store.getMemory(id).source_version, "live-v1");
+  store.confirmMemory(id, "owner", now);
+  assert.equal(store.searchMemories({
+    type: "knowledge",
+    now: new Date(now.getTime() + 899_999),
+  }).length, 1);
+  assert.equal(store.searchMemories({
+    type: "knowledge",
+    now: new Date(now.getTime() + 900_000),
+  }).length, 0);
+  store.setMemorySourceAccess(id, {
+    status: "unavailable",
+    reason: "source_unavailable",
+    checkedAt: new Date(now.getTime() + 900_000),
+  }, "system:memory-source");
+  assert.equal(store.getMemory(id).source_access_status, "unavailable");
+});
+
 test("新记忆确认时会撤销被替代的旧记忆", async (t) => {
   const store = await fixture(t);
   const oldId = store.proposeMemory({
