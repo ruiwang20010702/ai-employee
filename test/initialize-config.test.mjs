@@ -23,6 +23,7 @@ test("production config initializer writes protected unique secrets and refuses 
   );
   assert.equal(config.DWS_PATH, "dws");
   assert.equal(config.CODEX_PATH, "codex");
+  assert.equal(config.GBRAIN_PATH, "gbrain");
 
   await assert.rejects(
     () => initializeProductionConfig({ outputPath: destination }),

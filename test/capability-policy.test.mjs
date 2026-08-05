@@ -111,6 +111,82 @@ test("完整计划不能超过能力授权次数", () => {
   assert.match(result.reason, /次数/u);
 });
 
+test("知识页读取必须配置项目路径白名单并只接受精确范围内的 slug", () => {
+  const missingScope = manifest();
+  missingScope.capabilities.knowledge_read = { mode: "automatic" };
+  assert.throws(
+    () => validateProjectManifest(missingScope),
+    /allowedSlugPrefixes/u,
+  );
+
+  const value = manifest();
+  value.capabilities.knowledge_read = {
+    mode: "automatic",
+    allowedSlugPrefixes: ["projects/vocab/"],
+    maxPages: 2,
+    maxContentBytes: 32_000,
+  };
+  assert.equal(
+    evaluatePlan({
+      manifest: value,
+      requesterId: "authorized-user",
+      steps: [{
+        id: "knowledge-1",
+        capability: "knowledge_read",
+        inputs: { slugs: ["projects/vocab/spec"] },
+      }],
+    }).decision,
+    "ALLOW",
+  );
+  assert.equal(
+    evaluatePlan({
+      manifest: value,
+      requesterId: "authorized-user",
+      steps: [{
+        id: "knowledge-1",
+        capability: "knowledge_read",
+        inputs: { slugs: ["projects/other/secret"] },
+      }],
+    }).decision,
+    "DENY",
+  );
+});
+
+test("知识证据只能被后续步骤按步骤编号显式引用", () => {
+  const value = manifest();
+  value.capabilities.knowledge_read = {
+    mode: "automatic",
+    allowedSlugPrefixes: ["projects/vocab/"],
+  };
+  const allowed = evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [
+      {
+        id: "knowledge-1",
+        capability: "knowledge_read",
+        inputs: { slugs: ["projects/vocab/spec"] },
+      },
+      {
+        id: "research-1",
+        capability: "research",
+        inputs: { knowledgeStepIds: ["knowledge-1"] },
+      },
+    ],
+  });
+  assert.equal(allowed.decision, "ALLOW");
+  const denied = evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [{
+      id: "research-1",
+      capability: "research",
+      inputs: { knowledgeStepIds: ["missing"] },
+    }],
+  });
+  assert.equal(denied.decision, "DENY");
+});
+
 test("L3 推送即使标记自动也必须单次审批并绑定远端", () => {
   const value = manifest();
   value.capabilities.git_push = {

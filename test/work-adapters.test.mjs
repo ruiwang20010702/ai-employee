@@ -91,6 +91,71 @@ test("研究适配器使用只读 Codex 并删除临时明文", async (t) => {
   await assert.rejects(access(temporaryOutput), { code: "ENOENT" });
 });
 
+test("知识页适配器只按精确 slug 调用 gbrain 并校验返回身份", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-gbrain-adapter-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const executable = join(directory, "fake-gbrain");
+  const argumentsRecord = join(directory, "gbrain-arguments.txt");
+  await writeFile(executable, [
+    "#!/bin/sh",
+    `printf '%s' "$*" > '${argumentsRecord}'`,
+    "if [ \"$1\" = 'version' ]; then printf 'gbrain test\\n'; exit 0; fi",
+    "printf '%s\\n' '{\"slug\":\"projects/test/spec\",\"title\":\"规范\",\"type\":\"document\",\"compiled_truth\":\"统一口径\",\"tags\":[\"正式\"]}'",
+  ].join("\n"), { mode: 0o700 });
+  const input = context(directory, "knowledge_read");
+  input.step.inputs = { slugs: ["projects/test/spec"] };
+  input.manifest.capabilities.knowledge_read = {
+    mode: "automatic",
+    timeoutMs: 10_000,
+    allowedSlugPrefixes: ["projects/test/"],
+    maxPages: 5,
+    maxContentBytes: 64 * 1024,
+  };
+  const adapter = createReadOnlyWorkAdapters({
+    codexPath: "/bin/false",
+    gbrainPath: executable,
+  }).knowledge_read;
+  await adapter.preflight(input);
+  const result = await adapter.execute(input);
+  assert.equal(result.verified, true);
+  assert.equal(result.evidence.verification, "exact_slug_and_project_prefix");
+  assert.deepEqual(result.evidence.slugs, ["projects/test/spec"]);
+  assert.match(await readFile(argumentsRecord, "utf8"), /^call get_page /u);
+  assert.doesNotMatch(await readFile(argumentsRecord, "utf8"), /query|search|fuzzy/u);
+  input.step.inputs = { slugs: ["projects/other/secret"] };
+  await assert.rejects(
+    adapter.execute(input),
+    /outside the project authorization/u,
+  );
+  assert.match(await readFile(argumentsRecord, "utf8"), /^call get_page /u);
+});
+
+test("Codex 步骤只注入显式引用的知识页证据", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-knowledge-evidence-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const fake = await fakeCodex(directory, "# 结论\n\n已使用规范。\n");
+  const adapters = createReadOnlyWorkAdapters({ codexPath: fake.executable });
+  const input = context(directory, "research");
+  input.plan.steps = [
+    { id: "knowledge-1", capability: "knowledge_read" },
+    input.step,
+  ];
+  input.step.inputs = { knowledgeStepIds: ["knowledge-1"] };
+  await adapters.research.preflight(input);
+  await adapters.research.execute({
+    ...input,
+    priorEvidence: {
+      "knowledge-1": {
+        kind: "gbrain_pages",
+        content: '[{"slug":"projects/test/spec","content":"统一口径"}]',
+      },
+    },
+  });
+  const prompt = await readFile(fake.promptRecord, "utf8");
+  assert.match(prompt, /显式授权的 gbrain 知识页证据/u);
+  assert.match(prompt, /统一口径/u);
+});
+
 test("代码补丁必须通过 git apply check 才能成为证据", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "ai-code-patch-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

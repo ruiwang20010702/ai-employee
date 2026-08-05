@@ -5,6 +5,9 @@
   "rootDirectory": "/absolute/path/to/project",
   "requesters": ["replace_with_authorized_user_id"],
   "capabilities": {
+    "knowledge_read": {
+      "mode": "disabled"
+    },
     "research": { "mode": "automatic", "timeoutMs": 120000 },
     "document_draft": { "mode": "automatic", "timeoutMs": 120000 },
     "shared_document_write": {

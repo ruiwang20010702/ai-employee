@@ -106,6 +106,7 @@ export async function runPlanExecutor({
   adapters = adapters ?? createControlledWorkAdapters({
     codexPath: config.codexPath,
     dwsPath: config.dwsPath,
+    gbrainPath: config.gbrainPath,
   });
   let stopped = false;
   let heartbeatTimer;

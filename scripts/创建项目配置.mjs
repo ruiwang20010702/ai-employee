@@ -36,6 +36,7 @@ const manifest = validateProjectManifest({
   rootDirectory,
   requesters: [requester],
   capabilities: {
+    knowledge_read: { mode: "disabled" },
     research: { mode: "automatic", timeoutMs: 120_000 },
     document_draft: { mode: "automatic", timeoutMs: 120_000 },
     shared_document_write: { mode: "disabled" },

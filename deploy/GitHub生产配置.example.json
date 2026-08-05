@@ -14,5 +14,6 @@
   "AI_EMPLOYEE_BACKUP_DIRECTORY": "/absolute/path/to/offsite-synced-backups",
   "DWS_PATH": "dws",
   "CODEX_PATH": "codex",
+  "GBRAIN_PATH": "gbrain",
   "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply"
 }

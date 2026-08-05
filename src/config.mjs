@@ -173,6 +173,7 @@ export function loadConfig({
     // for Homebrew on both Apple Silicon and Intel, npm global installs, and
     // managed installations. Production can still pin an absolute path.
     codexPath: process.env.CODEX_PATH ?? "codex",
+    gbrainPath: process.env.GBRAIN_PATH ?? "gbrain",
     dingtalkRoot:
       process.env.DINGTALK_DATA_ROOT ??
       join(homedir(), "Library/Application Support/DingTalkMac"),

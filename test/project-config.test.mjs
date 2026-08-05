@@ -23,6 +23,7 @@ test("新项目生成器默认关闭外部副作用能力", async (t) => {
   ]);
   const manifest = JSON.parse(stdout);
   assert.equal(manifest.capabilities.research.mode, "automatic");
+  assert.equal(manifest.capabilities.knowledge_read.mode, "disabled");
   assert.equal(manifest.capabilities.code_patch.mode, "approval_required");
   assert.equal(manifest.capabilities.local_test.mode, "disabled");
   assert.equal(manifest.capabilities.dingtalk_todo_create.mode, "disabled");

@@ -12,6 +12,7 @@ const weekdays = new Set([
 
 export const capabilityCatalog = Object.freeze({
   observe_messages: { level: "L0", sideEffect: false, runtime: "dws", probe: ["chat", "message", "list-by-sender"] },
+  knowledge_read: { level: "L1", sideEffect: false, interruptible: true, runtime: "gbrain" },
   research: { level: "L1", sideEffect: false, interruptible: true, runtime: "codex" },
   work_plan_proposal: { level: "L1", sideEffect: false, runtime: "codex" },
   reply_draft: { level: "L1", sideEffect: false, runtime: "builtin" },
@@ -207,6 +208,41 @@ export function validateProjectManifest(input) {
     };
     if (commandCapabilities.has(name) || rule.commands != null) {
       capabilities[name].commands = validateCommands(name, rule.commands);
+    }
+    if (
+      name === "knowledge_read" &&
+      (mode !== "disabled" || rule.allowedSlugPrefixes != null)
+    ) {
+      const prefixes = normalizedStringSet(
+        rule.allowedSlugPrefixes,
+        "knowledge_read.allowedSlugPrefixes",
+        { min: 1, max: 20 },
+      );
+      if (prefixes.some((prefix) => (
+        prefix.length > 200 ||
+        !prefix.endsWith("/") ||
+        prefix.startsWith("/") ||
+        prefix.includes("//") ||
+        prefix.split("/").includes("..") ||
+        !/^[\p{L}\p{N}._/-]+$/u.test(prefix)
+      ))) {
+        throw new Error(
+          "knowledge_read.allowedSlugPrefixes must be safe directory prefixes ending in /",
+        );
+      }
+      capabilities[name].allowedSlugPrefixes = prefixes;
+      capabilities[name].maxPages = boundedInteger(
+        rule.maxPages,
+        "knowledge_read.maxPages",
+        5,
+        10,
+      );
+      capabilities[name].maxContentBytes = boundedInteger(
+        rule.maxContentBytes,
+        "knowledge_read.maxContentBytes",
+        64 * 1024,
+        256 * 1024,
+      );
     }
     if (
       name === "git_push" &&
@@ -420,6 +456,46 @@ export function evaluatePlan({ manifest, requesterId, steps, now = new Date() })
     capabilityRuns.set(capability, runs);
     if (rule.maxRuns != null && runs > rule.maxRuns) {
       return { decision: "DENY", reason: `能力次数超过授权上限：${capability}` };
+    }
+    const knowledgeStepIds = step.inputs?.knowledgeStepIds;
+    if (knowledgeStepIds != null) {
+      if (
+        !Array.isArray(knowledgeStepIds) ||
+        knowledgeStepIds.length === 0 ||
+        knowledgeStepIds.length > 10 ||
+        new Set(knowledgeStepIds).size !== knowledgeStepIds.length ||
+        knowledgeStepIds.some((id) => typeof id !== "string" || !id.trim()) ||
+        knowledgeStepIds.some((id) => !steps.slice(0, index).some(
+          (candidate) => candidate.id === id && candidate.capability === "knowledge_read",
+        ))
+      ) {
+        return { decision: "DENY", reason: "知识证据必须引用更早的知识页读取步骤。" };
+      }
+    }
+    if (capability === "knowledge_read") {
+      const slugs = step.inputs?.slugs;
+      if (
+        !onlyInputKeys(step.inputs, new Set(["slugs"])) ||
+        !Array.isArray(slugs) ||
+        slugs.length === 0 ||
+        slugs.length > rule.maxPages ||
+        new Set(slugs).size !== slugs.length ||
+        slugs.some((slug) => (
+          typeof slug !== "string" ||
+          !slug.trim() ||
+          slug !== slug.trim() ||
+          slug.length > 300 ||
+          slug.startsWith("/") ||
+          slug.includes("//") ||
+          slug.split("/").includes("..") ||
+          !/^[\p{L}\p{N}._/-]+$/u.test(slug)
+        )) ||
+        slugs.some((slug) => !rule.allowedSlugPrefixes.some(
+          (prefix) => slug.startsWith(prefix) && slug.length > prefix.length,
+        ))
+      ) {
+        return { decision: "DENY", reason: "知识页不在项目授权的精确路径范围内。" };
+      }
     }
     if (
       definition.requiresProjectRoot &&

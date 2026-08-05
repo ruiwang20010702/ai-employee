@@ -170,6 +170,13 @@ async function capabilityAvailable(name, rule, config) {
   const runtime = capabilityCatalog[name]?.runtime;
   if (!runtime) return false;
   if (runtime === "codex") return executable(config.codexPath);
+  if (runtime === "gbrain") {
+    return execFileAsync(config.gbrainPath, ["version"], {
+      timeout: 5_000,
+      maxBuffer: 512 * 1024,
+      env: safeCommandEnvironment(config.gbrainPath),
+    }).then(() => true).catch(() => false);
+  }
   if (runtime === "dws") {
     return dwsCapabilityAvailable(config.dwsPath, capabilityCatalog[name].probe);
   }

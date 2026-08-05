@@ -35,6 +35,7 @@ export async function initializeProductionConfig({
   );
   values.DWS_PATH = "dws";
   values.CODEX_PATH = "codex";
+  values.GBRAIN_PATH = "gbrain";
   values.AI_EMPLOYEE_APPROVER = "replace_with_operator_id";
 
   await mkdir(dirname(destination), { recursive: true, mode: 0o700 });

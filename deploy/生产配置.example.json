@@ -13,6 +13,7 @@
   "AI_EMPLOYEE_PROJECTS_DIRECTORY": "/absolute/path/to/ai员工/.runtime/projects",
   "DWS_PATH": "dws",
   "CODEX_PATH": "codex",
+  "GBRAIN_PATH": "gbrain",
   "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply,work_plan_proposal",
   "AI_EMPLOYEE_PLAN_EXECUTOR_POLL_MS": 5000,
   "AI_EMPLOYEE_PLAN_EXECUTION_LEASE_MS": 300000,
