@@ -1,0 +1,131 @@
+import assert from "node:assert/strict";
+import { PassThrough } from "node:stream";
+import test from "node:test";
+import {
+  adminBaseUrl,
+  createAdminReader,
+  createMcpHandler,
+  runStdioServer,
+} from "../plugins/ai-employee/scripts/mcp-server.mjs";
+
+test("Codex MCP 只提供只读工具且状态卡片具备无界面降级结果", async () => {
+  const handler = createMcpHandler({
+    readAdmin: async (path) => {
+      assert.equal(path, "/api/overview");
+      return {
+        ready: true,
+        paused: false,
+        sendMode: "真实发送关闭",
+        taskCounts: { awaiting_approval: 2, dead: 1 },
+        planCounts: { awaiting_approval: 3 },
+        confirmedMemoryCount: 4,
+        projectCount: 5,
+        checks: {
+          database: true,
+          dwsExecutable: true,
+          codexExecutable: true,
+          deadTasks: 1,
+          heartbeats: { worker: { healthy: true, lastSeenAt: "不得返回" } },
+          operationalChecks: { reconciliation: { healthy: false, detail: "不得返回" } },
+          messageCoverage: { required: true, healthy: true, sourceMessages: 99 },
+          secret: "不得返回",
+        },
+      };
+    },
+  });
+  const listed = await handler({ method: "tools/list" });
+  assert.equal(listed.tools.length, 7);
+  assert.ok(listed.tools.every((tool) => tool.annotations.readOnlyHint));
+  assert.ok(listed.tools.every((tool) => !/approve|send|execute/u.test(tool.name)));
+  const panelTool = listed.tools.find((tool) => tool.name === "show_status_panel");
+  assert.equal(panelTool._meta.ui.resourceUri, "ui://ai-employee/status.html");
+
+  const result = await handler({ method: "tools/call", params: { name: "show_status_panel", arguments: {} } });
+  assert.equal(result.structuredContent.ready, true);
+  assert.equal(result.structuredContent.taskCounts.awaiting_approval, 2);
+  assert.deepEqual(result.structuredContent.checks, {
+    database: true,
+    dwsExecutable: true,
+    codexExecutable: true,
+    deadTasks: 1,
+    unknownSends: 0,
+    expiredExecutionLeases: 0,
+    heartbeats: { worker: true },
+    operationalChecks: { reconciliation: false },
+    messageCoverage: { required: true, healthy: true },
+  });
+  assert.doesNotMatch(JSON.stringify(result), /不得返回/u);
+});
+
+test("待审批草稿只在专用工具中返回并限制数量与字段", async () => {
+  const handler = createMcpHandler({
+    readAdmin: async () => ({
+      items: Array.from({ length: 25 }, (_, index) => ({
+        id: `task-${index}`,
+        senderName: "联系人",
+        contentPreview: "原消息",
+        draft: "建议回复",
+        riskLevel: "low",
+        reason: "需要确认",
+        workingDirectory: "/private/project",
+        payload: { secret: "不得返回" },
+      })),
+    }),
+  });
+  const result = await handler({ method: "tools/call", params: { name: "list_pending_drafts", arguments: {} } });
+  assert.equal(result.structuredContent.count, 20);
+  assert.deepEqual(Object.keys(result.structuredContent.items[0]).sort(), [
+    "draft", "id", "originalMessage", "reason", "riskLevel", "senderName", "updatedAt",
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /private|不得返回/u);
+});
+
+test("管理客户端只访问本机只读接口且不泄露钥匙串令牌", async () => {
+  assert.equal(adminBaseUrl("http://localhost:9465"), "http://localhost:9465");
+  assert.equal(adminBaseUrl("http://[::1]:9465"), "http://[::1]:9465");
+  assert.throws(() => adminBaseUrl("https://example.com"), /loopback/u);
+  let captured;
+  const read = createAdminReader({
+    baseUrl: "http://127.0.0.1:9465",
+    tokenReader: async () => "private-read-token",
+    request: async (url, init) => {
+      captured = { url, init };
+      return { ok: true, json: async () => ({ ready: true }) };
+    },
+  });
+  assert.deepEqual(await read("/api/overview"), { ready: true });
+  assert.equal(captured.url, "http://127.0.0.1:9465/api/overview");
+  assert.equal(captured.init.method, "GET");
+  assert.equal(captured.init.headers.authorization, "Bearer private-read-token");
+  await assert.rejects(read("/api/system/pause"), /Unsupported/u);
+});
+
+test("stdio 传输完成初始化、工具枚举并稳定返回协议错误", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  let text = "";
+  output.on("data", (chunk) => { text += chunk; });
+  const running = runStdioServer({
+    input,
+    output,
+    handler: createMcpHandler({ readAdmin: async () => ({ ready: true }) }),
+  });
+  input.end([
+    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }),
+    JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "missing", arguments: {} } }),
+  ].join("\n"));
+  await running;
+  const messages = text.trim().split("\n").map(JSON.parse);
+  assert.equal(messages[0].result.serverInfo.name, "ai-employee");
+  assert.equal(messages[1].result.tools.length, 7);
+  assert.equal(messages[2].error.code, -32601);
+});
+
+test("状态 UI 资源符合 MCP Apps 类型且不含写入动作", async () => {
+  const handler = createMcpHandler({ readAdmin: async () => ({}) });
+  const result = await handler({ method: "resources/read", params: { uri: "ui://ai-employee/status.html" } });
+  assert.equal(result.contents[0].mimeType, "text/html;profile=mcp-app");
+  assert.match(result.contents[0].text, /ui\/notifications\/tool-result/u);
+  assert.doesNotMatch(result.contents[0].text, /批准|发送消息|执行计划/u);
+});

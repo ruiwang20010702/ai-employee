@@ -76,6 +76,11 @@ function packageFileGate(files) {
     "src/capability-policy.mjs",
     "src/privacy-erasure.mjs",
     "src/production-config-file.mjs",
+    "plugins/ai-employee/.codex-plugin/plugin.json",
+    "plugins/ai-employee/.mcp.json",
+    "plugins/ai-employee/scripts/mcp-server.mjs",
+    "plugins/ai-employee/skills/ai-employee/SKILL.md",
+    "plugins/ai-employee/说明.md",
   ];
   for (const path of required) {
     assert(paths.includes(path), `Release package is missing required file: ${path}`);
@@ -103,6 +108,36 @@ async function verifyInstalledSources(packageDirectory) {
     await run(process.execPath, ["--check", join(sourceDirectory, source)]);
   }
   return sources.length;
+}
+
+async function verifyInstalledPlugin(packageDirectory) {
+  const pluginDirectory = join(packageDirectory, "plugins", "ai-employee");
+  const [manifest, mcp] = await Promise.all([
+    readFile(join(pluginDirectory, ".codex-plugin", "plugin.json"), "utf8")
+      .then(JSON.parse),
+    readFile(join(pluginDirectory, ".mcp.json"), "utf8").then(JSON.parse),
+  ]);
+  assert(manifest.name === "ai-employee", "Installed Codex plugin identity changed");
+  assert(manifest.mcpServers === "./.mcp.json", "Installed Codex plugin lost MCP mapping");
+  const server = mcp.mcpServers?.["ai-employee"];
+  assert(
+    server?.type === "stdio" &&
+    server.command === "node" &&
+    server.cwd === "." &&
+    JSON.stringify(server.args) === JSON.stringify(["scripts/mcp-server.mjs"]),
+    "Installed Codex plugin MCP command is invalid",
+  );
+  const script = join(pluginDirectory, "scripts", "mcp-server.mjs");
+  await run(process.execPath, ["--check", script]);
+  const skill = await readFile(
+    join(pluginDirectory, "skills", "ai-employee", "SKILL.md"),
+    "utf8",
+  );
+  assert(
+    skill.includes("本插件只读") && skill.includes("不批准、拒绝、发送、执行"),
+    "Installed Codex plugin lost its read-only boundary",
+  );
+  return 5;
 }
 
 export async function verifyReusableInstallation({
@@ -159,7 +194,10 @@ export async function verifyReusableInstallation({
     );
     assert(installedMetadata.name === packageName, "Installed package identity changed");
     assert(installedMetadata.version === packResult[0].version, "Installed package version changed");
-    const sourceCount = await verifyInstalledSources(packageDirectory);
+    const [sourceCount, pluginFileCount] = await Promise.all([
+      verifyInstalledSources(packageDirectory),
+      verifyInstalledPlugin(packageDirectory),
+    ]);
 
     const configPath = join(runtimeDirectory, "production.json");
     const initializeScript = join(packageDirectory, "scripts", "初始化生产配置.mjs");
@@ -227,6 +265,7 @@ export async function verifyReusableInstallation({
       package: `${packageName}@${installedMetadata.version}`,
       packageFiles: fileCount,
       checkedSourceModules: sourceCount,
+      checkedPluginFiles: pluginFileCount,
       configMode: "600",
       projectMode: "600",
       overwriteProtection: true,

@@ -11,6 +11,7 @@
     "schemas/",
     "scripts/",
     "src/*.mjs",
+    "plugins/ai-employee/",
     "!src/store.mjs",
     "README.md",
     "许可证.md",

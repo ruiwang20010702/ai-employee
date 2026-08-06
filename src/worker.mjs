@@ -1,4 +1,8 @@
 import { setTimeout as delay } from "node:timers/promises";
+import {
+  createCapabilityDraft,
+  isCapabilityQuestion,
+} from "./capability-summary.mjs";
 import { loadConfig } from "./config.mjs";
 import { generateReplyDraft } from "./draft.mjs";
 import { DwsAdapter } from "./dws.mjs";
@@ -145,6 +149,19 @@ export async function processDraftTask({
           errorCode: safeErrorCode(error),
         });
       }
+    }
+    if (isCapabilityQuestion(task.payload.content)) {
+      const draft = await createCapabilityDraft({
+        config,
+        requesterId: task.sender_user_id,
+        isGroup,
+      });
+      await store.completeDraft(task.id, draft);
+      log("worker.capability_summary_completed", {
+        taskId: task.id,
+        projectScope: isGroup ? "count_only" : "authorized_names",
+      });
+      return true;
     }
     let conversation = [];
     if (!isGroup) {

@@ -21,7 +21,7 @@ async function fixture(t) {
   return store;
 }
 
-function enqueue(store, id = "m1") {
+function enqueue(store, id = "m1", content = "帮我看看这个方案") {
   const base = new Date("2020-01-01T10:00:00.000Z");
   store.ingestMessages(
     [
@@ -31,7 +31,7 @@ function enqueue(store, id = "m1") {
         senderName: "测试用户",
         conversationId: "c1",
         createTime: base.toISOString(),
-        content: "帮我看看这个方案",
+        content,
       },
     ],
     base,
@@ -93,6 +93,28 @@ test("Worker 只生成草稿并进入待审批", async (t) => {
     },
   });
   assert.equal(store.getTask(taskId).status, "awaiting_approval");
+});
+
+test("询问能力时依据当前授权确定性回答且不调用 Codex", async (t) => {
+  const store = await fixture(t);
+  const taskId = enqueue(store, "capability-question", "你这个 AI 员工能做什么？");
+  let generated = false;
+  await processDraftTask({
+    store,
+    dws: { async fetchDirect() { return []; } },
+    config: {
+      ...baseConfig,
+      capabilities: new Set(["draft_reply", "work_plan_proposal"]),
+    },
+    async generator() { generated = true; },
+  });
+  const task = store.getTask(taskId);
+  assert.equal(generated, false);
+  assert.equal(task.status, "awaiting_approval");
+  assert.equal(task.result.decisionSource, "capability_catalog");
+  assert.match(task.result.reply, /真实发送关闭/u);
+  assert.match(task.result.reply, /计划自动执行关闭/u);
+  assert.doesNotMatch(task.result.reply, /计划提案/u);
 });
 
 test("联系人暂停时不调用 Codex 且不消耗重试次数", async (t) => {

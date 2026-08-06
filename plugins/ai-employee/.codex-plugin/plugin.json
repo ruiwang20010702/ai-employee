@@ -1,0 +1,26 @@
+{
+  "name": "ai-employee",
+  "version": "0.1.0",
+  "description": "在 Codex 中安全查看本机 AI 员工状态、待审批草稿、计划与能力边界。",
+  "author": {
+    "name": "AI 员工项目"
+  },
+  "repository": "https://github.com/ruiwang20010702/ai-employee",
+  "license": "MIT",
+  "keywords": ["dingtalk", "approval", "operations"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "AI 员工",
+    "shortDescription": "在 Codex 中查看 AI 员工并进入人工控制台",
+    "longDescription": "连接本机只读管理接口，查看运行健康、待审批回复、工作计划、人工接管状态和已授权能力。插件不发送消息、不批准计划，也不扩大授权范围。",
+    "developerName": "AI 员工项目",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "defaultPrompt": [
+      "查看 AI 员工当前运行状态。",
+      "列出等待我审核的回复草稿。",
+      "查看需要人工接管的工作计划。"
+    ]
+  }
+}

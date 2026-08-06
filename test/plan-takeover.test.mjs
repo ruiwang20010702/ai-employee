@@ -38,6 +38,7 @@ test("可中断步骤必须有执行证据才能显示已确认中断", () => {
       plan: { steps: [{ id: "step_1", capability: "local_test", description: "测试" }] },
     }),
     [{ step_id: "step_1", status: "executing" }],
+    { now: new Date("2026-08-05T10:00:02.000Z") },
   );
   assert.equal(awaiting.state, "interrupt_requested");
 
@@ -53,6 +54,7 @@ test("可中断步骤必须有执行证据才能显示已确认中断", () => {
       error: "operator_interrupted",
       evidence: { verification: "operator_interrupt_confirmed", kind: "controlled_command" },
     }],
+    { now: new Date("2026-08-05T10:00:02.000Z") },
   );
   assert.equal(confirmed.state, "interrupt_confirmed");
   assert.equal(confirmed.terminal, true);
