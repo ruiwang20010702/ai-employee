@@ -21,6 +21,10 @@ import {
 } from "./scoped-pause.mjs";
 import { validateWorkPlanRevision } from "./work-plan.mjs";
 import {
+  assertMigrationStatus,
+  inspectMigrationStatus,
+} from "./migration-status.mjs";
+import {
   buildPrivacyErasurePreview,
   erasableTaskStatuses,
   erasableWorkPlanStatuses,
@@ -92,11 +96,12 @@ function workPlanFromRow(row, cipher) {
 }
 
 export class PostgresStore {
-  constructor(config, { pool } = {}) {
+  constructor(config, { pool, readOnly = false } = {}) {
     this.config = config;
     this.tenantId = config.tenantId;
-    this.pool = pool ?? createPostgresPool(config);
+    this.pool = pool ?? createPostgresPool(config, { readOnly });
     this.ownsPool = !pool;
+    this.readOnly = readOnly;
     this.cipher = null;
     this.opened = false;
   }
@@ -110,24 +115,28 @@ export class PostgresStore {
       ephemeral: false,
     });
     await checkPostgres(this.pool);
-    const migration = await this.pool.query(
-      "SELECT to_regclass('public.schema_migrations') AS table_name",
-    );
-    if (!migration.rows[0].table_name) {
-      throw new Error("Database is not migrated; run npm run db:migrate");
+    assertMigrationStatus(await inspectMigrationStatus(this.pool));
+    if (!this.readOnly) {
+      await this.pool.query(
+        `
+        INSERT INTO settings(tenant_id, key, value)
+        VALUES ($1, 'encryption_sentinel', $2)
+        ON CONFLICT (tenant_id, key) DO NOTHING
+      `,
+        [this.tenantId, this.cipher.encrypt("ai-employee-v1")],
+      );
     }
-    await this.pool.query(
-      `
-      INSERT INTO settings(tenant_id, key, value)
-      VALUES ($1, 'encryption_sentinel', $2)
-      ON CONFLICT (tenant_id, key) DO NOTHING
-    `,
-      [this.tenantId, this.cipher.encrypt("ai-employee-v1")],
-    );
     const sentinel = await this.pool.query(
       "SELECT value FROM settings WHERE tenant_id = $1 AND key = 'encryption_sentinel'",
       [this.tenantId],
     );
+    if (!sentinel.rows[0]?.value) {
+      throw new Error(
+        this.readOnly
+          ? "Database encryption sentinel is missing; initialize it through a controlled service start"
+          : "Database encryption sentinel was not created",
+      );
+    }
     try {
       if (this.cipher.decrypt(sentinel.rows[0].value) !== "ai-employee-v1") {
         throw new Error("sentinel mismatch");

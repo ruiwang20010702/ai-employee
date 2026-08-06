@@ -20,8 +20,9 @@ if (forbidden.length > 0) {
   throw new Error("Shadow acceptance requires sending and work plan execution to be disabled");
 }
 
-const store = await createProductionStore(config);
+let store;
 try {
+  store = await createProductionStore(config, { readOnly: true });
   const [health, tasks, plans, memories, reviews] = await Promise.all([
     evaluateHealth({ store, config }),
     store.listTasks({ limit: 500 }),
@@ -67,6 +68,19 @@ try {
     }),
   );
   if (!accepted) process.exitCode = 1;
+} catch (error) {
+  if (!String(error.code ?? "").startsWith("database_")) throw error;
+  console.error(JSON.stringify({
+    accepted: false,
+    mode: "shadow",
+    databaseWrite: false,
+    errorCode: error.code,
+    migrations: error.migrations ?? [],
+    action: error.code === "database_migration_checksum_mismatch"
+      ? "停止发布且不要执行迁移；先恢复正确的迁移文件。"
+      : "先完成带备份的受控迁移，再执行影子验收。",
+  }));
+  process.exitCode = 1;
 } finally {
-  await store.close();
+  await store?.close();
 }

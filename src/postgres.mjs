@@ -2,16 +2,21 @@ import pg from "pg";
 
 const { Pool } = pg;
 
-export function createPostgresPool(config) {
+export function postgresPoolOptions(config, { readOnly = false } = {}) {
   if (!config.databaseUrl) throw new Error("DATABASE_URL is required");
-  return new Pool({
+  return {
     connectionString: config.databaseUrl,
     max: config.databasePoolMax,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
-    application_name: "ai-employee",
+    application_name: readOnly ? "ai-employee-read-only" : "ai-employee",
     ssl: config.databaseSsl ? { rejectUnauthorized: true } : false,
-  });
+    ...(readOnly ? { options: "-c default_transaction_read_only=on" } : {}),
+  };
+}
+
+export function createPostgresPool(config, options = {}) {
+  return new Pool(postgresPoolOptions(config, options));
 }
 
 export async function checkPostgres(pool) {

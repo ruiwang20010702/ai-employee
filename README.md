@@ -126,14 +126,14 @@ AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run config:migrate-keychain -- --apply
 ```
 
-4. 先运行只读生产诊断。它检查配置、密钥、远程数据库 TLS、所需工具、Codex 登录与网络运行状态、项目能力清单和数据库连接，但不修改数据库：
+4. 先运行只读生产诊断。它检查配置、密钥、远程数据库 TLS、所需工具、Codex 登录与网络运行状态、项目能力清单、数据库连接和全部迁移版本及校验和，但不修改数据库。只要存在待迁移项或已应用迁移文件发生漂移，诊断就会在查询业务表前停止，并只返回稳定错误码和迁移文件名：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run production:doctor
 ```
 
-`production:preflight` 保留为相同的只读生产预检入口。首次部署或升级草稿 Schema 后，诊断通过还应人工运行一次合成草稿探针。它会调用一次 Codex，只使用固定测试消息，不读取钉钉或数据库，也不展示和保存回复内容：
+`production:preflight` 是发布迁移前的只读预检入口：它同样核对迁移校验和，但允许把尚未应用的迁移作为明确计划列出，供后续备份和独立 `db:migrate` 步骤处理。运行时、`production:doctor` 和 `shadow:verify` 不允许待迁移状态。首次部署或升级草稿 Schema 后，迁移与诊断通过还应人工运行一次合成草稿探针。它会调用一次 Codex，只使用固定测试消息，不读取钉钉或数据库，也不展示和保存回复内容：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \

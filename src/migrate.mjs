@@ -1,19 +1,8 @@
-import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
+import { listExpectedMigrations } from "./migration-status.mjs";
 import { createPostgresPool } from "./postgres.mjs";
 import { applyProductionConfigFile } from "./production-config-file.mjs";
 import { isMainModule } from "./main-module.mjs";
-
-const migrationsDirectory = fileURLToPath(
-  new URL("../db/migrations/", import.meta.url),
-);
-
-function checksum(content) {
-  return createHash("sha256").update(content).digest("hex");
-}
 
 export async function migrate(pool) {
   const client = await pool.connect();
@@ -28,13 +17,9 @@ export async function migrate(pool) {
         applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    const filenames = (await readdir(migrationsDirectory))
-      .filter((name) => /^\d+_.+\.sql$/u.test(name) && !name.endsWith(".undo.sql"))
-      .sort();
+    const migrations = await listExpectedMigrations();
     const applied = [];
-    for (const filename of filenames) {
-      const content = await readFile(resolve(migrationsDirectory, filename), "utf8");
-      const digest = checksum(content);
+    for (const { version: filename, content, checksum: digest } of migrations) {
       const existing = await client.query(
         "SELECT checksum FROM schema_migrations WHERE version = $1",
         [filename],

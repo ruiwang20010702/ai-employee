@@ -22,6 +22,19 @@ function config(tenantId) {
   };
 }
 
+integration("PostgreSQL 影子连接由数据库会话强制只读", async (t) => {
+  const pool = createPostgresPool(config(`readonly-${randomUUID()}`), {
+    readOnly: true,
+  });
+  t.after(() => pool.end());
+  const setting = await pool.query("SHOW default_transaction_read_only");
+  assert.equal(setting.rows[0].default_transaction_read_only, "on");
+  await assert.rejects(
+    () => pool.query("CREATE TEMP TABLE ai_employee_readonly_probe(value integer)"),
+    { code: "25006" },
+  );
+});
+
 async function fixture(t) {
   const tenantId = `test-${randomUUID()}`;
   const settings = config(tenantId);

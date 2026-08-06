@@ -13,6 +13,15 @@ import {
 
 const key = Buffer.alloc(32, 1).toString("base64");
 const backupKey = Buffer.alloc(32, 2).toString("base64");
+const currentMigrations = async () => ({
+  current: true,
+  tablePresent: true,
+  expected: 16,
+  applied: 16,
+  pending: [],
+  checksumMismatches: [],
+  unexpected: [],
+});
 
 function validConfig(overrides = {}) {
   return {
@@ -192,6 +201,7 @@ test("生产计划启用知识页读取时预检强制验证 gbrain", async () =
     },
     createPool: () => ({ async end() {} }),
     checkDatabase: async () => ({ database: true }),
+    migrationInspector: currentMigrations,
   });
   assert.deepEqual(result.gbrainRuntime, { required: true, version: "0.30.2" });
   assert.equal(calls.some(([name]) => name === "gbrain"), true);
@@ -214,6 +224,7 @@ test("启用记忆来源复核时按项目知识能力预检 gbrain", async () =
     gbrainChecker: async () => ({ required: true, version: "0.30.2" }),
     createPool: () => ({ async end() {} }),
     checkDatabase: async () => ({ database: true }),
+    migrationInspector: currentMigrations,
   });
   assert.equal(calls.includes("gbrain"), true);
   assert.equal(result.gbrainRuntime.required, true);
@@ -232,7 +243,43 @@ test("未启用知识页读取时预检不要求安装 gbrain", async () => {
     },
     createPool: () => ({ async end() {} }),
     checkDatabase: async () => ({ database: true }),
+    migrationInspector: currentMigrations,
   });
   assert.deepEqual(result.gbrainRuntime, { required: false });
   assert.equal(calls.includes("gbrain"), false);
+});
+
+test("生产预检可报告待迁移，严格诊断必须在业务查询前停止", async () => {
+  const pendingMigrations = {
+    current: false,
+    tablePresent: true,
+    expected: 16,
+    applied: 14,
+    pending: ["015_记忆来源访问租约.sql", "016_隐私擦除墓碑.sql"],
+    checksumMismatches: [],
+    unexpected: [],
+  };
+  const options = {
+    config: validConfig(),
+    environment: { AI_EMPLOYEE_BACKUP_KEY: backupKey },
+    executableChecker: async () => {},
+    codexChecker: async () => ({ status: "ok" }),
+    dwsChecker: async () => ({ authenticated: true }),
+    createPool: () => ({ async end() {} }),
+    checkDatabase: async () => ({ database: "employee" }),
+    migrationInspector: async () => pendingMigrations,
+  };
+  const preflight = await checkProductionReadiness({
+    ...options,
+    allowPendingMigrations: true,
+  });
+  assert.equal(preflight.ready, true);
+  assert.deepEqual(preflight.migrations.pending, pendingMigrations.pending);
+  await assert.rejects(
+    () => checkProductionReadiness(options),
+    {
+      code: "database_migrations_pending",
+      migrations: pendingMigrations.pending,
+    },
+  );
 });
