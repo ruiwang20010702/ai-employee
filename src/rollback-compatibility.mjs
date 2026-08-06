@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { migrate } from "./migrate.mjs";
+import {
+  assertMigrationStatus,
+  inspectMigrationStatus,
+} from "./migration-status.mjs";
 import { createPostgresPool } from "./postgres.mjs";
 
 const defaultRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -92,8 +96,12 @@ export async function verifyRollbackCompatibility({
     databaseSsl: false,
   });
   let applied;
+  let currentMigrationCount;
   try {
     applied = await migrate(pool);
+    const status = await inspectMigrationStatus(pool);
+    assertMigrationStatus(status);
+    currentMigrationCount = status.applied;
   } finally {
     await pool.end();
   }
@@ -133,6 +141,7 @@ export async function verifyRollbackCompatibility({
     baselineCommit: manifest.commit,
     baselineMigrations: manifest.expectedMigrations,
     currentMigrationsApplied: applied.length,
+    currentMigrationCount,
     testFile: manifest.testFile,
     productionWrite: false,
   };
