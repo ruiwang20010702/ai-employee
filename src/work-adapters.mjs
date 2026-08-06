@@ -5,6 +5,7 @@ import {
   constants,
   mkdir,
   realpath,
+  rmdir,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -406,8 +407,20 @@ async function createIsolatedBranch({ plan, step, manifest, priorEvidence }) {
   try {
     await git(root, ["worktree", "add", "-b", branch, target, sourceCommit]);
     created = true;
+    // A new worktree is exclusively owned by this operation. Normalize both
+    // its files and index before applying a patch so racy stat data or an
+    // interrupted checkout cannot become an intermittent --index mismatch.
+    await git(target, ["reset", "--hard", sourceCommit]);
+    await git(target, ["update-index", "--refresh"]);
+    const initialStatus = (await git(target, [
+      "status", "--porcelain=v1", "--untracked-files=no",
+    ])).stdout.trim();
+    if (initialStatus) {
+      throw new Error("New isolated worktree is not clean");
+    }
     await mkdir(patchDirectory, { recursive: true, mode: 0o700 });
     await writeFile(patchPath, patchEvidence.content, { mode: 0o600, flag: "wx" });
+    await git(target, ["apply", "--check", "--index", patchPath]);
     await git(target, ["apply", "--index", patchPath]);
     await git(target, ["diff", "--cached", "--check"]);
     const appliedPatch = (await git(target, ["diff", "--cached", "--binary"])).stdout;
@@ -445,6 +458,9 @@ async function createIsolatedBranch({ plan, step, manifest, priorEvidence }) {
     if (created) {
       await git(root, ["worktree", "remove", "--force", target]).catch(() => {});
       await git(root, ["branch", "-D", branch]).catch(() => {});
+      await rmdir(parent).catch((cleanupError) => {
+        if (!["ENOENT", "ENOTEMPTY"].includes(cleanupError.code)) throw cleanupError;
+      });
     }
     throw error;
   } finally {

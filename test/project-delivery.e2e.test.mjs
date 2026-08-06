@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -31,7 +31,7 @@ test("项目交付从补丁到发布形成完整审批和证据闭环", async (t
       await execFileAsync("/usr/bin/git", [
         "-C", root, "branch", "-D", worktreeEvidence.branch,
       ]).catch(() => {});
-      await rm(dirname(worktreeEvidence.worktreeDirectory), { recursive: false }).catch(() => {});
+      await rmdir(dirname(worktreeEvidence.worktreeDirectory)).catch(() => {});
     }
     store.close();
     await rm(sandbox, { recursive: true, force: true });

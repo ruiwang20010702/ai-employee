@@ -54,7 +54,7 @@
     "db:restore": "node scripts/恢复数据库.mjs",
     "db:restore:drill": "node scripts/隔离恢复演练.mjs",
     "db:migrate": "node src/migrate.mjs",
-    "check": "node --check src/*.mjs && node --test test/*.test.mjs",
+    "check": "node --check src/*.mjs && node --test --test-concurrency=4 test/*.test.mjs",
     "check:security": "npm audit --audit-level=high",
     "check:dws": "node src/listener.mjs --once"
   },

@@ -7,12 +7,14 @@ import {
   mkdtemp,
   readFile,
   rm,
+  rmdir,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   createControlledWorkAdapters,
@@ -243,6 +245,75 @@ test("本地测试拒绝计划临时指定未登记命令", async (t) => {
   );
 });
 
+test("隔离补丁失败会删除工作树、分支和空的运行目录", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ai-isolated-failure-"));
+  const projectId = `test_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  const planHash = createHash("sha256").update(projectId).digest("hex");
+  const branch = `ai-employee/${projectId}/${planHash.slice(0, 12)}`;
+  const parent = fileURLToPath(
+    new URL(`../.runtime/worktrees/${projectId}/`, import.meta.url),
+  );
+  const target = fileURLToPath(
+    new URL(`../.runtime/worktrees/${projectId}/${planHash.slice(0, 24)}/`, import.meta.url),
+  );
+  t.after(async () => {
+    await rm(parent, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  });
+  await execFileAsync("/usr/bin/git", ["-C", root, "init"]);
+  await execFileAsync("/usr/bin/git", ["-C", root, "config", "user.name", "Test"]);
+  await execFileAsync("/usr/bin/git", ["-C", root, "config", "user.email", "test@example.invalid"]);
+  await writeFile(join(root, "file.txt"), "old\n");
+  await execFileAsync("/usr/bin/git", ["-C", root, "add", "file.txt"]);
+  await execFileAsync("/usr/bin/git", ["-C", root, "commit", "-m", "initial"]);
+  const patch = [
+    "diff --git a/file.txt b/file.txt",
+    "--- a/file.txt",
+    "+++ b/file.txt",
+    "@@ -1 +1 @@",
+    "-different",
+    "+new",
+    "",
+  ].join("\n");
+  const plan = {
+    objective: "验证失败清理",
+    planHash,
+    steps: [
+      { id: "补丁", capability: "code_patch" },
+      { id: "分支", capability: "local_branch", inputs: { patchStepId: "补丁" } },
+    ],
+  };
+  await assert.rejects(
+    createControlledWorkAdapters({ codexPath: "/bin/false" })
+      .local_branch.execute({
+        plan,
+        step: plan.steps[1],
+        manifest: {
+          version: 1,
+          projectId,
+          name: "失败清理测试",
+          rootDirectory: root,
+          requesters: ["user-1"],
+          capabilities: { local_branch: { mode: "approval_required" } },
+        },
+        priorEvidence: {
+          补丁: {
+            kind: "unified_diff",
+            content: patch,
+            sha256: createHash("sha256").update(patch).digest("hex"),
+          },
+        },
+      }),
+  );
+  await assert.rejects(access(target), { code: "ENOENT" });
+  await assert.rejects(access(parent), { code: "ENOENT" });
+  await assert.rejects(
+    execFileAsync("/usr/bin/git", [
+      "-C", root, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`,
+    ]),
+  );
+});
+
 test("代码补丁只应用到隔离分支且不覆盖原工作区", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ai-isolated-repo-"));
   const remote = await mkdtemp(join(tmpdir(), "ai-isolated-remote-"));
@@ -258,7 +329,7 @@ test("代码补丁只应用到隔离分支且不覆盖原工作区", async (t) =
       await execFileAsync("/usr/bin/git", [
         "-C", root, "branch", "-D", evidence.branch,
       ]).catch(() => {});
-      await rm(dirname(evidence.worktreeDirectory), { recursive: false }).catch(() => {});
+      await rmdir(dirname(evidence.worktreeDirectory)).catch(() => {});
     }
     await rm(root, { recursive: true, force: true });
     await rm(remote, { recursive: true, force: true });
