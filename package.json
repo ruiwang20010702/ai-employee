@@ -41,6 +41,7 @@
     "reuse:verify": "node scripts/验证复用安装.mjs",
     "codex:verify": "node scripts/验证Codex插件.mjs",
     "ci:verify": "node scripts/验证GitHub提交.mjs",
+    "rollback:verify": "node scripts/验证服务回退兼容.mjs",
     "plan:check": "node scripts/评估任务计划.mjs",
     "config:init": "node scripts/初始化生产配置.mjs",
     "config:migrate-keychain": "node scripts/迁移生产密钥到钥匙串.mjs",

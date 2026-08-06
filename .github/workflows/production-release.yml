@@ -24,28 +24,38 @@ jobs:
     env:
       AI_EMPLOYEE_DEPLOY_ROOT: ${{ vars.AI_EMPLOYEE_DEPLOY_ROOT }}
     steps:
-      - uses: actions/checkout@v5
+      - name: 签出当前发布控制器
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: .deployment-controller
+      - name: 签出目标业务版本
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+          path: .release-source
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: .release-source/package-lock.json
       - name: 限制为主分支已审核提交
         run: |
+          cd "$GITHUB_WORKSPACE/.release-source"
           /usr/bin/git merge-base --is-ancestor HEAD refs/remotes/origin/main
           export AI_EMPLOYEE_DEPLOY_SHA="$(/usr/bin/git rev-parse HEAD)"
           echo "AI_EMPLOYEE_DEPLOY_SHA=$AI_EMPLOYEE_DEPLOY_SHA" >> "$GITHUB_ENV"
       - name: 准备稳定的版本目录
         run: |
-          node scripts/准备版本化发布.mjs prepare \
+          node "$GITHUB_WORKSPACE/.deployment-controller/scripts/准备版本化发布.mjs" prepare \
             --root "$AI_EMPLOYEE_DEPLOY_ROOT" \
             --sha "$AI_EMPLOYEE_DEPLOY_SHA" \
             --run-id "$GITHUB_RUN_ID" \
             --attempt "$GITHUB_RUN_ATTEMPT" \
             --github-env "$GITHUB_ENV"
-          /usr/bin/git archive --format=tar HEAD |
+          /usr/bin/git -C "$GITHUB_WORKSPACE/.release-source" archive --format=tar HEAD |
             /usr/bin/tar -xf - -C "$AI_EMPLOYEE_RELEASE_DIRECTORY"
       - run: |
           cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
@@ -86,11 +96,12 @@ jobs:
             mode: 0o600,
           });
           NODE
-      - name: 只读生产预检
+      - name: 只读生产预检与回退目标门禁
         run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
           export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
-          npm run production:preflight
+          node "$GITHUB_WORKSPACE/.deployment-controller/scripts/验证发布回退目标.mjs" \
+            --release "$AI_EMPLOYEE_RELEASE_DIRECTORY" \
+            --previous "$AI_EMPLOYEE_PREVIOUS_RELEASE"
       - name: 执行数据库迁移
         run: |
           cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
@@ -111,7 +122,7 @@ jobs:
           npm run production:verify
       - name: 固定当前成功版本
         run: |
-          node scripts/准备版本化发布.mjs activate \
+          node "$GITHUB_WORKSPACE/.deployment-controller/scripts/准备版本化发布.mjs" activate \
             --root "$AI_EMPLOYEE_DEPLOY_ROOT" \
             --release "$AI_EMPLOYEE_RELEASE_DIRECTORY" \
             --run-id "$GITHUB_RUN_ID" \

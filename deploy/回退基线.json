@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "ai-employee-rollback-baseline/v1",
+  "commit": "cff1d56f42a6f4cd5b9b4954c1764b291f314d73",
+  "expectedMigrations": 14,
+  "testFile": "test/postgres-store.integration.test.mjs",
+  "reason": "迁移 015 和 016 引入前、生产数据库仍为 14 个迁移时的最后兼容基线"
+}

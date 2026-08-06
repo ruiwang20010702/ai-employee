@@ -44,5 +44,8 @@ jobs:
       - run: npm run check
         env:
           TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/ai_employee_test
+      - run: npm run rollback:verify
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/ai_employee_test
       - run: npm pack --dry-run
       - run: npm run reuse:verify
