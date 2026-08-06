@@ -67,6 +67,10 @@ function run(command, args, options = {}) {
   });
 }
 
+export function assertRollbackBaselineObject({ root, commit, runner = run }) {
+  runner("git", ["cat-file", "-e", `${commit}^{commit}`], { cwd: root });
+}
+
 export async function verifyRollbackCompatibility({
   root = defaultRoot,
   databaseUrl = process.env.TEST_DATABASE_URL,
@@ -78,8 +82,10 @@ export async function verifyRollbackCompatibility({
     JSON.parse(await readFile(join(projectRoot, "deploy", "回退基线.json"), "utf8")),
   );
 
-  runner("git", ["merge-base", "--is-ancestor", manifest.commit, "HEAD"], {
-    cwd: projectRoot,
+  assertRollbackBaselineObject({
+    root: projectRoot,
+    commit: manifest.commit,
+    runner,
   });
   const migrationCount = countForwardMigrationFiles(runner(
     "git",

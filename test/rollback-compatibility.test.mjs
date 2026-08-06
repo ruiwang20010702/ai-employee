@@ -1,10 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assertRollbackBaselineObject,
   countForwardMigrationFiles,
   validateRollbackManifest,
   validateRollbackTestUrl,
 } from "../src/rollback-compatibility.mjs";
+
+test("服务回退只读取清单登记的完整提交对象", () => {
+  const calls = [];
+  assertRollbackBaselineObject({
+    root: "/repo",
+    commit: "a".repeat(40),
+    runner(command, args, options) {
+      calls.push({ command, args, options });
+    },
+  });
+  assert.deepEqual(calls, [{
+    command: "git",
+    args: ["cat-file", "-e", `${"a".repeat(40)}^{commit}`],
+    options: { cwd: "/repo" },
+  }]);
+});
 
 test("服务回退演练只允许本机明确命名的测试数据库", () => {
   assert.equal(
