@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { validateCodexPluginPackage } from "../src/codex-plugin-package.mjs";
 import { isMainModule } from "../src/main-module.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -65,6 +66,7 @@ function canonicalKey(value) {
 function packageFileGate(files) {
   const paths = files.map((file) => file.path);
   const required = [
+    ".agents/plugins/marketplace.json",
     "package.json",
     "README.md",
     "docs/产品需求文档.md",
@@ -111,6 +113,11 @@ async function verifyInstalledSources(packageDirectory) {
 }
 
 async function verifyInstalledPlugin(packageDirectory) {
+  const packageValidation = await validateCodexPluginPackage({ root: packageDirectory });
+  assert(
+    packageValidation.checkedDistributionFiles === 6 && packageValidation.personalConfigurationWrite === false,
+    "Installed Codex plugin distribution validation is incomplete",
+  );
   const pluginDirectory = join(packageDirectory, "plugins", "ai-employee");
   const [manifest, mcp] = await Promise.all([
     readFile(join(pluginDirectory, ".codex-plugin", "plugin.json"), "utf8")
@@ -137,7 +144,7 @@ async function verifyInstalledPlugin(packageDirectory) {
     skill.includes("本插件只读") && skill.includes("不批准、拒绝、发送、执行"),
     "Installed Codex plugin lost its read-only boundary",
   );
-  return 5;
+  return packageValidation.checkedDistributionFiles;
 }
 
 export async function verifyReusableInstallation({

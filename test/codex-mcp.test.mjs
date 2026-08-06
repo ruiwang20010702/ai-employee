@@ -1,12 +1,59 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { validateCodexPluginPackage } from "../src/codex-plugin-package.mjs";
 import {
   adminBaseUrl,
   createAdminReader,
   createMcpHandler,
   runStdioServer,
 } from "../plugins/ai-employee/scripts/mcp-server.mjs";
+
+test("仓库市场以显式安装方式发布只读 Codex 插件", async () => {
+  const result = await validateCodexPluginPackage({
+    root: fileURLToPath(new URL("../", import.meta.url)),
+  });
+  assert.deepEqual(result, {
+    valid: true,
+    marketplace: "ai-employee-local",
+    plugin: "ai-employee",
+    version: "0.2.0",
+    installation: "AVAILABLE",
+    authentication: "ON_INSTALL",
+    readOnly: true,
+    checkedDistributionFiles: 6,
+    personalConfigurationWrite: false,
+  });
+});
+
+test("仓库市场不能通过符号链接把插件来源指向仓库外", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ai-plugin-marketplace-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, ".agents", "plugins"), { recursive: true });
+  await mkdir(join(root, "plugins"), { recursive: true });
+  await symlink(
+    fileURLToPath(new URL("../plugins/ai-employee", import.meta.url)),
+    join(root, "plugins", "ai-employee"),
+  );
+  await writeFile(join(root, ".agents", "plugins", "marketplace.json"), JSON.stringify({
+    name: "ai-employee-local",
+    interface: { displayName: "AI 员工（本仓库）" },
+    plugins: [{
+      name: "ai-employee",
+      source: { source: "local", path: "./plugins/ai-employee" },
+      policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
+      category: "Productivity",
+    }],
+  }));
+  await assert.rejects(
+    validateCodexPluginPackage({ root }),
+    /escapes the package root/u,
+  );
+});
 
 test("Codex MCP 只提供只读工具且状态卡片具备无界面降级结果", async () => {
   const handler = createMcpHandler({

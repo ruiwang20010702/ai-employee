@@ -1,0 +1,20 @@
+{
+  "name": "ai-employee-local",
+  "interface": {
+    "displayName": "AI 员工（本仓库）"
+  },
+  "plugins": [
+    {
+      "name": "ai-employee",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-employee"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

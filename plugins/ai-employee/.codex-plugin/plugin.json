@@ -1,6 +1,6 @@
 {
   "name": "ai-employee",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "在 Codex 中安全查看本机 AI 员工状态、待审批草稿、计划与能力边界。",
   "author": {
     "name": "AI 员工项目"
