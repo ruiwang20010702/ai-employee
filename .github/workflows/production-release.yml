@@ -124,6 +124,8 @@ jobs:
           cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
           export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
           npm run service:install
+          node "$GITHUB_WORKSPACE/.deployment-controller/scripts/清理版本外常驻服务.mjs" \
+            --release "$AI_EMPLOYEE_RELEASE_DIRECTORY"
       - name: 验证生产服务
         run: |
           cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
@@ -144,6 +146,8 @@ jobs:
             cd "$AI_EMPLOYEE_PREVIOUS_RELEASE"
             export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_PREVIOUS_RELEASE/.runtime/production.json"
             npm run service:install
+            node "$GITHUB_WORKSPACE/.deployment-controller/scripts/清理版本外常驻服务.mjs" \
+              --release "$AI_EMPLOYEE_PREVIOUS_RELEASE"
             npm run production:verify
           else
             echo "常驻服务尚未切换，或没有可验证的上一版本；无需执行服务回退。"

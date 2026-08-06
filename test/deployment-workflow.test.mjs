@@ -31,6 +31,10 @@ test("生产发布使用稳定版本目录、外部密钥门禁和失败回退",
   assert.match(workflow, /AI_EMPLOYEE_DEPLOY_SHA/u);
   assert.match(workflow, /Remote production config requires|macOS remote deployment requires/u);
   assert.match(workflow, /发布失败时恢复上一版本服务/u);
+  assert.equal(
+    workflow.match(/清理版本外常驻服务\.mjs/gu)?.length,
+    2,
+  );
   assert.match(workflow, /AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED/u);
   assert.equal(
     workflow.includes("${{ github.workspace }}/.runtime/production.json"),
