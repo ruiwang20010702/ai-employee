@@ -55,6 +55,8 @@ jobs:
             --run-id "$GITHUB_RUN_ID" \
             --attempt "$GITHUB_RUN_ATTEMPT" \
             --github-env "$GITHUB_ENV"
+      - name: 写入目标版本文件
+        run: |
           /usr/bin/git -C "$GITHUB_WORKSPACE/.release-source" archive --format=tar HEAD |
             /usr/bin/tar -xf - -C "$AI_EMPLOYEE_RELEASE_DIRECTORY"
       - run: |
