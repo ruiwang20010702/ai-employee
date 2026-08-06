@@ -15,6 +15,20 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
 });
 
+test("判断质量页支持连续复核并保留分歧说明门槛", () => {
+  const script = adminHtml.match(
+    /<script nonce="__NONCE__">([\s\S]*?)<\/script>/u,
+  )?.[1];
+  assert.ok(script);
+  assert.match(adminHtml, /连续人工复核/u);
+  assert.match(adminHtml, /与 AI 一致时直接保存并进入下一条/u);
+  assert.match(script, /expected!==task\.shouldReply/u);
+  assert.match(script, /state\.view!==['"]quality['"]&&!confirm/u);
+  assert.match(script, /state\.qualitySession\.completed\+=1/u);
+  assert.match(script, /state\.quality=await api\(['"]\/api\/quality['"]\)/u);
+  assert.match(script, /aria-busy/u);
+});
+
 function fixture() {
   let paused = false;
   const scopedPauses = [];
