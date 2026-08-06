@@ -4,6 +4,7 @@ import {
   assertMigrationStatus,
   inspectMigrationStatus,
   listExpectedMigrations,
+  validateMigrationCompatibility,
 } from "../src/migration-status.mjs";
 
 test("迁移状态检查只读识别缺失迁移", async () => {
@@ -73,5 +74,48 @@ test("没有迁移表时预检可报告但运行时必须停止", async () => {
   assert.throws(
     () => assertMigrationStatus(status),
     { code: "database_schema_not_initialized", message: /not initialized/u },
+  );
+});
+
+test("新迁移必须登记服务回退证据", () => {
+  const migrations = [{
+    version: "017_新增字段.sql",
+    content: "ALTER TABLE tasks ADD COLUMN new_value TEXT;",
+  }];
+  assert.throws(
+    () => validateMigrationCompatibility(migrations, {
+      schema: "ai-employee-migration-compatibility/v1",
+      policyStartsAt: 15,
+      migrations: {},
+    }),
+    /evidence is missing/u,
+  );
+});
+
+test("声明服务可回退的迁移禁止破坏性 SQL", () => {
+  const policy = {
+    schema: "ai-employee-migration-compatibility/v1",
+    policyStartsAt: 15,
+    migrations: {
+      "017_危险迁移.sql": {
+        backwardCompatible: true,
+        rollback: "service_only",
+        evidence: "测试",
+      },
+    },
+  };
+  assert.throws(
+    () => validateMigrationCompatibility([{
+      version: "017_危险迁移.sql",
+      content: "ALTER TABLE tasks DROP COLUMN payload_ciphertext;",
+    }], policy),
+    /destructive statement/u,
+  );
+  assert.throws(
+    () => validateMigrationCompatibility([{
+      version: "017_危险迁移.sql",
+      content: "ALTER TABLE tasks ADD COLUMN required_value TEXT NOT NULL;",
+    }], policy),
+    /without a default/u,
   );
 });

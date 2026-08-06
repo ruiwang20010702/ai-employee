@@ -4,7 +4,10 @@ import { createPostgresPool } from "./postgres.mjs";
 import { applyProductionConfigFile } from "./production-config-file.mjs";
 import { isMainModule } from "./main-module.mjs";
 
-export async function migrate(pool) {
+export async function migrate(pool, {
+  migrationLoader = listExpectedMigrations,
+} = {}) {
+  const migrations = await migrationLoader();
   const client = await pool.connect();
   try {
     await client.query(
@@ -17,7 +20,6 @@ export async function migrate(pool) {
         applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    const migrations = await listExpectedMigrations();
     const applied = [];
     for (const { version: filename, content, checksum: digest } of migrations) {
       const existing = await client.query(

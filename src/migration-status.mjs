@@ -6,9 +6,63 @@ import { fileURLToPath } from "node:url";
 const defaultMigrationsDirectory = fileURLToPath(
   new URL("../db/migrations/", import.meta.url),
 );
+const compatibilityPolicyFilename = "兼容性策略.json";
 
 function checksum(content) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function migrationNumber(version) {
+  const value = Number.parseInt(String(version).match(/^(\d+)_/u)?.[1] ?? "", 10);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+export function validateMigrationCompatibility(migrations, policy) {
+  if (policy?.schema !== "ai-employee-migration-compatibility/v1") {
+    throw new Error("Migration compatibility policy schema is invalid");
+  }
+  if (!Number.isSafeInteger(policy.policyStartsAt) || policy.policyStartsAt < 1) {
+    throw new Error("Migration compatibility policy start version is invalid");
+  }
+  if (!policy.migrations || Array.isArray(policy.migrations)) {
+    throw new Error("Migration compatibility policy entries are invalid");
+  }
+  for (const migration of migrations) {
+    const number = migrationNumber(migration.version);
+    if (number == null || number < policy.policyStartsAt) continue;
+    const entry = policy.migrations[migration.version];
+    if (
+      entry?.backwardCompatible !== true ||
+      entry?.rollback !== "service_only" ||
+      !String(entry?.evidence ?? "").trim()
+    ) {
+      throw new Error(
+        `Migration compatibility evidence is missing: ${migration.version}`,
+      );
+    }
+    const withoutForeignKeyDeleteActions = migration.content.replace(
+      /ON\s+DELETE\s+(?:CASCADE|SET\s+NULL|RESTRICT|NO\s+ACTION)/giu,
+      "",
+    );
+    if (
+      /\b(?:DROP|TRUNCATE|RENAME|ALTER\s+COLUMN|DELETE\s+FROM)\b/iu.test(
+        withoutForeignKeyDeleteActions,
+      )
+    ) {
+      throw new Error(
+        `Backward-compatible migration contains a destructive statement: ${migration.version}`,
+      );
+    }
+    for (const addColumn of migration.content.matchAll(
+      /ADD\s+COLUMN\s+[^,;]+/giu,
+    )) {
+      if (/NOT\s+NULL/iu.test(addColumn[0]) && !/DEFAULT/iu.test(addColumn[0])) {
+        throw new Error(
+          `Backward-compatible migration adds a required column without a default: ${migration.version}`,
+        );
+      }
+    }
+  }
 }
 
 export async function listExpectedMigrations({
@@ -17,12 +71,17 @@ export async function listExpectedMigrations({
   const filenames = (await readdir(migrationsDirectory))
     .filter((name) => /^\d+_.+\.sql$/u.test(name) && !name.endsWith(".undo.sql"))
     .sort();
-  return Promise.all(
+  const migrations = await Promise.all(
     filenames.map(async (version) => {
       const content = await readFile(resolve(migrationsDirectory, version), "utf8");
       return { version, content, checksum: checksum(content) };
     }),
   );
+  const policy = JSON.parse(
+    await readFile(resolve(migrationsDirectory, compatibilityPolicyFilename), "utf8"),
+  );
+  validateMigrationCompatibility(migrations, policy);
+  return migrations;
 }
 
 export async function inspectMigrationStatus(pool, options = {}) {

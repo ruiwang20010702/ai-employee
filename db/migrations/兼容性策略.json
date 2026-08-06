@@ -1,0 +1,16 @@
+{
+  "schema": "ai-employee-migration-compatibility/v1",
+  "policyStartsAt": 15,
+  "migrations": {
+    "015_记忆来源访问租约.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only",
+      "evidence": "只增加带默认值或可空字段、约束和索引；旧服务不读取新字段"
+    },
+    "016_隐私擦除墓碑.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only",
+      "evidence": "只增加可空字段、新表和条件索引；旧服务仍可使用原有字段"
+    }
+  }
+}

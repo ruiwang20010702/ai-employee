@@ -133,7 +133,7 @@ AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run production:doctor
 ```
 
-`production:preflight` 是发布迁移前的只读预检入口：它同样核对迁移校验和，但允许把尚未应用的迁移作为明确计划列出，供后续备份和独立 `db:migrate` 步骤处理。运行时、`production:doctor` 和 `shadow:verify` 不允许待迁移状态。首次部署或升级草稿 Schema 后，迁移与诊断通过还应人工运行一次合成草稿探针。它会调用一次 Codex，只使用固定测试消息，不读取钉钉或数据库，也不展示和保存回复内容：
+`production:preflight` 是发布迁移前的只读预检入口：它同样核对迁移校验和，但允许把尚未应用的迁移作为明确计划列出，供后续备份和独立 `db:migrate` 步骤处理。运行时、`production:doctor` 和 `shadow:verify` 不允许待迁移状态。从迁移 015 起还必须在 `db/migrations/兼容性策略.json` 登记服务回退证据；声明仅回退服务版本的迁移如果包含删除、重命名、改变既有结构或新增无默认值必填列，会在数据库写入前失败。首次部署或升级草稿 Schema 后，迁移与诊断通过还应人工运行一次合成草稿探针。它会调用一次 Codex，只使用固定测试消息，不读取钉钉或数据库，也不展示和保存回复内容：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
