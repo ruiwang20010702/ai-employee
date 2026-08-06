@@ -48,6 +48,13 @@ export function validateRollbackManifest(value) {
   return value;
 }
 
+export function countForwardMigrationFiles(output) {
+  return String(output)
+    .split("\0")
+    .filter((file) => file.endsWith(".sql") && !file.endsWith(".undo.sql"))
+    .length;
+}
+
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
     encoding: "utf8",
@@ -70,14 +77,12 @@ export async function verifyRollbackCompatibility({
   runner("git", ["merge-base", "--is-ancestor", manifest.commit, "HEAD"], {
     cwd: projectRoot,
   });
-  const migrationFiles = runner(
+  const migrationCount = countForwardMigrationFiles(runner(
     "git",
-    ["ls-tree", "-r", "--name-only", manifest.commit, "db/migrations"],
+    ["ls-tree", "-r", "-z", "--name-only", manifest.commit, "db/migrations"],
     { cwd: projectRoot },
-  )
-    .split("\n")
-    .filter((file) => file.endsWith(".sql") && !file.endsWith(".undo.sql"));
-  if (migrationFiles.length !== manifest.expectedMigrations) {
+  ));
+  if (migrationCount !== manifest.expectedMigrations) {
     throw new Error("回退基线迁移数量与清单不一致");
   }
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  countForwardMigrationFiles,
   validateRollbackManifest,
   validateRollbackTestUrl,
 } from "../src/rollback-compatibility.mjs";
@@ -17,6 +18,16 @@ test("服务回退演练只允许本机明确命名的测试数据库", () => {
   ]) {
     assert.throws(() => validateRollbackTestUrl(value), /回退演练/u);
   }
+});
+
+test("服务回退基线使用零分隔文件名统计中文迁移", () => {
+  assert.equal(
+    countForwardMigrationFiles(
+      "db/migrations/001_基础.sql\0db/migrations/001_基础.undo.sql\0" +
+        "db/migrations/002_中文.sql\0",
+    ),
+    2,
+  );
 });
 
 test("服务回退基线绑定完整提交、迁移数量和固定测试入口", () => {
