@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const workflowUrl = new URL(
-  "../.github/workflows/生产发布.yml",
+  "../.github/workflows/production-release.yml",
   import.meta.url,
 );
 const checkWorkflowUrl = new URL(
-  "../.github/workflows/检查.yml",
+  "../.github/workflows/check.yml",
   import.meta.url,
 );
 
