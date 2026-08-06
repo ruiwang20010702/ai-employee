@@ -4,13 +4,16 @@ import { checkProductionReadiness } from "../src/production-readiness.mjs";
 
 await applyProductionConfigFile();
 const config = loadConfig({ production: true });
-const readiness = await checkProductionReadiness({ config });
+const readiness = await checkProductionReadiness({
+  config,
+  allowPendingMigrations: true,
+});
 console.log(
   JSON.stringify(
     {
       ...readiness,
       databaseWrite: false,
-      note: "Preflight passed without migration; run db:migrate explicitly before service installation.",
+      note: "预检只校验迁移计划，不执行迁移；db:migrate 仍是独立受控步骤。",
     },
     null,
     2,

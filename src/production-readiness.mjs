@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { checkPostgres, createPostgresPool } from "./postgres.mjs";
 import { loadProjectManifests } from "./project-manifests.mjs";
 import { safeCodexEnvironment } from "./codex-environment.mjs";
+import { assertMigrationStatus, inspectMigrationStatus } from "./migration-status.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -178,6 +179,8 @@ export async function checkProductionReadiness({
   codexChecker = checkCodexRuntime,
   dwsChecker = checkDwsRuntime,
   gbrainChecker = checkGbrainRuntime,
+  migrationInspector = inspectMigrationStatus,
+  allowPendingMigrations = false,
 } = {}) {
   validateProductionReadinessConfig(config, environment);
   let projects = new Map();
@@ -214,9 +217,12 @@ export async function checkProductionReadiness({
   const pool = createPool(config);
   try {
     const database = await checkDatabase(pool);
+    const migrations = await migrationInspector(pool);
+    assertMigrationStatus(migrations, { allowPending: allowPendingMigrations });
     return {
       ready: true,
       database: database.database,
+      migrations,
       targets: config.targetUserIds.length + config.targetGroupIds.length,
       capabilities: [...config.capabilities],
       codexRuntime,

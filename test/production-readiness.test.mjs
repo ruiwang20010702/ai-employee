@@ -192,6 +192,7 @@ test("生产计划启用知识页读取时预检强制验证 gbrain", async () =
     },
     createPool: () => ({ async end() {} }),
     checkDatabase: async () => ({ database: true }),
+    migrationInspector: async () => ({ pending: [], checksumMismatches: [], unexpected: [] }),
   });
   assert.deepEqual(result.gbrainRuntime, { required: true, version: "0.30.2" });
   assert.equal(calls.some(([name]) => name === "gbrain"), true);
@@ -211,6 +212,7 @@ test("未启用知识页读取时预检不要求安装 gbrain", async () => {
     },
     createPool: () => ({ async end() {} }),
     checkDatabase: async () => ({ database: true }),
+    migrationInspector: async () => ({ pending: [], checksumMismatches: [], unexpected: [] }),
   });
   assert.deepEqual(result.gbrainRuntime, { required: false });
   assert.equal(calls.includes("gbrain"), false);
