@@ -35,5 +35,7 @@ test("生产发布使用稳定版本目录、外部密钥门禁和失败回退",
 
 test("持续集成从真实发布包执行隔离复用验收", async () => {
   const workflow = await readFile(checkWorkflowUrl, "utf8");
+  assert.match(workflow, /fetch-depth: 0/u);
+  assert.match(workflow, /npm run rollback:verify/u);
   assert.match(workflow, /npm run reuse:verify/u);
 });
