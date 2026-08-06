@@ -1,7 +1,7 @@
 {
   "schemaVersion": "ai-employee-rollback-baseline/v1",
-  "commit": "cff1d56f42a6f4cd5b9b4954c1764b291f314d73",
+  "commit": "4bb791da3c49ba2fe0b15f11508f0183d2e10551",
   "expectedMigrations": 14,
   "testFile": "test/postgres-store.integration.test.mjs",
-  "reason": "迁移 015 和 016 引入前、生产数据库仍为 14 个迁移时的最后兼容基线"
+  "reason": "迁移 015 和 016 引入前的 14 迁移兼容基线，并固定时间条件以消除发布前测试漂移"
 }

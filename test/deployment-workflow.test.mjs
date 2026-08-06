@@ -22,6 +22,7 @@ test("生产发布使用稳定版本目录、外部密钥门禁和失败回退",
   assert.match(workflow, /\.release-source/u);
   assert.match(workflow, /验证发布回退目标\.mjs/u);
   assert.match(workflow, /archive --format=tar HEAD/u);
+  assert.match(workflow, /\.deployment-controller\/deploy\/回退基线\.json/u);
   assert.match(
     workflow,
     /--github-env "\$GITHUB_ENV"\n\s+- name: 写入目标版本文件/u,

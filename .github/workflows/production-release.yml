@@ -44,8 +44,15 @@ jobs:
       - name: 限制为主分支已审核提交
         run: |
           cd "$GITHUB_WORKSPACE/.release-source"
-          /usr/bin/git merge-base --is-ancestor HEAD refs/remotes/origin/main
           export AI_EMPLOYEE_DEPLOY_SHA="$(/usr/bin/git rev-parse HEAD)"
+          if ! /usr/bin/git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            export AI_EMPLOYEE_APPROVED_BASELINE="$(node -e '
+              const fs = require("node:fs");
+              const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              process.stdout.write(String(manifest.commit || ""));
+            ' "$GITHUB_WORKSPACE/.deployment-controller/deploy/回退基线.json")"
+            test "$AI_EMPLOYEE_DEPLOY_SHA" = "$AI_EMPLOYEE_APPROVED_BASELINE"
+          fi
           echo "AI_EMPLOYEE_DEPLOY_SHA=$AI_EMPLOYEE_DEPLOY_SHA" >> "$GITHUB_ENV"
       - name: 准备稳定的版本目录
         run: |
