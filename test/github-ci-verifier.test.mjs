@@ -4,7 +4,7 @@ import {
   chooseCurrentRun,
   validateBranchRef,
   validateCompletedRun,
-} from "../scripts/验证GitHub提交.mjs";
+} from "../src/github-ci-verifier.mjs";
 
 test("GitHub 提交验证只接受安全分支名称", () => {
   assert.equal(validateBranchRef("main"), "main");
