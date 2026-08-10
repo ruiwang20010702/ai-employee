@@ -62,6 +62,7 @@ export async function rotateAdminTokens({
     });
     await rename(temporaryPath, destination);
     await chmod(destination, 0o600);
+    await unlink(backupPath);
   } finally {
     await unlink(temporaryPath).catch((error) => {
       if (error.code !== "ENOENT") throw error;
@@ -70,7 +71,8 @@ export async function rotateAdminTokens({
   return {
     rotated: true,
     configPath: destination,
-    backupPath,
+    backupPath: null,
+    rollbackSnapshotRemoved: true,
     tokenBytes: 32,
     secretsPrinted: false,
   };

@@ -11,6 +11,7 @@ import { createCipheriv, randomBytes } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { createWriteStream } from "node:fs";
 import { applyProductionConfigFile } from "../src/production-config-file.mjs";
+import { safeCodexEnvironment } from "../src/codex-environment.mjs";
 
 if (process.env.AI_EMPLOYEE_CONFIG_FILE) {
   await applyProductionConfigFile();
@@ -22,16 +23,32 @@ function required(name) {
   return value;
 }
 
-function databaseEnvironment(databaseUrl) {
+const allowedPostgresEnvironmentNames = [
+  "PGCHANNELBINDING",
+  "PGCONNECT_TIMEOUT",
+  "PGSSLCERT",
+  "PGSSLCRL",
+  "PGSSLCRLDIR",
+  "PGSSLKEY",
+  "PGSSLMAXPROTOCOLVERSION",
+  "PGSSLMINPROTOCOLVERSION",
+  "PGSSLROOTCERT",
+];
+
+function databaseEnvironment(databaseUrl, executable, source = process.env) {
   const parsed = new URL(databaseUrl);
+  const environment = safeCodexEnvironment(executable, source);
+  for (const name of allowedPostgresEnvironmentNames) {
+    if (typeof source[name] === "string") environment[name] = source[name];
+  }
   return {
-    ...process.env,
+    ...environment,
     PGHOST: parsed.hostname,
     PGPORT: parsed.port || "5432",
     PGDATABASE: parsed.pathname.slice(1),
     PGUSER: decodeURIComponent(parsed.username),
     PGPASSWORD: decodeURIComponent(parsed.password),
-    PGSSLMODE: process.env.DATABASE_SSL === "true" ? "verify-full" : "disable",
+    PGSSLMODE: source.DATABASE_SSL === "true" ? "verify-full" : "disable",
   };
 }
 
@@ -53,11 +70,12 @@ const metadataPath = `${destination}.json`;
 const partialMetadataPath = `${metadataPath}.partial`;
 const iv = randomBytes(12);
 const cipher = createCipheriv("aes-256-gcm", backupKey, iv);
+const pgDumpPath = process.env.PG_DUMP_PATH ?? "pg_dump";
 const dump = spawn(
-  process.env.PG_DUMP_PATH ?? "pg_dump",
+  pgDumpPath,
   ["--format=custom", "--no-owner", "--no-privileges"],
   {
-    env: databaseEnvironment(databaseUrl),
+    env: databaseEnvironment(databaseUrl, pgDumpPath),
     stdio: ["ignore", "pipe", "pipe"],
   },
 );

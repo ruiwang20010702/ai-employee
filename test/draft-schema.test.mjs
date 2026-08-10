@@ -11,6 +11,11 @@ test("draft schema is strict and models optional work requests as null", async (
     Object.keys(schema.properties).sort(),
   );
   assert.equal(schema.additionalProperties, false);
+  assert.equal(
+    schema.allOf[0].if.properties.workRequest.properties.requested.const,
+    true,
+  );
+  assert.equal(schema.allOf[0].then.properties.shouldReply.const, true);
   assert.ok(schema.properties.workRequest.anyOf.some(
     (variant) => variant.type === "null",
   ));
@@ -22,4 +27,15 @@ test("draft schema is strict and models optional work requests as null", async (
     Object.keys(objectVariant.properties).sort(),
   );
   assert.equal(objectVariant.additionalProperties, false);
+  const candidate = schema.properties.memoryCandidates.items;
+  assert.deepEqual(
+    [...candidate.required].sort(),
+    Object.keys(candidate.properties).sort(),
+  );
+  assert.equal(candidate.additionalProperties, false);
+  assert.equal(schema.properties.memoryCandidates.maxItems, 3);
+  assert.equal(
+    candidate.properties.factKey.pattern,
+    "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*){1,4}$",
+  );
 });

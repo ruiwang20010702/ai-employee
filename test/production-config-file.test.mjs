@@ -17,15 +17,31 @@ async function configFile(values, mode = 0o600) {
 
 test("生产配置只接受白名单标量并写入指定环境", async () => {
   const path = await configFile({
-    DATABASE_URL: "postgresql://example",
+    DATABASE_URL: "env://DATABASE_SECRET",
     DATABASE_POOL_MAX: 12,
     DATABASE_SSL: true,
   });
-  const environment = {};
+  const environment = { DATABASE_SECRET: "postgresql://example" };
   await applyProductionConfigFile({ path, environment });
   assert.equal(environment.DATABASE_URL, "postgresql://example");
   assert.equal(environment.DATABASE_POOL_MAX, "12");
   assert.equal(environment.DATABASE_SSL, "true");
+});
+
+test("生产运行拒绝内联密钥但迁移工具仍可只读识别旧配置", async () => {
+  const path = await configFile({
+    DATABASE_URL: "postgresql://legacy-inline-secret",
+  });
+  await assert.rejects(
+    applyProductionConfigFile({ path, environment: {} }),
+    /must use an external reference/u,
+  );
+  const result = await applyProductionConfigFile({
+    path,
+    environment: {},
+    resolveSecrets: false,
+  });
+  assert.equal(result.values.DATABASE_URL, "postgresql://legacy-inline-secret");
 });
 
 test("GitHub 生产示例的五项密钥统一使用正式钥匙串服务", async () => {
@@ -248,6 +264,59 @@ test("入口可用性采样频率和保留窗口必须可形成完整月度口�
     assert.throws(
       () => loadConfig({ requireTargets: false }),
       /must exceed/u,
+    );
+  } finally {
+    for (const name of names) {
+      if (previous[name] == null) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
+test("等待补充信息期限必须在一分钟到三十天之间", () => {
+  const name = "AI_EMPLOYEE_WAITING_INFORMATION_TTL_MS";
+  const previous = process.env[name];
+  try {
+    process.env[name] = "59999";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /60000-2592000000/u,
+    );
+    process.env[name] = "2592000001";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /60000-2592000000/u,
+    );
+    process.env[name] = "86400000";
+    assert.equal(
+      loadConfig({ requireTargets: false }).waitingInformationTtlMs,
+      86_400_000,
+    );
+  } finally {
+    if (previous == null) delete process.env[name];
+    else process.env[name] = previous;
+  }
+});
+
+test("连续消息安静窗口不能超过总等待上限", () => {
+  const names = ["DINGTALK_QUIET_WINDOW_MS", "AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS"];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.DINGTALK_QUIET_WINDOW_MS = "3000";
+    process.env.AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS = "8000";
+    const config = loadConfig({ requireTargets: false });
+    assert.equal(config.quietWindowMs, 3_000);
+    assert.equal(config.bundleMaxWaitMs, 8_000);
+    process.env.DINGTALK_QUIET_WINDOW_MS = "9000";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must not exceed/u,
+    );
+    process.env.DINGTALK_QUIET_WINDOW_MS = "3000";
+    process.env.AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS = "8001";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must not exceed 8000/u,
     );
   } finally {
     for (const name of names) {

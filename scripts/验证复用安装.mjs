@@ -60,8 +60,16 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function packageFileGate(files) {
+async function packageFileGate(files, root) {
   const paths = files.map((file) => file.path);
+  const migrationFiles = (await readdir(join(root, "db", "migrations"), {
+    withFileTypes: true,
+  }))
+    .filter((entry) =>
+      entry.isFile() &&
+      (entry.name.endsWith(".sql") || entry.name.endsWith(".json")),
+    )
+    .map((entry) => `db/migrations/${entry.name}`);
   const required = [
     ".agents/plugins/marketplace.json",
     "package.json",
@@ -77,7 +85,7 @@ function packageFileGate(files) {
     "scripts/校验项目能力.mjs",
     "scripts/运行完整测试.mjs",
     "scripts/验证复用安装.mjs",
-    "db/migrations/016_隐私擦除墓碑.sql",
+    ...migrationFiles,
     "src/capability-policy.mjs",
     "src/control-access.mjs",
     "src/privacy-erasure.mjs",
@@ -211,7 +219,7 @@ export async function verifyReusableInstallation({
       basename(packResult[0].filename) === packResult[0].filename,
       "npm pack returned invalid package metadata",
     );
-    const packageFiles = packageFileGate(packResult[0].files ?? []);
+    const packageFiles = await packageFileGate(packResult[0].files ?? [], root);
     const fileCount = packageFiles.length;
     const tarball = join(packDirectory, packResult[0].filename);
     await access(tarball);
@@ -286,12 +294,33 @@ export async function verifyReusableInstallation({
       guideHelp.boundary.includes("不连接钉钉、Codex 或数据库"),
       "Installed reusable environment guide lost its read-only boundary",
     );
-    const [initializedA, initializedB] = await Promise.all([
+    const workspaceConfigA = join(workspaceA, ".runtime", "production.json");
+    const workspaceConfigB = join(workspaceB, ".runtime", "production.json");
+    const [previewA, previewB] = await Promise.all([
       run(installedGuide, ["init"], { cwd: workspaceA }).then(({ stdout }) => JSON.parse(stdout)),
       run(installedGuide, ["init"], { cwd: workspaceB }).then(({ stdout }) => JSON.parse(stdout)),
     ]);
-    const workspaceConfigA = join(workspaceA, ".runtime", "production.json");
-    const workspaceConfigB = join(workspaceB, ".runtime", "production.json");
+    assert(
+      previewA.dryRun === true &&
+      previewB.dryRun === true &&
+      previewA.executed === false &&
+      previewB.executed === false,
+      "Reusable initialization wrote without explicit --apply",
+    );
+    const previewCreatedConfig = await Promise.all([
+      access(workspaceConfigA).then(() => true).catch(() => false),
+      access(workspaceConfigB).then(() => true).catch(() => false),
+    ]);
+    assert(
+      previewCreatedConfig.every((created) => created === false),
+      "Reusable initialization preview created a configuration file",
+    );
+    const [initializedA, initializedB] = await Promise.all([
+      run(installedGuide, ["init", "--apply"], { cwd: workspaceA })
+        .then(({ stdout }) => JSON.parse(stdout)),
+      run(installedGuide, ["init", "--apply"], { cwd: workspaceB })
+        .then(({ stdout }) => JSON.parse(stdout)),
+    ]);
     const canonicalWorkspaceA = await realpath(workspaceA);
     const canonicalWorkspaceB = await realpath(workspaceB);
     const canonicalWorkspaceConfigA = join(
@@ -342,7 +371,7 @@ export async function verifyReusableInstallation({
     );
     let workspaceOverwriteRefused = false;
     try {
-      await run(installedGuide, ["init"], { cwd: workspaceA });
+      await run(installedGuide, ["init", "--apply"], { cwd: workspaceA });
     } catch {
       workspaceOverwriteRefused = true;
     }
@@ -359,8 +388,22 @@ export async function verifyReusableInstallation({
       guideCheck.readyForPreflight === false,
       "Installed reusable environment guide did not safely detect missing configuration",
     );
-    const initializeScript = join(packageDirectory, "scripts", "初始化生产配置.mjs");
-    await run(process.execPath, [initializeScript, "--output", configPath]);
+    const configPreview = JSON.parse((await run(
+      installedGuide,
+      ["init", "--config", configPath],
+      { cwd: runtimeDirectory },
+    )).stdout);
+    assert(
+      configPreview.dryRun === true &&
+      configPreview.executed === false &&
+      configPreview.configExists === false,
+      "Installed configuration initialization did not require --apply",
+    );
+    await run(
+      installedGuide,
+      ["init", "--apply", "--config", configPath],
+      { cwd: runtimeDirectory },
+    );
     const configMode = (await stat(configPath)).mode & 0o777;
     assert(configMode === 0o600, "Generated production config permissions are not 600");
     const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -396,13 +439,18 @@ export async function verifyReusableInstallation({
     }
     let refusedOverwrite = false;
     try {
-      await run(process.execPath, [initializeScript, "--output", configPath]);
+      await run(
+        installedGuide,
+        ["init", "--apply", "--config", configPath],
+        { cwd: runtimeDirectory },
+      );
     } catch {
       refusedOverwrite = true;
     }
     assert(refusedOverwrite, "Production config initializer overwrote an existing file");
 
     Object.assign(config, {
+      DATABASE_URL: "env://AI_EMPLOYEE_REUSE_DATABASE_URL",
       AI_EMPLOYEE_DATA_KEY: "env://AI_EMPLOYEE_REUSE_DATA_KEY",
       AI_EMPLOYEE_BACKUP_KEY: "env://AI_EMPLOYEE_REUSE_BACKUP_KEY",
       AI_EMPLOYEE_ADMIN_READ_TOKEN: "env://AI_EMPLOYEE_REUSE_ADMIN_READ_TOKEN",
@@ -424,12 +472,61 @@ export async function verifyReusableInstallation({
     assert(
       configuredGuideCheck.config.exists === true &&
       configuredGuideCheck.config.protected === true &&
-      configuredGuideCheck.config.externalSecretReferences === 4 &&
+      configuredGuideCheck.config.externalSecretReferences === 5 &&
       configuredGuideCheck.config.inlineSecretValues === 0 &&
       configuredGuideCheck.config.unsafeCapabilitiesEnabled.length === 0 &&
       !JSON.stringify(configuredGuideCheck).includes("reuse-target-user") &&
       !JSON.stringify(configuredGuideCheck).includes("reuse-self-user"),
       "Installed reusable environment guide exposed values or misread safe defaults",
+    );
+
+    const lifecycleDryRuns = [
+      ["preflight", "--dry-run"],
+      ["doctor", "--dry-run"],
+      ["backup"],
+      ["migrate"],
+      ["probe"],
+      ["service", "generate"],
+      ["service", "install"],
+      ["service", "uninstall"],
+      ["service", "verify", "--dry-run"],
+      ["verify", "--dry-run"],
+      ["shadow", "--dry-run"],
+    ];
+    const packageRuntime = join(packageDirectory, ".runtime");
+    assert(
+      await access(packageRuntime).then(() => false).catch(() => true),
+      "Installed package unexpectedly contained runtime state before lifecycle previews",
+    );
+    const lifecyclePlans = [];
+    for (const lifecycleArgs of lifecycleDryRuns) {
+      const plan = JSON.parse((await run(
+        installedGuide,
+        [...lifecycleArgs, "--config", configPath],
+        { cwd: runtimeDirectory },
+      )).stdout);
+      assert(
+        plan.schema === "ai-employee-command-plan/v1" &&
+        plan.dryRun === true &&
+        plan.executed === false,
+        `Installed lifecycle command executed during preview: ${lifecycleArgs.join(" ")}`,
+      );
+      const resolvedScript = await realpath(plan.packageScript);
+      const resolvedPackage = await realpath(packageDirectory);
+      assert(
+        resolvedScript.startsWith(`${resolvedPackage}/`),
+        `Installed lifecycle command escaped package scripts: ${lifecycleArgs.join(" ")}`,
+      );
+      lifecyclePlans.push(plan);
+    }
+    assert(
+      await access(packageRuntime).then(() => false).catch(() => true),
+      "Installed lifecycle preview wrote package runtime state",
+    );
+    assert(
+      lifecyclePlans.filter((plan) => plan.applyRequired).length === 6 &&
+      lifecyclePlans.filter((plan) => !plan.applyRequired).length === 5,
+      "Installed lifecycle apply boundaries changed",
     );
 
     await run("/usr/bin/git", ["-C", projectDirectory, "init"]);
@@ -444,6 +541,7 @@ export async function verifyReusableInstallation({
     ];
     const runtimeEnvironment = {
       AI_EMPLOYEE_CONFIG_FILE: configPath,
+      AI_EMPLOYEE_REUSE_DATABASE_URL: "postgresql://reuse:reuse@127.0.0.1:5432/reuse",
       AI_EMPLOYEE_REUSE_DATA_KEY: Buffer.alloc(32, 1).toString("base64"),
       AI_EMPLOYEE_REUSE_BACKUP_KEY: Buffer.alloc(32, 2).toString("base64"),
       AI_EMPLOYEE_REUSE_ADMIN_READ_TOKEN: "r".repeat(64),
@@ -491,6 +589,8 @@ export async function verifyReusableInstallation({
       overwriteProtection: true,
       inlineSecretsWritten: 0,
       keychainProvisioningPreview: true,
+      lifecycleDryRuns: lifecyclePlans.length,
+      lifecycleWritesApplied: 0,
       defaultExternalCapabilities: "disabled",
       productionWrite: false,
     };

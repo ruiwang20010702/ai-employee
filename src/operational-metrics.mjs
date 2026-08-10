@@ -1,6 +1,11 @@
 import { normalizeMessageCoverage } from "./message-reconciliation.mjs";
 
-const taskOutcomes = new Set(["completed", "no_reply", "dead", "send_unknown"]);
+const taskOutcomes = new Set([
+  "completed",
+  "no_reply",
+  "dead",
+  "send_unknown",
+]);
 const successfulTaskOutcomes = new Set(["completed", "no_reply"]);
 
 function timestamp(value) {
@@ -52,6 +57,12 @@ export function buildOperationalMetrics(
   );
   const lowRiskSuccesses = lowRiskOutcomes.filter((task) =>
     successfulTaskOutcomes.has(task.status));
+  const routedContinuations = tasks.filter((task) => task.status === "continued");
+  const terminalContinuationChildren = tasks.filter((task) =>
+    task.continuation_of_task_id && taskOutcomes.has(task.status));
+  const successfulContinuationChildren = terminalContinuationChildren.filter(
+    (task) => successfulTaskOutcomes.has(task.status),
+  );
   const taskDurations = lowRiskOutcomes
     .map((task) => duration(task.created_at, task.draft_ready_at))
     .filter((value) => value != null);
@@ -116,6 +127,15 @@ export function buildOperationalMetrics(
         : lowRiskTaskDurationP95Ms < 120_000,
       lifecycleSamples: lifecycleDurations.length,
       lifecycleP95Ms: lowRiskTaskLifecycleP95Ms,
+    },
+    continuationRouting: {
+      routed: routedContinuations.length,
+      terminalChildren: terminalContinuationChildren.length,
+      successfulChildren: successfulContinuationChildren.length,
+      terminalSuccessRate: ratio(
+        successfulContinuationChildren.length,
+        terminalContinuationChildren.length,
+      ),
     },
     approvalWait: {
       samples: approvalWaits.length,

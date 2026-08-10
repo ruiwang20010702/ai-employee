@@ -307,6 +307,15 @@ export async function migrateProductionSecretsToKeychain({
       });
     }
   }
+  try {
+    await unlink(rollbackSnapshot);
+  } catch {
+    const error = new Error(
+      "Keychain migration completed but plaintext rollback snapshot cleanup failed",
+    );
+    error.code = "keychain_migration_snapshot_cleanup_failed";
+    throw error;
+  }
 
   return {
     completed: true,
@@ -318,7 +327,8 @@ export async function migrateProductionSecretsToKeychain({
       .map(([key]) => key),
     alreadyExternalKeys,
     configUpdated: true,
-    rollbackSnapshot,
+    rollbackSnapshot: null,
+    rollbackSnapshotRemoved: true,
     secretsPrinted: false,
   };
 }

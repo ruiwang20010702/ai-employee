@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { createHmac } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -22,13 +23,26 @@ test("仓库市场以显式安装方式发布只读 Codex 插件", async () => {
     valid: true,
     marketplace: "ai-employee-local",
     plugin: "ai-employee",
-    version: "0.2.0",
+    version: "0.3.0",
     installation: "AVAILABLE",
     authentication: "ON_INSTALL",
     readOnly: true,
     checkedDistributionFiles: 6,
     personalConfigurationWrite: false,
   });
+});
+
+test("应用包、插件清单和 MCP 服务版本保持一致", async () => {
+  const [application, plugin] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
+    readFile(
+      new URL("../plugins/ai-employee/.codex-plugin/plugin.json", import.meta.url),
+      "utf8",
+    ).then(JSON.parse),
+  ]);
+  assert.equal(application.version, "0.3.0");
+  assert.equal(plugin.version, application.version);
+  assert.equal(pluginVersion, application.version);
 });
 
 test("仓库市场不能通过符号链接把插件来源指向仓库外", async (t) => {
@@ -64,7 +78,7 @@ test("Codex MCP 只提供只读工具且状态卡片具备无界面降级结果"
         ready: true,
         paused: false,
         sendMode: "真实发送关闭",
-        taskCounts: { awaiting_approval: 2, dead: 1 },
+        taskCounts: { awaiting_approval: 2, waiting_information: 3, dead: 1 },
         planCounts: { awaiting_approval: 3 },
         confirmedMemoryCount: 4,
         projectCount: 5,
@@ -91,6 +105,7 @@ test("Codex MCP 只提供只读工具且状态卡片具备无界面降级结果"
   const result = await handler({ method: "tools/call", params: { name: "show_status_panel", arguments: {} } });
   assert.equal(result.structuredContent.ready, true);
   assert.equal(result.structuredContent.taskCounts.awaiting_approval, 2);
+  assert.equal(result.structuredContent.taskCounts.waiting_information, 3);
   assert.deepEqual(result.structuredContent.checks, {
     database: true,
     dwsExecutable: true,
@@ -132,19 +147,34 @@ test("管理客户端只访问本机只读接口且不泄露钥匙串令牌", as
   assert.equal(adminBaseUrl("http://localhost:9465"), "http://localhost:9465");
   assert.equal(adminBaseUrl("http://[::1]:9465"), "http://[::1]:9465");
   assert.throws(() => adminBaseUrl("https://example.com"), /loopback/u);
-  let captured;
+  const captured = [];
+  const nonce = "n".repeat(43);
   const read = createAdminReader({
     baseUrl: "http://127.0.0.1:9465",
     tokenReader: async () => "private-read-token",
     request: async (url, init) => {
-      captured = { url, init };
+      captured.push({ url, init });
+      if (url.endsWith("/api/auth/challenge")) {
+        return { ok: true, json: async () => ({ nonce }) };
+      }
       return { ok: true, json: async () => ({ ready: true }) };
     },
   });
   assert.deepEqual(await read("/api/overview"), { ready: true });
-  assert.equal(captured.url, "http://127.0.0.1:9465/api/overview");
-  assert.equal(captured.init.method, "GET");
-  assert.equal(captured.init.headers.authorization, "Bearer private-read-token");
+  assert.equal(captured[0].url, "http://127.0.0.1:9465/api/auth/challenge");
+  assert.equal(captured[0].init.method, "POST");
+  assert.equal(captured[0].init.headers.authorization, undefined);
+  assert.equal(captured[1].url, "http://127.0.0.1:9465/api/overview");
+  assert.equal(captured[1].init.method, "GET");
+  assert.equal(captured[1].init.headers.authorization, undefined);
+  assert.equal(captured[1].init.headers["x-ai-employee-challenge"], nonce);
+  assert.equal(
+    captured[1].init.headers["x-ai-employee-proof"],
+    createHmac("sha256", "private-read-token")
+      .update(`${nonce}\nGET\n/api/overview`)
+      .digest("hex"),
+  );
+  assert.doesNotMatch(JSON.stringify(captured), /private-read-token/u);
   await assert.rejects(read("/api/system/pause"), /Unsupported/u);
 });
 
@@ -176,5 +206,6 @@ test("状态 UI 资源符合 MCP Apps 类型且不含写入动作", async () => 
   const result = await handler({ method: "resources/read", params: { uri: "ui://ai-employee/status.html" } });
   assert.equal(result.contents[0].mimeType, "text/html;profile=mcp-app");
   assert.match(result.contents[0].text, /ui\/notifications\/tool-result/u);
+  assert.match(result.contents[0].text, /等待补充信息/u);
   assert.doesNotMatch(result.contents[0].text, /批准|发送消息|执行计划/u);
 });

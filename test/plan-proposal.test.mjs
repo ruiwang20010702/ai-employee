@@ -59,12 +59,39 @@ async function fixture(t, projectCount = 1) {
   };
 }
 
+function enqueueSourceTask(store, suffix = "source") {
+  const receivedAt = new Date("2026-08-10T08:00:00.000Z");
+  store.ingestMessages([{
+    id: `plan-proposal-${suffix}`,
+    senderUserId: "user-1",
+    senderName: "测试用户",
+    conversationId: `plan-proposal-${suffix}`,
+    createTime: receivedAt.toISOString(),
+    content: "请形成研究计划",
+  }], receivedAt);
+  const [taskId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(receivedAt.getTime() + 10),
+  });
+  store.claimTask({ now: new Date(receivedAt.getTime() + 10) });
+  store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "已形成计划草稿。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "工作请求",
+    decisionKind: "work_request",
+  }, new Date(receivedAt.getTime() + 20));
+  return taskId;
+}
+
 test("明确工作请求会在唯一授权项目中形成计划提案", async (t) => {
   const { store, config } = await fixture(t);
+  const sourceTaskId = enqueueSourceTask(store);
   const result = await proposeWorkPlanForTask({
     store,
     config,
-    task: { id: "task-1", sender_user_id: "user-1" },
+    task: { id: sourceTaskId, sender_user_id: "user-1" },
     draft: {
       workRequest: {
         requested: true,
@@ -75,8 +102,34 @@ test("明确工作请求会在唯一授权项目中形成计划提案", async (t
   });
   assert.equal(result.created, true);
   assert.equal(result.status, "ready");
-  assert.equal(store.getWorkPlan(result.planId).plan.sourceTaskId, "task-1");
+  assert.equal(store.getWorkPlan(result.planId).plan.sourceTaskId, sourceTaskId);
   assert.equal(store.getWorkPlan(result.planId).objective, "调研当前项目并形成结论");
+});
+
+test("计划生成后注册前的人工接管复查可以阻止落库", async (t) => {
+  const { store, config } = await fixture(t);
+  const sourceTaskId = enqueueSourceTask(store, "guard");
+  let checked = 0;
+  const result = await proposeWorkPlanForTask({
+    store,
+    config,
+    task: { id: sourceTaskId, sender_user_id: "user-1" },
+    draft: {
+      workRequest: {
+        requested: true,
+        objective: "规划期间负责人已经人工回复",
+        projectHint: "",
+      },
+    },
+    async beforeRegister() {
+      checked += 1;
+      return false;
+    },
+  });
+  assert.equal(checked, 1);
+  assert.equal(result.created, false);
+  assert.equal(result.reason, "registration_guard_rejected");
+  assert.equal(store.listWorkPlans({ limit: 10 }).length, 0);
 });
 
 test("项目暂停时不调用 Codex 生成新计划", async (t) => {

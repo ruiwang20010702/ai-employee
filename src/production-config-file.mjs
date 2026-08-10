@@ -20,6 +20,7 @@ export const productionConfigKeys = new Set([
   "DINGTALK_DEBOUNCE_MS",
   "DINGTALK_FALLBACK_MS",
   "DINGTALK_QUIET_WINDOW_MS",
+  "AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS",
   "AI_EMPLOYEE_BUNDLE_GAP_MS",
   "AI_EMPLOYEE_MAX_MESSAGES_PER_TASK",
   "DINGTALK_INITIAL_LOOKBACK_HOURS",
@@ -40,6 +41,7 @@ export const productionConfigKeys = new Set([
   "AI_EMPLOYEE_MEMORY_SOURCE_LIMIT",
   "AI_EMPLOYEE_REQUIRE_MESSAGE_RECONCILIATION",
   "AI_EMPLOYEE_REPLY_MAX_AGE_MS",
+  "AI_EMPLOYEE_WAITING_INFORMATION_TTL_MS",
   "AI_EMPLOYEE_DRAFT_APPROVAL_TTL_MS",
   "AI_EMPLOYEE_MAX_TASK_ATTEMPTS",
   "AI_EMPLOYEE_SHADOW_MIN_SAMPLES",
@@ -111,6 +113,13 @@ export async function applyProductionConfigFile({
     }
     if (isSecretReference(value) && !secretConfigKeys.has(key)) {
       throw new Error(`Secret references are not allowed for config key: ${key}`);
+    }
+    if (
+      secretConfigKeys.has(key) &&
+      resolveSecrets &&
+      !isSecretReference(value)
+    ) {
+      throw new Error(`Production secret must use an external reference: ${key}`);
     }
     if (secretConfigKeys.has(key) && resolveSecrets) {
       const resolved = await resolveSecretReference(String(value), {

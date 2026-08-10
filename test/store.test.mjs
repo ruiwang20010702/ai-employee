@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { memoryDeletionConfirmation } from "../src/memory-portability.mjs";
 import { Store } from "../src/store.mjs";
@@ -65,6 +66,90 @@ test("消息幂等入库并在安静窗口后合并为一个任务", async (t) =
     }),
     [],
   );
+});
+
+test("连续输入达到总等待上限后必须创建任务", async (t) => {
+  const store = await fixture(t);
+  const firstAt = new Date("2026-08-10T08:00:00.000Z");
+  store.ingestMessages([
+    {
+      id: "max-wait-1",
+      senderUserId: "u1",
+      senderName: "测试用户",
+      conversationId: "c1",
+      createTime: firstAt.toISOString(),
+      content: "第一段",
+    },
+  ], firstAt);
+  assert.equal(
+    store.nextPendingBundleAt({
+      quietWindowMs: 3_000,
+      bundleMaxWaitMs: 8_000,
+    }).toISOString(),
+    new Date(firstAt.getTime() + 3_000).toISOString(),
+  );
+  const secondAt = new Date(firstAt.getTime() + 7_500);
+  store.ingestMessages([
+    {
+      id: "max-wait-2",
+      senderUserId: "u1",
+      senderName: "测试用户",
+      conversationId: "c1",
+      createTime: secondAt.toISOString(),
+      content: "第二段",
+    },
+  ], secondAt);
+  assert.equal(
+    store.nextPendingBundleAt({
+      quietWindowMs: 3_000,
+      bundleMaxWaitMs: 8_000,
+    }).toISOString(),
+    new Date(firstAt.getTime() + 8_000).toISOString(),
+  );
+  assert.deepEqual(store.createReadyTasks({
+    quietWindowMs: 3_000,
+    bundleMaxWaitMs: 8_000,
+    now: new Date(firstAt.getTime() + 7_999),
+  }), []);
+  const taskIds = store.createReadyTasks({
+    quietWindowMs: 3_000,
+    bundleMaxWaitMs: 8_000,
+    now: new Date(firstAt.getTime() + 8_000),
+  });
+  assert.equal(taskIds.length, 1);
+  assert.equal(store.getTask(taskIds[0]).payload.content, "第一段\n第二段");
+  assert.equal(store.nextPendingBundleAt({
+    quietWindowMs: 3_000,
+    bundleMaxWaitMs: 8_000,
+  }), null);
+  assert.throws(
+    () => store.createReadyTasks({
+      quietWindowMs: 3_000,
+      bundleMaxWaitMs: 8_001,
+      now: new Date(firstAt.getTime() + 8_001),
+    }),
+    /8000ms/u,
+  );
+});
+
+test("显式紧急信号可以提前结束安静窗口", async (t) => {
+  const store = await fixture(t);
+  const receivedAt = new Date("2026-08-10T08:00:00.000Z");
+  store.ingestMessages([{
+    id: "early-urgent",
+    senderUserId: "u1",
+    senderName: "测试用户",
+    conversationId: "c1",
+    createTime: receivedAt.toISOString(),
+    content: "[紧急] 生产服务异常",
+  }], receivedAt);
+  const taskIds = store.createReadyTasks({
+    quietWindowMs: 3_000,
+    bundleMaxWaitMs: 8_000,
+    now: new Date(receivedAt.getTime() + 100),
+  });
+  assert.equal(taskIds.length, 1);
+  assert.equal(store.getTask(taskIds[0]).payload.content, "[紧急] 生产服务异常");
 });
 
 test("消息覆盖对账可批量确认已入库主键", async (t) => {
@@ -262,6 +347,462 @@ test("外发必须经过审批并记录幂等副作用", async (t) => {
   );
   store.completeSideEffect(taskId, "send_message", { success: true });
   assert.equal(store.getTask(taskId).status, "completed");
+});
+
+test("非发送态不能创建副作用且缺失账本不能确认完成", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  store.ingestMessages(messages().slice(0, 1), base);
+  const [taskId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  assert.throws(
+    () => store.beginSideEffect(taskId, "send_message", base),
+    /Task is not sending/u,
+  );
+  store.claimTask({ now: new Date(base.getTime() + 20) });
+  store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "我先看一下。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "需要回复",
+  }, new Date(base.getTime() + 20));
+  store.decideTask(taskId, {
+    decision: "approved",
+    actor: "tester",
+  }, new Date(base.getTime() + 30));
+  store.claimApprovedTask({ now: new Date(base.getTime() + 30) });
+  assert.throws(
+    () => store.completeSideEffect(
+      taskId,
+      "send_message",
+      { success: true },
+      new Date(base.getTime() + 40),
+    ),
+    /Side effect was not started/u,
+  );
+  assert.equal(store.getTask(taskId).status, "sending");
+});
+
+function sendClarification(store, taskId, now) {
+  store.claimTask({ now });
+  store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "请补充目标上线日期。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "缺少决定方案范围的必要信息",
+    needsInformation: true,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, now);
+  store.decideTask(
+    taskId,
+    { decision: "approved", actor: "tester" },
+    now,
+  );
+  store.claimApprovedTask({ now });
+  store.beginSideEffect(taskId, "send_message", now);
+  store.completeSideEffect(taskId, "send_message", { success: true }, now);
+}
+
+function ingestSingle(store, { id, at, content = "下周一上线" }) {
+  store.ingestMessages([{
+    id,
+    senderUserId: "u1",
+    senderName: "测试用户",
+    conversationId: "c1",
+    createTime: at.toISOString(),
+    content,
+  }], at);
+}
+
+test("澄清问题发送成功后等待同会话补充并继续原任务", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, { id: "wait-parent", at: base, content: "帮我做上线方案" });
+  const [parentId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  const waitingAt = new Date(base.getTime() + 20);
+  sendClarification(store, parentId, waitingAt);
+  assert.equal(store.getTask(parentId).status, "waiting_information");
+  assert.equal(store.getTask(parentId).waiting_information_at, waitingAt.toISOString());
+
+  const answerAt = new Date(base.getTime() + 1_000);
+  ingestSingle(store, { id: "wait-answer", at: answerAt });
+  const [childId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    waitingInformationTtlMs: 60_000,
+    now: new Date(answerAt.getTime() + 10),
+  });
+  const child = store.getTask(childId);
+  assert.equal(child.continuation_of_task_id, parentId);
+  assert.equal(child.payload.waitingTask.clarificationQuestion, "请补充目标上线日期。");
+  assert.equal(store.getTask(parentId).status, "continuation_pending");
+  assert.equal(store.getTask(parentId).waiting_information_at, waitingAt.toISOString());
+
+  store.claimTask({ now: new Date(answerAt.getTime() + 20) });
+  store.completeDraft(childId, {
+    shouldReply: true,
+    reply: "收到，将按下周一上线规划。",
+    confidence: 0.95,
+    riskLevel: "medium",
+    reason: "补充信息回答了原追问",
+    needsInformation: false,
+    relatedToWaitingTask: true,
+    workRequest: {
+      requested: true,
+      objective: "制定下周一上线方案",
+      projectHint: null,
+    },
+  }, new Date(answerAt.getTime() + 20));
+  assert.equal(store.getTask(parentId).status, "continued");
+  assert.equal(
+    store.cancelDraftForManualReply(childId, new Date(answerAt.getTime() + 30)),
+    true,
+  );
+  assert.equal(store.getTask(parentId).status, "cancelled_manual");
+});
+
+test("追问后的历史补录不冒充补充信息且不吞掉随后真实回答", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, {
+    id: "boundary-parent",
+    at: base,
+    content: "帮我做上线方案",
+  });
+  const [parentId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 5),
+  });
+  const waitingAt = new Date(base.getTime() + 20_000);
+  sendClarification(store, parentId, waitingAt);
+
+  const historicalAt = new Date(base.getTime() + 10_000);
+  const answerAt = new Date(base.getTime() + 30_000);
+  store.ingestMessages([
+    {
+      id: "boundary-old-backfill",
+      senderUserId: "u1",
+      senderName: "测试用户",
+      conversationId: "c1",
+      createTime: historicalAt.toISOString(),
+      content: "这是追问前遗漏的历史消息",
+    },
+    {
+      id: "boundary-real-answer",
+      senderUserId: "u1",
+      senderName: "测试用户",
+      conversationId: "c1",
+      createTime: answerAt.toISOString(),
+      content: "下周一上线",
+    },
+  ], new Date(base.getTime() + 40_000));
+  const created = store.createReadyTasks({
+    quietWindowMs: 1,
+    bundleGapMs: 120_000,
+    now: new Date(base.getTime() + 40_010),
+  });
+  assert.equal(created.length, 2);
+  const tasks = created.map((id) => store.getTask(id));
+  const oldTask = tasks.find((task) =>
+    task.payload.messageIds.includes("boundary-old-backfill"));
+  const answerTask = tasks.find((task) =>
+    task.payload.messageIds.includes("boundary-real-answer"));
+  assert.equal(oldTask.continuation_of_task_id, null);
+  assert.equal(oldTask.payload.waitingTask, null);
+  assert.equal(answerTask.continuation_of_task_id, parentId);
+  assert.equal(
+    answerTask.payload.waitingTask.clarificationQuestion,
+    "请补充目标上线日期。",
+  );
+  assert.equal(store.getTask(parentId).status, "continuation_pending");
+});
+
+test("追问发送结果人工确认成功后进入等待信息", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, { id: "unknown-clarification", at: base, content: "帮我上线" });
+  const [taskId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  store.claimTask({ now: new Date(base.getTime() + 20) });
+  store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "请补充上线日期。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "缺少必要信息",
+    needsInformation: true,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, new Date(base.getTime() + 20));
+  store.decideTask(taskId, { decision: "approved", actor: "tester" }, new Date(base.getTime() + 30));
+  store.claimApprovedTask({ now: new Date(base.getTime() + 30) });
+  store.beginSideEffect(taskId, "send_message", new Date(base.getTime() + 30));
+  store.markSideEffectUnknown(taskId, "send_message", new Error("unknown"), new Date(base.getTime() + 40));
+  assert.equal(store.getTask(taskId).status, "send_unknown");
+  const confirmedAt = new Date(base.getTime() + 50);
+  store.resolveUnknownSend(taskId, "sent", "operator", confirmedAt);
+  assert.equal(store.getTask(taskId).status, "waiting_information");
+  assert.equal(
+    store.getTask(taskId).waiting_information_at,
+    new Date(base.getTime() + 30).toISOString(),
+  );
+  const answerAt = new Date(base.getTime() + 45);
+  ingestSingle(store, {
+    id: "unknown-answer-before-confirmation",
+    at: answerAt,
+    content: "下周一",
+  });
+  const [childId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 60),
+  });
+  assert.equal(store.getTask(childId).continuation_of_task_id, taskId);
+});
+
+test("首条补充处理中后续消息保持待处理并在链路释放后关联", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, { id: "serial-parent", at: base, content: "帮我做上线方案" });
+  const [parentId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  sendClarification(store, parentId, new Date(base.getTime() + 20));
+  const firstAt = new Date(base.getTime() + 1_000);
+  ingestSingle(store, { id: "serial-first", at: firstAt, content: "周五" });
+  const [firstChildId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(firstAt.getTime() + 10),
+  });
+
+  const secondAt = new Date(base.getTime() + 2_000);
+  ingestSingle(store, { id: "serial-second", at: secondAt, content: "改成下周一" });
+  assert.deepEqual(store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(secondAt.getTime() + 10),
+  }), []);
+  assert.equal(store.getTask(parentId).status, "continuation_pending");
+  assert.equal(
+    store.nextPendingBundleAt({
+      quietWindowMs: 1,
+      now: new Date(secondAt.getTime() + 10),
+    }).toISOString(),
+    new Date(secondAt.getTime() + 1_010).toISOString(),
+  );
+
+  store.claimTask({ now: new Date(secondAt.getTime() + 20) });
+  store.completeDraft(firstChildId, {
+    shouldReply: false,
+    reply: "",
+    confidence: 0.8,
+    riskLevel: "low",
+    reason: "第一条不是最终补充",
+    needsInformation: false,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, new Date(secondAt.getTime() + 20));
+  const [secondChildId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(secondAt.getTime() + 30),
+  });
+  assert.equal(store.getTask(secondChildId).continuation_of_task_id, parentId);
+  assert.deepEqual(store.getTask(secondChildId).payload.messageIds, ["serial-second"]);
+});
+
+test("同一次合并扫描只预留一条等待链补充", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, { id: "same-sweep-parent", at: base, content: "帮我做上线方案" });
+  const [parentId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  sendClarification(store, parentId, new Date(base.getTime() + 20));
+  const firstAt = new Date(base.getTime() + 1_000);
+  ingestSingle(store, { id: "same-sweep-first", at: firstAt, content: "周五" });
+  ingestSingle(store, {
+    id: "same-sweep-second",
+    at: new Date(firstAt.getTime() + 1),
+    content: "更正为下周一",
+  });
+  const created = store.createReadyTasks({
+    quietWindowMs: 1,
+    maxMessagesPerTask: 1,
+    now: new Date(firstAt.getTime() + 10),
+  });
+  assert.equal(created.length, 1);
+  assert.equal(store.getTask(created[0]).continuation_of_task_id, parentId);
+  assert.equal(
+    store.db.prepare("SELECT status FROM messages WHERE id = ?").get("same-sweep-second").status,
+    "pending",
+  );
+  store.claimTask({ now: new Date(firstAt.getTime() + 20) });
+  store.completeDraft(created[0], {
+    shouldReply: false,
+    reply: "",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "第一段属于补充信息",
+    needsInformation: false,
+    relatedToWaitingTask: true,
+    workRequest: null,
+  }, new Date(firstAt.getTime() + 20));
+  assert.equal(store.getTask(parentId).status, "waiting_information");
+  const [secondChildId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    maxMessagesPerTask: 1,
+    now: new Date(firstAt.getTime() + 30),
+  });
+  assert.equal(store.getTask(secondChildId).continuation_of_task_id, parentId);
+  assert.deepEqual(
+    store.getTask(secondChildId).payload.messageIds,
+    ["same-sweep-second"],
+  );
+});
+
+test("无关消息恢复原等待；多个等待任务时不自动关联", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, { id: "ambiguous-parent", at: base, content: "帮我做上线方案" });
+  const [parentId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  sendClarification(store, parentId, new Date(base.getTime() + 20));
+
+  const unrelatedAt = new Date(base.getTime() + 1_000);
+  ingestSingle(store, { id: "unrelated-question", at: unrelatedAt, content: "另外预算是多少？" });
+  const [secondId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(unrelatedAt.getTime() + 10) });
+  store.claimTask({ now: new Date(unrelatedAt.getTime() + 20) });
+  store.completeDraft(secondId, {
+    shouldReply: true,
+    reply: "请补充预算范围。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "这是独立问题且缺少预算范围",
+    needsInformation: true,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, new Date(unrelatedAt.getTime() + 20));
+  assert.equal(store.getTask(parentId).status, "waiting_information");
+  store.decideTask(secondId, { decision: "approved", actor: "tester" }, new Date(unrelatedAt.getTime() + 30));
+  store.claimApprovedTask({ now: new Date(unrelatedAt.getTime() + 30) });
+  store.beginSideEffect(secondId, "send_message", new Date(unrelatedAt.getTime() + 30));
+  store.completeSideEffect(secondId, "send_message", { success: true }, new Date(unrelatedAt.getTime() + 30));
+
+  const nextAt = new Date(base.getTime() + 2_000);
+  ingestSingle(store, { id: "ambiguous-answer", at: nextAt, content: "100 万" });
+  const [thirdId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(nextAt.getTime() + 10) });
+  assert.equal(store.getTask(thirdId).continuation_of_task_id, null);
+  assert.equal(store.getTask(thirdId).payload.waitingTask, null);
+  assert.equal(store.getTask(parentId).status, "waiting_information");
+  assert.equal(store.getTask(secondId).status, "waiting_information");
+});
+
+test("等待超时后原任务过期且新消息不关联", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, { id: "expired-parent", at: base, content: "帮我做上线方案" });
+  const [parentId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  sendClarification(store, parentId, new Date(base.getTime() + 20));
+  const lateAt = new Date(base.getTime() + 61_000);
+  ingestSingle(store, { id: "late-answer", at: lateAt });
+  const [childId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    waitingInformationTtlMs: 60_000,
+    now: new Date(lateAt.getTime() + 10),
+  });
+  assert.equal(store.getTask(parentId).status, "expired");
+  assert.equal(store.getTask(childId).continuation_of_task_id, null);
+});
+
+test("补充消息处理死亡时恢复原等待任务", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, { id: "failure-parent", at: base, content: "帮我做上线方案" });
+  const [parentId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  sendClarification(store, parentId, new Date(base.getTime() + 20));
+  const answerAt = new Date(base.getTime() + 1_000);
+  ingestSingle(store, { id: "failure-answer", at: answerAt });
+  const [childId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    maxAttempts: 1,
+    now: new Date(answerAt.getTime() + 10),
+  });
+  store.claimTask({ now: new Date(answerAt.getTime() + 20) });
+  assert.equal(store.failTask(childId, new Error("permanent"), new Date(answerAt.getTime() + 20)), "dead");
+  assert.equal(store.getTask(parentId).status, "waiting_information");
+  store.retryTask(childId, new Date(answerAt.getTime() + 30));
+  assert.equal(store.getTask(parentId).status, "continuation_pending");
+  store.claimTask({ now: new Date(answerAt.getTime() + 40) });
+  store.completeDraft(childId, {
+    shouldReply: true,
+    reply: "收到，继续处理。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "重试后确认是补充信息",
+    needsInformation: false,
+    relatedToWaitingTask: true,
+    workRequest: null,
+  }, new Date(answerAt.getTime() + 40));
+  assert.equal(store.getTask(parentId).status, "continued");
+});
+
+test("后续消息处理前发现人工接管会关闭原等待任务", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, { id: "manual-parent", at: base, content: "帮我做上线方案" });
+  const [parentId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  sendClarification(store, parentId, new Date(base.getTime() + 20));
+  const answerAt = new Date(base.getTime() + 1_000);
+  ingestSingle(store, { id: "manual-answer", at: answerAt });
+  const [childId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(answerAt.getTime() + 10) });
+  store.claimTask({ now: new Date(answerAt.getTime() + 20) });
+  store.completeDraft(childId, {
+    shouldReply: false,
+    reply: "",
+    confidence: 1,
+    riskLevel: "low",
+    reason: "负责人已经人工回复",
+    needsInformation: false,
+    relatedToWaitingTask: false,
+    workRequest: null,
+    decisionSource: "manual_reply_check",
+    decisionKind: "manual_reply",
+  }, new Date(answerAt.getTime() + 20));
+  assert.equal(store.getTask(parentId).status, "cancelled_manual");
+});
+
+test("补充任务生成期间人工接管会释放 continuation_pending 父任务", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  ingestSingle(store, {
+    id: "manual-processing-parent",
+    at: base,
+    content: "帮我做上线方案",
+  });
+  const [parentId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  sendClarification(store, parentId, new Date(base.getTime() + 20));
+  const answerAt = new Date(base.getTime() + 1_000);
+  ingestSingle(store, { id: "manual-processing-answer", at: answerAt });
+  const [childId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(answerAt.getTime() + 10),
+  });
+  store.claimTask({ now: new Date(answerAt.getTime() + 20) });
+  assert.equal(store.getTask(childId).status, "processing");
+  assert.equal(store.getTask(parentId).status, "continuation_pending");
+  assert.equal(
+    store.cancelDraftForManualReply(childId, new Date(answerAt.getTime() + 30)),
+    true,
+  );
+  assert.equal(store.getTask(parentId).status, "cancelled_manual");
 });
 
 test("暂停开关持久化", async (t) => {
@@ -562,6 +1103,19 @@ test("按人隐私擦除绑定实时快照并清空任务、消息、记忆和�
     sourceId: "private-message",
     createdBy: "u1",
   }, new Date(base.getTime() + 41));
+  const derivedMemory = store.proposeMemoryCandidate({
+    type: "principle",
+    subject: "organization",
+    statement: "消息中形成的协作原则",
+    sourceType: "dingtalk_message",
+    sourceId: "m1",
+    sourceVersion: taskId,
+    scope: { factKey: "collaboration.principle" },
+    confidence: 0.9,
+    sensitivity: "internal",
+    expiresAt: new Date(base.getTime() + 86_400_000),
+    createdBy: "system:memory-candidate",
+  }, new Date(base.getTime() + 41));
   assert.throws(
     () => store.erasePrivacyData({ personId: "u1" }, first.confirmation, "operator", new Date(base.getTime() + 50)),
     /current snapshot/u,
@@ -584,6 +1138,9 @@ test("按人隐私擦除绑定实时快照并清空任务、消息、记忆和�
   const rawMemory = store.db.prepare("SELECT * FROM memory_items WHERE id = ?").get(memoryId);
   assert.ok(rawMemory.deleted_at);
   assert.equal(store.cipher.decrypt(rawMemory.statement_ciphertext), "");
+  assert.ok(store.db.prepare(
+    "SELECT deleted_at FROM memory_items WHERE id = ?",
+  ).get(derivedMemory.id).deleted_at);
   const review = store.db.prepare("SELECT * FROM decision_reviews WHERE task_id = ?").get(taskId);
   assert.equal(review, undefined);
   assert.equal(store.previewPrivacyErasure({ personId: "u1" }).eligibleTotal, 0);
@@ -628,10 +1185,26 @@ test("按项目擦除覆盖计划、来源任务和项目记忆但不接受活�
     sourceId: "source",
     createdBy: "operator",
   }, new Date(base.getTime() + 41));
+  store.db.prepare(
+    `INSERT INTO capability_budget_usage(
+       project_key, project_id_ciphertext, authorization_hash, capability,
+       limit_count, used_count, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    store.cipher.fingerprint("privacy_project"),
+    store.cipher.encrypt("privacy_project"),
+    "a".repeat(64),
+    "research",
+    1,
+    1,
+    new Date(base.getTime() + 42).toISOString(),
+    new Date(base.getTime() + 42).toISOString(),
+  );
   const preview = store.previewPrivacyErasure({ projectId: "privacy_project" }, new Date(base.getTime() + 50));
   assert.equal(preview.counts.tasks, 1);
   assert.equal(preview.counts.workPlans, 1);
   assert.equal(preview.counts.memories, 1);
+  assert.equal(preview.counts.capabilityBudgets, 1);
   store.erasePrivacyData(
     { projectId: "privacy_project" }, preview.confirmation, "operator", new Date(base.getTime() + 50),
   );
@@ -641,6 +1214,11 @@ test("按项目擦除覆盖计划、来源任务和项目记忆但不接受活�
   assert.equal(rawPlan.project_id, "deleted");
   assert.deepEqual(JSON.parse(store.cipher.decrypt(rawPlan.plan_ciphertext)), {});
   assert.ok(store.db.prepare("SELECT deleted_at FROM memory_items WHERE id = ?").get(memoryId).deleted_at);
+  const retainedBudget = store.db.prepare(
+    "SELECT * FROM capability_budget_usage",
+  ).get();
+  assert.equal(store.cipher.decrypt(retainedBudget.project_id_ciphertext), "");
+  assert.equal(retainedBudget.used_count, 1);
   assert.throws(
     () => store.registerWorkPlan(assessWorkPlan({
       manifest,
@@ -653,7 +1231,7 @@ test("按项目擦除覆盖计划、来源任务和项目记忆但不接受活�
         steps: [{ id: "research", capability: "research", description: "研究", expectedEvidence: "结论" }],
       },
     })),
-    /cannot be recreated/u,
+    /source task is no longer actionable|cannot be recreated/u,
   );
 });
 
@@ -671,6 +1249,48 @@ test("时间擦除遇到未归档消息或仍生效的暂停范围会整体阻�
   assert.equal(preview.confirmation, null);
   assert.equal(preview.blocked.messages, 1);
   assert.equal(preview.blocked.scopedPauses, 1);
+});
+
+test("按时间擦除不会重置安全能力预算", async (t) => {
+  const store = await fixture(t);
+  const old = new Date("2026-08-01T10:00:00.000Z");
+  store.proposeMemory({
+    type: "principle",
+    subject: "organization",
+    statement: "已过期的临时口径",
+    sourceType: "operator",
+    sourceId: "old-source",
+    createdBy: "operator",
+  }, old);
+  store.db.prepare(
+    `INSERT INTO capability_budget_usage(
+       project_key, project_id_ciphertext, authorization_hash, capability,
+       limit_count, used_count, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, 1, 1, ?, ?)`,
+  ).run(
+    store.cipher.fingerprint("retained_budget_project"),
+    store.cipher.encrypt("retained_budget_project"),
+    "b".repeat(64),
+    "research",
+    old.toISOString(),
+    old.toISOString(),
+  );
+  const now = new Date("2026-08-05T00:00:00.000Z");
+  const preview = store.previewPrivacyErasure(
+    { before: "2026-08-02T00:00:00.000Z" },
+    now,
+  );
+  assert.equal(preview.counts.capabilityBudgets, 0);
+  store.erasePrivacyData(
+    { before: "2026-08-02T00:00:00.000Z" },
+    preview.confirmation,
+    "operator",
+    now,
+  );
+  const retained = store.db.prepare(
+    "SELECT used_count FROM capability_budget_usage",
+  ).get();
+  assert.equal(retained.used_count, 1);
 });
 
 function assessedPlan(description = "形成代码补丁") {
@@ -701,6 +1321,236 @@ function assessedPlan(description = "形成代码补丁") {
     },
   });
 }
+
+async function legacyWorkPlanDatabase(
+  t,
+  statuses,
+  { removeCapabilitySchema = false } = {},
+) {
+  const directory = await mkdtemp(join(tmpdir(), "ai-employee-legacy-plan-"));
+  const databasePath = join(directory, "legacy.sqlite");
+  const stores = [];
+  t.after(async () => {
+    for (const store of stores) store.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const seed = await new Store(databasePath).open();
+  stores.push(seed);
+  const assessments = statuses.map((status, index) =>
+    assessedPlan(`018 旧计划 ${status} ${index}`));
+  const plans = assessments.map((assessment) => seed.registerWorkPlan(assessment));
+  const seedNow = new Date("2026-08-10T08:00:00.000Z");
+  statuses.forEach((status, index) => {
+    if (["approved", "executing", "verifying"].includes(status)) {
+      seed.decideWorkPlan(plans[index].id, {
+        decision: "approved",
+        actor: "legacy-approver",
+      }, seedNow);
+    }
+    if (["executing", "verifying"].includes(status)) {
+      seed.consumeWorkPlanAuthorization(
+        plans[index].id,
+        new Date(seedNow.getTime() + 1_000),
+      );
+    }
+    if (seed.getWorkPlan(plans[index].id).status !== status) {
+      seed.db.prepare(
+        "UPDATE work_plans SET status = ? WHERE id = ?",
+      ).run(status, plans[index].id);
+    }
+  });
+  seed.close();
+
+  const legacyDb = new DatabaseSync(databasePath);
+  try {
+    legacyDb.exec(`
+      DROP TRIGGER IF EXISTS work_plans_capability_budget_insert_guard;
+      DROP TRIGGER IF EXISTS work_plans_capability_budget_update_guard;
+    `);
+    if (removeCapabilitySchema) {
+      legacyDb.exec(`
+        DROP TABLE capability_budget_usage;
+        ALTER TABLE work_plans DROP COLUMN capability_budget_ciphertext;
+        ALTER TABLE work_plans DROP COLUMN authorization_hash;
+      `);
+    } else {
+      legacyDb.exec(`
+        UPDATE work_plans
+        SET authorization_hash = NULL, capability_budget_ciphertext = NULL;
+      `);
+    }
+  } finally {
+    legacyDb.close();
+  }
+  return {
+    assessments,
+    databasePath,
+    plans,
+    createStore() {
+      const store = new Store(databasePath);
+      stores.push(store);
+      return store;
+    },
+  };
+}
+
+test("SQLite 018 会取消缺少预算绑定的未执行旧计划并允许重新登记", async (t) => {
+  const legacy = await legacyWorkPlanDatabase(t, [
+    "ready",
+    "awaiting_approval",
+    "approved",
+  ]);
+  const store = await legacy.createStore().open();
+
+  for (const plan of legacy.plans) {
+    const migrated = store.getWorkPlan(plan.id);
+    assert.equal(migrated.status, "cancelled");
+    assert.equal(migrated.authorization_hash, null);
+    assert.equal(migrated.capability_budget, null);
+    assert.ok(migrated.cancel_requested_at);
+    assert.equal(migrated.cancel_requested_by, "system:migration-018");
+    const [step] = store.listWorkPlanSteps(plan.id);
+    assert.equal(step.status, "cancelled");
+    assert.ok(step.completed_at);
+    assert.match(step.error, /system:migration-018/u);
+  }
+
+  const restoredAt = new Date("2026-08-10T10:00:00.000Z");
+  const restoredIndex = 2;
+  const restored = store.registerWorkPlan(
+    legacy.assessments[restoredIndex],
+    restoredAt,
+  );
+  assert.equal(restored.id, legacy.plans[restoredIndex].id);
+  assert.equal(restored.status, "awaiting_approval");
+  assert.equal(
+    restored.authorization_hash,
+    legacy.assessments[restoredIndex].authorizationHash,
+  );
+  assert.deepEqual(
+    restored.capability_budget,
+    legacy.assessments[restoredIndex].capabilityBudget,
+  );
+  assert.equal(restored.approval_version, 2);
+  assert.equal(restored.cancel_requested_at, null);
+  assert.equal(restored.cancel_requested_by, null);
+  const [restoredStep] = store.listWorkPlanSteps(restored.id);
+  assert.equal(restoredStep.status, "pending");
+  assert.equal(restoredStep.completed_at, null);
+  assert.equal(restoredStep.error, null);
+
+  store.decideWorkPlan(restored.id, {
+    decision: "approved",
+    actor: "approver",
+  }, new Date(restoredAt.getTime() + 1_000));
+  assert.equal(
+    store.consumeWorkPlanAuthorization(
+      restored.id,
+      new Date(restoredAt.getTime() + 2_000),
+    ),
+    true,
+  );
+  assert.equal(store.isWorkPlanCancellationRequested(restored.id), false);
+});
+
+test("SQLite 018 数据库门禁拒绝旧执行器写入无预算可执行计划", async (t) => {
+  const legacy = await legacyWorkPlanDatabase(t, ["ready"]);
+  const store = await legacy.createStore().open();
+  const migrated = store.getWorkPlan(legacy.plans[0].id);
+  assert.equal(migrated.status, "cancelled");
+  assert.equal(migrated.authorization_hash, null);
+  assert.equal(migrated.capability_budget, null);
+  store.close();
+
+  const timestamp = "2026-08-10T10:00:00.000Z";
+  const oldExecutor = new DatabaseSync(legacy.databasePath);
+  try {
+    const insert = oldExecutor.prepare(
+      `INSERT INTO work_plans(
+         id, project_id, requester_key, requester_ciphertext,
+         objective_ciphertext, plan_ciphertext, plan_hash, max_level,
+         policy_decision, status, created_at, updated_at
+       ) VALUES (?, 'project', 'requester', 'ciphertext', 'ciphertext',
+         'ciphertext', ?, 'L1', 'ALLOW', ?, ?, ?)`,
+    );
+    assert.throws(
+      () => insert.run(
+        "old-executor-insert",
+        "old-executor-insert-hash",
+        "ready",
+        timestamp,
+        timestamp,
+      ),
+      /capability budget authorization is required/u,
+    );
+
+    insert.run(
+      "historical-cancelled",
+      "historical-cancelled-hash",
+      "cancelled",
+      timestamp,
+      timestamp,
+    );
+    assert.throws(
+      () => oldExecutor.prepare(
+        "UPDATE work_plans SET status = 'approved' WHERE id = ?",
+      ).run("historical-cancelled"),
+      /capability budget authorization is required/u,
+    );
+    assert.equal(
+      oldExecutor.prepare(
+        "SELECT status FROM work_plans WHERE id = 'historical-cancelled'",
+      ).get().status,
+      "cancelled",
+    );
+  } finally {
+    oldExecutor.close();
+  }
+});
+
+test("SQLite 018 遇到缺少预算绑定的执行中旧计划时整体回滚", async (t) => {
+  const legacy = await legacyWorkPlanDatabase(
+    t,
+    ["executing", "verifying"],
+    { removeCapabilitySchema: true },
+  );
+  const store = legacy.createStore();
+  await assert.rejects(
+    store.open(),
+    /legacy work plans are executing/u,
+  );
+  assert.equal(store.db, null);
+
+  const raw = new DatabaseSync(legacy.databasePath);
+  try {
+    const columns = new Set(
+      raw.prepare("PRAGMA table_info(work_plans)").all().map((row) => row.name),
+    );
+    assert.equal(columns.has("authorization_hash"), false);
+    assert.equal(columns.has("capability_budget_ciphertext"), false);
+    assert.equal(
+      raw.prepare(
+        `SELECT COUNT(*) AS count FROM sqlite_master
+         WHERE type = 'table' AND name = 'capability_budget_usage'`,
+      ).get().count,
+      0,
+    );
+    assert.deepEqual(
+      raw.prepare(
+        "SELECT status FROM work_plans ORDER BY status",
+      ).all().map((row) => row.status),
+      ["executing", "verifying"],
+    );
+    assert.equal(
+      raw.prepare(
+        "SELECT COUNT(*) AS count FROM work_plan_steps WHERE status = 'pending'",
+      ).get().count,
+      2,
+    );
+  } finally {
+    raw.close();
+  }
+});
 
 test("任务计划审批绑定哈希、有效期和单次消费", async (t) => {
   const store = await fixture(t);
@@ -809,6 +1659,88 @@ test("未执行计划可以按任务单独取消", async (t) => {
   assert.equal(store.getWorkPlan(plan.id).status, "cancelled");
   assert.equal(store.listWorkPlanSteps(plan.id)[0].status, "cancelled");
   assert.equal(store.requestWorkPlanCancellation(plan.id, "operator"), "cancelled");
+});
+
+test("人工接管会取消未执行计划并请求安全停止执行中计划", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-10T08:00:00.000Z");
+  const manifest = {
+    version: 1,
+    projectId: "manual_takeover_project",
+    name: "人工接管测试",
+    rootDirectory: "/workspace/manual-takeover",
+    requesters: ["u1"],
+    capabilities: { research: { mode: "automatic", maxRuns: 5 } },
+  };
+  const enqueueSourceTask = (suffix, offsetMs) => {
+    const receivedAt = new Date(base.getTime() + offsetMs);
+    store.ingestMessages([{
+      ...messages()[0],
+      id: `manual-takeover-${suffix}`,
+      conversationId: `manual-takeover-${suffix}`,
+      createTime: receivedAt.toISOString(),
+      content: `请研究${suffix}`,
+    }], receivedAt);
+    const [taskId] = store.createReadyTasks({
+      quietWindowMs: 1,
+      now: new Date(receivedAt.getTime() + 10),
+    });
+    store.claimTask({ now: new Date(receivedAt.getTime() + 10) });
+    store.completeDraft(taskId, {
+      shouldReply: true,
+      reply: "已形成执行计划。",
+      confidence: 0.95,
+      riskLevel: "low",
+      reason: "识别为工作请求",
+      decisionSource: "model",
+      decisionKind: "work_request",
+    }, new Date(receivedAt.getTime() + 20));
+    return taskId;
+  };
+  const assessmentFor = (taskId, objective) => assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: manifest.projectId,
+      requesterId: "u1",
+      sourceTaskId: taskId,
+      objective,
+      steps: [{
+        id: "research",
+        capability: "research",
+        description: objective,
+        expectedEvidence: "研究结果",
+      }],
+    },
+  });
+
+  const readyTaskId = enqueueSourceTask("ready", 0);
+  const readyAssessment = assessmentFor(readyTaskId, "尚未开始的研究");
+  const readyPlan = store.registerWorkPlan(readyAssessment);
+  assert.equal(readyPlan.status, "ready");
+  assert.equal(store.cancelDraftForManualReply(readyTaskId), true);
+  assert.equal(store.getTask(readyTaskId).status, "cancelled_manual");
+  assert.equal(store.getWorkPlan(readyPlan.id).status, "cancelled");
+  assert.equal(store.listWorkPlanSteps(readyPlan.id)[0].status, "cancelled");
+  assert.throws(
+    () => store.registerWorkPlan(readyAssessment),
+    /source task is no longer actionable/u,
+  );
+
+  const executingTaskId = enqueueSourceTask("executing", 1_000);
+  const executingPlan = store.registerWorkPlan(
+    assessmentFor(executingTaskId, "已经开始的研究"),
+  );
+  assert.equal(store.consumeWorkPlanAuthorization(executingPlan.id), true);
+  assert.equal(store.cancelDraftForManualReply(executingTaskId), true);
+  const stopped = store.getWorkPlan(executingPlan.id);
+  assert.equal(stopped.status, "executing");
+  assert.ok(stopped.cancel_requested_at);
+  assert.equal(stopped.cancel_requested_by, "system:manual-reply");
+  assert.throws(
+    () => store.consumeWorkPlanAuthorization(executingPlan.id),
+    /source task is no longer actionable|not authorized/u,
+  );
 });
 
 test("人工判断标注加密保存并可覆盖修正", async (t) => {

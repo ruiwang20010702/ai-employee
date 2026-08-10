@@ -63,6 +63,7 @@ export async function proposeWorkPlanForTask({
   config,
   task,
   draft,
+  beforeRegister,
 }) {
   if (
     !config.capabilities.has("work_plan_proposal") ||
@@ -138,6 +139,13 @@ export async function proposeWorkPlanForTask({
       created: false,
       reason: "proposal_denied_by_current_policy",
       policyReason: assessment.reason,
+    };
+  }
+  if (beforeRegister && !(await beforeRegister({ assessment, project }))) {
+    return {
+      created: false,
+      reason: "registration_guard_rejected",
+      projectId: project.projectId,
     };
   }
   const plan = await store.registerWorkPlan(assessment);

@@ -193,6 +193,18 @@ export function loadConfig({
       "AI_EMPLOYEE_EXTERNAL_CHECK_STALE_MS must be shorter than AI_EMPLOYEE_MEMORY_SOURCE_LEASE_MS",
     );
   }
+  const waitingInformationTtlMs = positiveNumber(
+    "AI_EMPLOYEE_WAITING_INFORMATION_TTL_MS",
+    86_400_000,
+  );
+  if (
+    waitingInformationTtlMs < 60_000 ||
+    waitingInformationTtlMs > 30 * 24 * 60 * 60 * 1000
+  ) {
+    throw new Error(
+      "AI_EMPLOYEE_WAITING_INFORMATION_TTL_MS must be 60000-2592000000",
+    );
+  }
   const requiredComponents = commaSeparated(
     "AI_EMPLOYEE_REQUIRED_COMPONENTS",
     "listener,worker",
@@ -206,6 +218,21 @@ export function loadConfig({
   ) {
     throw new Error(
       "work_plan_execution requires executor in AI_EMPLOYEE_REQUIRED_COMPONENTS",
+    );
+  }
+  const quietWindowMs = positiveNumber("DINGTALK_QUIET_WINDOW_MS", 3_000);
+  const bundleMaxWaitMs = positiveNumber(
+    "AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS",
+    8_000,
+  );
+  if (bundleMaxWaitMs > 8_000) {
+    throw new Error(
+      "AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS must not exceed 8000",
+    );
+  }
+  if (quietWindowMs > bundleMaxWaitMs) {
+    throw new Error(
+      "DINGTALK_QUIET_WINDOW_MS must not exceed AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS",
     );
   }
 
@@ -234,7 +261,8 @@ export function loadConfig({
     databasePoolMax: positiveInteger("DATABASE_POOL_MAX", 10),
     fallbackMs: positiveNumber("DINGTALK_FALLBACK_MS", 300_000),
     debounceMs: positiveNumber("DINGTALK_DEBOUNCE_MS", 800),
-    quietWindowMs: positiveNumber("DINGTALK_QUIET_WINDOW_MS", 3_000),
+    quietWindowMs,
+    bundleMaxWaitMs,
     bundleGapMs: positiveNumber("AI_EMPLOYEE_BUNDLE_GAP_MS", 120_000),
     maxMessagesPerTask: positiveInteger(
       "AI_EMPLOYEE_MAX_MESSAGES_PER_TASK",
@@ -270,6 +298,7 @@ export function loadConfig({
       false,
     ),
     replyMaxAgeMs: positiveNumber("AI_EMPLOYEE_REPLY_MAX_AGE_MS", 7_200_000),
+    waitingInformationTtlMs,
     draftApprovalTtlMs: positiveNumber(
       "AI_EMPLOYEE_DRAFT_APPROVAL_TTL_MS",
       7_200_000,

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runAlertCheck, startAlertMonitor } from "../src/alert-monitor.mjs";
+import {
+  resolveAlertWebhookDestination,
+  runAlertCheck,
+  startAlertMonitor,
+  validateAlertWebhookUrl,
+} from "../src/alert-monitor.mjs";
 
 function fixture() {
   const checkpoints = new Map();
@@ -34,6 +39,7 @@ test("异常告警只发送脱敏状态并执行冷却", async () => {
   const first = await runAlertCheck({ store, config, now, fetchImpl });
   assert.equal(first.notified, true);
   assert.equal(requests.length, 1);
+  assert.equal(requests[0].init.redirect, "error");
   const payload = JSON.parse(requests[0].init.body);
   assert.deepEqual(payload.codes, ["dead_tasks"]);
   assert.equal(payload.counts.deadTasks, 2);
@@ -58,6 +64,75 @@ test("配置外部告警时必须使用签名密钥", async () => {
   const { store, config } = fixture();
   config.alertWebhookSecret = null;
   await assert.rejects(runAlertCheck({ store, config }), /secret is required/u);
+});
+
+test("Webhook 拒绝明文、凭据、本机和内网目标", async () => {
+  assert.throws(
+    () => validateAlertWebhookUrl("http://alerts.example/hook"),
+    /HTTPS/u,
+  );
+  assert.throws(
+    () => validateAlertWebhookUrl("https://user:pass@alerts.example/hook"),
+    /credentials/u,
+  );
+  assert.throws(
+    () => validateAlertWebhookUrl("https://localhost/hook"),
+    /local hostname/u,
+  );
+  assert.throws(
+    () => validateAlertWebhookUrl("https://127.0.0.1/hook"),
+    /private or reserved/u,
+  );
+  assert.throws(
+    () => validateAlertWebhookUrl("https://[::1]/hook"),
+    /private or reserved/u,
+  );
+  await assert.rejects(
+    resolveAlertWebhookDestination(
+      "https://alerts.example/hook",
+      async () => [{ address: "10.0.0.7", family: 4 }],
+    ),
+    /DNS resolved to a private or reserved address/u,
+  );
+  const publicTarget = await resolveAlertWebhookDestination(
+    "https://alerts.example/hook",
+    async () => [{ address: "8.8.8.8", family: 4 }],
+  );
+  assert.equal(publicTarget.address, "8.8.8.8");
+});
+
+test("所有导致未就绪的工作计划状态都有明确告警原因", async () => {
+  const { store, config } = fixture();
+  store.state.tasks = {};
+  store.state.workPlans = { failed: 2, executing: 1, verifying: 1 };
+  store.state.expiredExecutionLeases = 3;
+  const requests = [];
+  const fetchImpl = async (_url, init) => {
+    requests.push(init);
+    return { ok: true, status: 200 };
+  };
+  const result = await runAlertCheck({
+    store,
+    config,
+    fetchImpl,
+    now: new Date("2026-08-04T10:00:00Z"),
+  });
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.codes, [
+    "executing_work_plans",
+    "expired_execution_leases",
+    "failed_work_plans",
+  ]);
+  const payload = JSON.parse(requests[0].body);
+  assert.deepEqual(payload.counts, {
+    deadTasks: 0,
+    unknownSends: 0,
+    failedWorkPlans: 2,
+    executingWorkPlans: 2,
+    expiredExecutionLeases: 3,
+    pendingMessages: 3,
+    remainingMissingMessages: 0,
+  });
 });
 
 test("Webhook 失败不会进入冷却，下一次检查仍会重试", async () => {

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { safeCodexEnvironment } from "./codex-environment.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -22,6 +23,11 @@ function isoWithOffset(date) {
   return `${localTimestamp(date).replace(" ", "T")}+08:00`;
 }
 
+export function normalizeDwsIdentity(value) {
+  const normalized = String(value ?? "").trim();
+  return normalized === "" ? null : normalized;
+}
+
 export function collectMessages(payload, senderUserId) {
   const result = payload?.result ?? payload ?? {};
   const conversations =
@@ -39,15 +45,17 @@ export function collectMessages(payload, senderUserId) {
   return [...nested, ...direct]
     .map((message) => ({
       id: message.openMessageId ?? message.messageId ?? message.id,
-      senderUserId:
+      senderUserId: normalizeDwsIdentity(
         message.senderUserId ??
         message.sender?.userId ??
         message.sender?.staffId ??
         senderUserId ??
         message.senderOpenDingTalkId ??
         message.sender?.openDingTalkId,
-      senderOpenDingTalkId:
+      ),
+      senderOpenDingTalkId: normalizeDwsIdentity(
         message.senderOpenDingTalkId ?? message.sender?.openDingTalkId,
+      ),
       senderName:
         typeof message.sender === "string"
           ? message.sender
@@ -72,23 +80,39 @@ export function collectMessages(payload, senderUserId) {
     .filter((message) => message.id && message.conversationId);
 }
 
+export function bindMessagesToSender(messages, senderUserId) {
+  const expectedSenderUserId = normalizeDwsIdentity(senderUserId);
+  if (!expectedSenderUserId) {
+    const error = new Error("DWS list-by-sender requires a sender identity");
+    error.code = "dws_sender_identity_required";
+    throw error;
+  }
+  return messages.map((message) => {
+    if (normalizeDwsIdentity(message.senderUserId) !== expectedSenderUserId) {
+      const error = new Error(
+        "DWS list-by-sender returned a message for a different sender",
+      );
+      error.code = "dws_sender_identity_mismatch";
+      throw error;
+    }
+    return { ...message, senderUserId: expectedSenderUserId };
+  });
+}
+
 export function assertSuccessfulSendReceipt(receipt) {
   const values = [];
-  const visit = (value, depth = 0) => {
-    if (depth > 5 || value == null) return;
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item, depth + 1);
-      return;
-    }
-    if (typeof value !== "object") return;
-    for (const [key, child] of Object.entries(value)) {
-      if (["sendStatus", "send_status", "status", "success"].includes(key)) {
-        values.push({ key, value: child });
-      }
-      visit(child, depth + 1);
+  const addKnownReceiptFields = (value) => {
+    if (value == null || typeof value !== "object" || Array.isArray(value)) return;
+    for (const key of ["sendStatus", "send_status", "status", "success"]) {
+      if (Object.hasOwn(value, key)) values.push({ key, value: value[key] });
     }
   };
-  visit(receipt);
+  addKnownReceiptFields(receipt);
+  if (Array.isArray(receipt?.result)) {
+    for (const item of receipt.result) addKnownReceiptFields(item);
+  } else {
+    addKnownReceiptFields(receipt?.result);
+  }
 
   const explicitFailure = values.some(({ key, value }) => (
     (key === "success" && value !== true) ||
@@ -130,26 +154,124 @@ function epoch(value) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function normalizedText(value) {
+  return String(value ?? "").replace(/\r\n?/gu, "\n").trim();
+}
+
+function explicitAiMarker(raw) {
+  const values = [
+    raw?.aiTag,
+    raw?.ai_tag,
+    raw?.isAiGenerated,
+    raw?.aiGenerated,
+    raw?.generatedByAi,
+  ];
+  return values.some((value) =>
+    value === true || value === 1 || String(value).toLowerCase() === "true",
+  );
+}
+
+function evidenceMarkerValues(evidence) {
+  const values = new Set([evidence.taskId, evidence.idempotencyKey]);
+  const visit = (value, depth = 0) => {
+    if (depth > 4 || value == null) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    if (typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      if (
+        typeof child === "string" &&
+        /(?:message|msg|task|query|process|uuid|idempotency).*(?:id|key)|^(?:openTaskId|openMessageId|processQueryKey|uuid)$/iu.test(key)
+      ) {
+        values.add(child);
+      }
+      visit(child, depth + 1);
+    }
+  };
+  visit(evidence.receipt);
+  return values;
+}
+
+function rawMarkerValues(raw) {
+  const values = new Set();
+  const visit = (value, depth = 0) => {
+    if (depth > 3 || value == null || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      if (
+        typeof child === "string" &&
+        /(?:message|msg|task|query|process|uuid|idempotency).*(?:id|key)|^(?:openTaskId|openMessageId|processQueryKey|uuid)$/iu.test(key)
+      ) {
+        values.add(child);
+      }
+      if (child && typeof child === "object") visit(child, depth + 1);
+    }
+  };
+  visit(raw);
+  return values;
+}
+
+export function isAutomatedSelfMessage(message, evidence = []) {
+  if (explicitAiMarker(message?.raw)) return true;
+  const messageTime = epoch(message?.createTime);
+  const messageMarkers = new Set([message?.id, ...rawMarkerValues(message?.raw)]);
+  for (const item of evidence) {
+    if (item.conversationId !== message?.conversationId) continue;
+    const knownMarkers = evidenceMarkerValues(item);
+    if ([...messageMarkers].some((value) => value && knownMarkers.has(value))) {
+      return true;
+    }
+    const startedAt = epoch(item.startedAt);
+    if (
+      messageTime != null &&
+      startedAt != null &&
+      messageTime >= startedAt - 5_000 &&
+      messageTime <= startedAt + 10 * 60 * 1_000 &&
+      normalizedText(message?.content) !== "" &&
+      normalizedText(message?.content) === normalizedText(item.content)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export class DwsAdapter {
-  constructor({ dwsPath, dwsMock = false }) {
+  constructor({
+    dwsPath,
+    dwsMock = false,
+    commandRunner = execFileAsync,
+    environment = process.env,
+  }) {
     this.dwsPath = dwsPath;
     this.dwsMock = dwsMock;
+    this.commandRunner = commandRunner;
+    this.environment = environment;
   }
 
   async run(args, options = {}) {
-    const { stdout } = await execFileAsync(
+    const { env: ignoredEnvironment, ...commandOptions } = options;
+    const { stdout } = await this.commandRunner(
       this.dwsPath,
       [...args, ...(this.dwsMock ? ["--mock"] : []), "--format", "json"],
       {
         maxBuffer: 8 * 1024 * 1024,
         timeout: 60_000,
-        ...options,
+        ...commandOptions,
+        env: safeCodexEnvironment(this.dwsPath, this.environment),
       },
     );
     return JSON.parse(stdout);
   }
 
   async fetchBySenderAll({ senderUserId, start, end }) {
+    const expectedSenderUserId = normalizeDwsIdentity(senderUserId);
+    if (!expectedSenderUserId) {
+      const error = new Error("DWS list-by-sender requires a sender identity");
+      error.code = "dws_sender_identity_required";
+      throw error;
+    }
     const messages = [];
     const seenCursors = new Set();
     let cursor = "0";
@@ -164,7 +286,7 @@ export class DwsAdapter {
         "message",
         "list-by-sender",
         "--sender-user-id",
-        senderUserId,
+        expectedSenderUserId,
         "--start",
         isoWithOffset(start),
         "--end",
@@ -174,7 +296,12 @@ export class DwsAdapter {
         "--cursor",
         cursor,
       ]);
-      messages.push(...collectMessages(payload, senderUserId));
+      messages.push(
+        ...bindMessagesToSender(
+          collectMessages(payload, expectedSenderUserId),
+          expectedSenderUserId,
+        ),
+      );
       const pageInfo = pagination(payload);
       if (!pageInfo.hasMore) return messages;
       cursor = pageInfo.nextCursor;
@@ -252,7 +379,13 @@ export class DwsAdapter {
     );
   }
 
-  async hasManualReply({ conversationId, selfUserId, after, now = new Date() }) {
+  async hasManualReply({
+    conversationId,
+    selfUserId,
+    after,
+    now = new Date(),
+    automatedSendEvidence = [],
+  }) {
     if (!selfUserId) {
       return {
         known: false,
@@ -285,7 +418,8 @@ export class DwsAdapter {
       return (
         message.conversationId === conversationId &&
         messageTime != null &&
-        messageTime > afterTime
+        messageTime > afterTime &&
+        !isAutomatedSelfMessage(message, automatedSendEvidence)
       );
     });
     return { known: true, replied };

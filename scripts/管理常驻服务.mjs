@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { isMainModule } from "../src/main-module.mjs";
+import { applyProductionConfigFile } from "../src/production-config-file.mjs";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -145,16 +146,18 @@ ${lifecycle}
 `;
 }
 
-async function validateConfig() {
-  const metadata = await stat(configPath);
-  if ((metadata.mode & 0o077) !== 0) {
-    throw new Error(`Config must have mode 600: ${configPath}`);
-  }
-  JSON.parse(await readFile(configPath, "utf8"));
+export async function validateServiceConfig({
+  path = configPath,
+  environment = process.env,
+} = {}) {
+  await applyProductionConfigFile({
+    path,
+    environment: { ...environment },
+  });
 }
 
 async function generate() {
-  await validateConfig();
+  await validateServiceConfig();
   await mkdir(generatedDirectory, { recursive: true, mode: 0o700 });
   await mkdir(logsDirectory, { recursive: true, mode: 0o700 });
   await chmod(runtimeDirectory, 0o700);

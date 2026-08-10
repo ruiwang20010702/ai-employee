@@ -11,11 +11,12 @@
 | 钉钉消息监听 | 可用 | 只读取白名单单聊和白名单群中的 `@我` 消息 |
 | 实时唤醒与补漏 | 可用 | 本地活动信号唤醒，5 分钟增量检查兜底 |
 | 消息与任务可靠性 | 可用 | PostgreSQL 去重、事务、租约、重试和死信 |
-| 连续消息合并 | 可用 | 默认安静 3 秒；相隔超过 2 分钟或超过 20 条会拆分任务 |
+| 连续消息合并 | 可用 | 默认安静 3 秒；明确“紧急/发完”可提前处理，连续输入总等待不超过 8 秒；相隔超过 2 分钟或超过 20 条会拆分任务 |
 | 判断是否回复 | 可用 | 明确闭环走硬规则，其余由 Codex 结合上下文复核 |
 | 基于授权的能力自述 | 可用 | 被问“能做什么”时不调用模型；只按当前开关和请求人的有效项目授权回答，群聊隐藏项目名称 |
 | 影子质量评估 | 可用 | 回应必要性与草稿质量分开标注并保留不可变历史；至少 100 条有效回应判断、30 条草稿评价、分层覆盖和双向准确率达标，且高风险错误回复建议为 0 才通过 |
 | 草稿生成 | 可用 | 独立 Worker、只读 Codex 沙箱 |
+| 信息不足任务闭环 | V2.1 工作区候选，生产未发布 | 追问需审批并确认送达；只关联同发送人同会话的唯一候选，歧义、超时、失败和人工接管安全收敛 |
 | 人工审批与发送 | 可用、默认关闭 | 每条消息单次批准；未知结果不自动重发 |
 | 健康与指标 | 可用 | 进程心跳、真实 DWS 读取检查点、24 小时 SLO、管理台运营视图和 Prometheus 指标 |
 | 本机管理台 | 可用 | 总览、草稿、计划、监听范围、局部暂停、记忆与健康；监听对象仅显示 HMAC 指纹，读写令牌分离，不提供扩权、执行和发送入口 |
@@ -28,9 +29,9 @@
 | 任务级取消 | 可用 | 未执行计划立即取消；只读 Codex 和本地测试可确认中断进程组；外部副作用步骤完成回读或回滚后停止后续步骤 |
 | 死亡任务处置 | 可用、需负责人操作 | 可选择重试或审计关闭；关闭不会生成草稿、发送消息或再次调用 Codex |
 | 项目结果回传 | 可用 | 完成、失败或取消后在原会话生成幂等的待审批结果草稿，不直接发送 |
-| 正式记忆 | 可用 | 来源展示、人工确认、过期、冲突替代、gbrain 来源访问租约、元数据/正文受控导出、绑定确认的永久内容擦除和字段级加密 |
+| 正式记忆 | V2.1 工作区候选，生产未发布 | AI 只能形成有精确消息来源的待确认候选；敏感内容在入库前拒绝，人工确认后才成为正式记忆；支持过期、冲突替代、gbrain 来源租约、受控导出与擦除 |
 | gbrain 知识页读取 | 可用、默认关闭 | 只读取项目白名单前缀内的精确 slug；限页数、限正文，后续步骤必须显式引用 |
-| 研究、文档与代码补丁 | 可用 | 只读 Codex；补丁先通过 `git apply --check` |
+| 研究、文档与代码补丁 | 可用 | 只读 Codex；补丁先通过 `git apply --check`；AI 不具备代码合并权限，合并仍由人完成 |
 | 隔离修改与本地测试 | 可用、按项目授权 | 补丁只进入独立 worktree 和分支；应用前校准索引并预检，失败会清理本次分支与目录；测试仅运行清单登记的精确命令 |
 | Git 推送 | 可用、强制审批 | 只推 `ai-employee/` 前缀分支，远端 URL 固定，推后回读提交哈希 |
 | 生产发布 | 可用、L4 强审批 | 发布、验收、回滚命令同时绑定计划；失败自动回滚并复验 |
@@ -86,11 +87,32 @@ npm init -y
 npm install "github:ruiwang20010702/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA"
 npx --no-install ai-employee check
 npx --no-install ai-employee init
+npx --no-install ai-employee init --apply
 npx --no-install ai-employee secrets
 npx --no-install ai-employee secrets --apply
 ```
 
-安装时必须把占位内容替换为经过检查的完整 40 位提交编号，不使用会漂移的 `main` 作为生产版本。`check` 只检查 macOS、Node.js、DWS、Codex、PostgreSQL 工具、配置权限、必填项和危险能力开关，不连接钉钉、Codex 服务或数据库，也不输出配置值。`init` 默认只在当前工作目录创建 `.runtime/production.json`，权限为 `600`，已有文件绝不覆盖；文件只保存当前工作区独有的钥匙串引用，不保存生成的密钥值。`secrets` 默认只预览，只有显式增加 `--apply` 才把四项独立随机密钥直接写入对应 macOS 钥匙串并逐项回读。重复执行会复用全部有效的既有项；只存在部分条目、内容无效或冲突时会在新增写入前停止。写入或后续配置提交失败会清理由本次调用创建的条目，无法确认清理时明确要求人工核对。数据库连接仍由接入人单独安全配置。完成本地检查后仍必须继续执行 `production:preflight`，两者不能互相替代。
+安装时必须把占位内容替换为经过检查的完整 40 位提交编号，不使用会漂移的 `main` 作为生产版本。`check` 只检查 macOS、Node.js、DWS、Codex、PostgreSQL 工具、配置权限、必填项和危险能力开关，不连接钉钉、Codex 服务或数据库，也不输出配置值。`init` 默认只预览；只有 `init --apply` 才在当前工作目录创建权限为 `600` 的 `.runtime/production.json`，已有文件绝不覆盖。配置只保存当前工作区独有的钥匙串引用，不保存生成的密钥值。`secrets` 同样默认只预览，只有显式增加 `--apply` 才把四项独立随机密钥直接写入对应 macOS 钥匙串并逐项回读。重复执行会复用全部有效的既有项；只存在部分条目、内容无效或冲突时会在新增写入前停止。写入或后续配置提交失败会清理由本次调用创建的条目，无法确认清理时明确要求人工核对。数据库连接仍由接入人单独安全配置。
+
+填写配置并再次通过 `check` 后，安装包本身即可提供完整上线入口，不需要进入 `node_modules` 或源码仓库。带写入或外部消费的命令默认只返回计划，必须显式增加 `--apply`；`--dry-run` 可以让联网只读命令只展示将调用的包内脚本，不实际连接外部系统：
+
+```bash
+npx --no-install ai-employee preflight
+npx --no-install ai-employee backup
+npx --no-install ai-employee backup --apply
+npx --no-install ai-employee migrate
+npx --no-install ai-employee migrate --apply
+npx --no-install ai-employee doctor
+npx --no-install ai-employee probe
+npx --no-install ai-employee probe --apply
+npx --no-install ai-employee service install
+npx --no-install ai-employee service install --apply
+npx --no-install ai-employee service verify
+npx --no-install ai-employee verify
+npx --no-install ai-employee shadow
+```
+
+顺序不能省略：先只读预检，再显式备份和迁移，随后严格诊断、合成草稿探针、服务安装与验证。`probe --apply` 会产生一次固定合成 Codex 调用；不读取钉钉或数据库。直接 `service install --apply` 从当前安装包目录加载服务，适合首次接入；生产升级、不可变版本切换和自动回退仍须使用受控发布流程，不能把直接安装冒充版本化发布。`verify` 和 `shadow` 失败时只报告业务阻塞，不会自动处理死亡任务、打开发送或开启计划执行。
 
 ## 首次部署
 
@@ -132,9 +154,9 @@ npm run config:rotate-admin -- --yes
 
 引用只允许用于已登记密钥字段。任一密钥不存在、格式错误或钥匙串不可用时，整份配置都不会注入，服务直接停止；不会回退到明文或占位值。外部托管的管理令牌必须在原密钥库轮换，配置文件轮换命令会拒绝覆盖。
 
-使用仓库内的 GitHub 人工生产发布工作流时，应从[GitHub 生产配置示例](./deploy/GitHub生产配置.example.json)开始，5 项生产密钥统一引用 macOS 钥匙串；工作流拒绝包含这 5 项明文或临时环境变量引用的配置。
+GitHub“生产发布门禁”只核对不可变提交及云端“检查/安全扫描”，不读取生产配置，也不接触 Runner 或生产主机。实际发布只允许在已登录的 macOS 用户会话运行 `release:local`；发布器会拒绝生产配置中的任何内联密钥，并要求使用外部引用。
 
-macOS 上可先预览再迁移固定的 5 项生产密钥；命令会保留受保护的回滚快照，逐项回读成功后才替换配置：
+macOS 上可先预览再迁移固定的 5 项生产密钥；命令会在变更期间创建受保护的临时回滚快照，逐项回读成功后才替换配置，并在提交成功后删除临时明文快照。失败时保留快照供人工恢复，恢复完成后必须单独安全处置：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
@@ -221,6 +243,23 @@ npm run quality:report
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run db:restore:drill
 ```
+
+正式升级使用已登录的 macOS 用户会话执行固定提交发布。第一次命令只展示计划，不连接生产；人工核对后才在同一条命令末尾增加 `--apply`。目标必须是完整 40 位提交、属于最新 `origin/main` 历史（或清单固定回退基线），且该提交的 GitHub“检查”和“安全扫描”都已成功：
+
+```bash
+npm run release:local -- \
+  --sha REPLACE_WITH_APPROVED_FULL_SHA \
+  --root /absolute/path/ai-employee-production \
+  --config /absolute/path/production.json
+
+npm run release:local -- \
+  --sha REPLACE_WITH_APPROVED_FULL_SHA \
+  --root /absolute/path/ai-employee-production \
+  --config /absolute/path/production.json \
+  --apply
+```
+
+发布器先完成云端门禁，再准备不可变目录、备份和前向迁移；服务切换失败只在状态保护通过后恢复上一版本服务，绝不自动恢复数据库或执行反向迁移。发布成功也不会自动开启发送、计划执行或处理死亡任务。
 
 完整部署、升级、回滚、备份和恢复方法见[生产运维手册](./docs/生产运维手册.md)。
 
@@ -355,7 +394,7 @@ curl http://127.0.0.1:9464/metrics
 ```json
 {
   "AI_EMPLOYEE_ALERT_WEBHOOK_URL": "https://monitor.example/ai-employee",
-  "AI_EMPLOYEE_ALERT_WEBHOOK_SECRET": "至少 32 字节的独立随机密钥"
+  "AI_EMPLOYEE_ALERT_WEBHOOK_SECRET": "keychain://ai-employee-production/alert-webhook-secret"
 }
 ```
 
@@ -430,7 +469,7 @@ npm pack --dry-run
 npm run reuse:verify
 ```
 
-`check:full` 会在本机创建仅监听回环地址的随机 PostgreSQL 临时实例，清除子进程中的生产连接和业务密钥，只把临时测试库注入测试进程，结束后停止实例并清理专用临时目录。默认通过 `pg_config` 或 Homebrew 查找 PostgreSQL；需要指定版本时使用 `PG_TEST_BIN=/绝对路径/bin npm run check:full`。`reuse:verify` 会真实生成 tarball、安装到空目录、解析安装后的全部源码、初始化受保护配置、验证不可覆盖，再创建并校验一个默认无外部权限的项目清单；它不会连接生产数据库、钉钉或 Codex。GitHub 检查会在 Node.js 22 和 24 上启动真实 PostgreSQL 16，执行迁移、并发租约、审批、幂等和加密集成测试，并在当前 16 个迁移应用后运行 14 个迁移的旧版本集成测试，证明服务版本回退不要求反向修改数据库。
+`check:full` 会在本机创建仅监听回环地址的随机 PostgreSQL 临时实例，清除子进程中的生产连接和业务密钥，只把临时测试库注入测试进程，结束后停止实例并清理专用临时目录。默认通过 `pg_config` 或 Homebrew 查找 PostgreSQL；需要指定版本时使用 `PG_TEST_BIN=/绝对路径/bin npm run check:full`。`reuse:verify` 会真实生成 tarball、安装到两个空白工作区，验证初始化和 11 个上线入口的预览模式、全部迁移清单与零生命周期写入；它不会连接生产数据库、钉钉或 Codex。GitHub 检查会在 Node.js 22 和 24 上启动真实 PostgreSQL 16，执行仓库当前全部迁移、并发租约、审批、幂等和加密集成测试，并从固定 14 迁移基线验证旧服务兼容，证明服务回退不依赖反向修改数据库。
 
 `npm run rollback:verify` 只接受本机且名称带 `ai_employee_test` 边界的 PostgreSQL 测试库，拒绝生产地址；日常无需手工运行，云端检查会自动执行。
 

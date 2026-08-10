@@ -33,6 +33,8 @@ export function buildPlanResultDraft({ plan, steps, now = new Date() }) {
       confidence: 1,
       riskLevel: ["L3", "L4"].includes(plan.max_level) ? "high" : "medium",
       reason: "工作计划已经进入终态，结果需要回传原会话并由负责人审核。",
+      needsInformation: false,
+      relatedToWaitingTask: false,
       decisionSource: "work-plan-result",
       decisionKind: `work_plan_${plan.status}`,
     },

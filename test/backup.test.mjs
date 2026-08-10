@@ -29,14 +29,59 @@ async function fixture(t) {
   return directory;
 }
 
+function shellLiteral(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
 function environment(directory, pgDumpPath) {
   return {
     ...process.env,
+    HOME: directory,
+    TMPDIR: directory,
+    LANG: "zh_CN.UTF-8",
+    SSL_CERT_FILE: "/safe/cert.pem",
+    HTTPS_PROXY: "https://proxy.example",
+    PGSSLROOTCERT: "/safe/pg-root.pem",
+    DATABASE_SSL: "true",
     DATABASE_URL: "postgresql://user:password@127.0.0.1:5432/database",
     AI_EMPLOYEE_BACKUP_KEY: key,
     AI_EMPLOYEE_BACKUP_DIRECTORY: directory,
+    AI_EMPLOYEE_ADMIN_TOKEN: "admin-secret",
+    AI_EMPLOYEE_DATA_KEY: "data-secret",
+    ALERT_WEBHOOK_URL: "https://secret.example/hook",
+    DINGTALK_ACCESS_TOKEN: "dingtalk-secret",
+    UNRELATED_SECRET: "extra-secret",
     PG_DUMP_PATH: pgDumpPath,
   };
+}
+
+function environmentNames(content) {
+  return new Set(
+    content
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.slice(0, line.indexOf("=")))
+      .filter(Boolean),
+  );
+}
+
+function assertNoUnrelatedSecrets(names) {
+  for (const name of [
+    "DATABASE_URL",
+    "DATABASE_SSL",
+    "AI_EMPLOYEE_BACKUP_KEY",
+    "AI_EMPLOYEE_BACKUP_DIRECTORY",
+    "AI_EMPLOYEE_ADMIN_TOKEN",
+    "AI_EMPLOYEE_DATA_KEY",
+    "ALERT_WEBHOOK_URL",
+    "DINGTALK_ACCESS_TOKEN",
+    "UNRELATED_SECRET",
+    "PG_DUMP_PATH",
+    "PG_RESTORE_PATH",
+    "AI_EMPLOYEE_CONFIRM_RESTORE",
+  ]) {
+    assert.equal(names.has(name), false, `${name} must not reach database tools`);
+  }
 }
 
 test("备份成功后原子发布且可以通过认证解密恢复", async (t) => {
@@ -44,10 +89,15 @@ test("备份成功后原子发布且可以通过认证解密恢复", async (t) =
   const dumpPath = join(directory, "pg_dump");
   const restorePath = join(directory, "pg_restore");
   const restoredPath = join(directory, "restored.dump");
-  await executable(dumpPath, "#!/bin/sh\nprintf 'verified-dump-content'\n");
+  const dumpEnvironmentPath = join(directory, "dump.env");
+  const restoreEnvironmentPath = join(directory, "restore.env");
+  await executable(
+    dumpPath,
+    `#!/bin/sh\nenv | sort > ${shellLiteral(dumpEnvironmentPath)}\nprintf 'verified-dump-content'\n`,
+  );
   await executable(
     restorePath,
-    "#!/bin/sh\ncat > \"$FAKE_RESTORE_OUTPUT\"\n",
+    `#!/bin/sh\nenv | sort > ${shellLiteral(restoreEnvironmentPath)}\ncat > ${shellLiteral(restoredPath)}\n`,
   );
 
   const { stdout } = await execFileAsync(process.execPath, [backupScript], {
@@ -71,11 +121,42 @@ test("备份成功后原子发布且可以通过认证解密恢复", async (t) =
     env: {
       ...environment(directory, dumpPath),
       PG_RESTORE_PATH: restorePath,
-      FAKE_RESTORE_OUTPUT: restoredPath,
       AI_EMPLOYEE_CONFIRM_RESTORE: "yes",
     },
   });
   assert.equal(await readFile(restoredPath, "utf8"), "verified-dump-content");
+
+  for (const path of [dumpEnvironmentPath, restoreEnvironmentPath]) {
+    const childEnvironment = await readFile(path, "utf8");
+    const names = environmentNames(childEnvironment);
+    assertNoUnrelatedSecrets(names);
+    for (const secret of [
+      "admin-secret",
+      "data-secret",
+      "https://secret.example/hook",
+      "dingtalk-secret",
+      "extra-secret",
+    ]) {
+      assert.equal(childEnvironment.includes(secret), false);
+    }
+    for (const requiredName of [
+      "HOME",
+      "TMPDIR",
+      "LANG",
+      "SSL_CERT_FILE",
+      "HTTPS_PROXY",
+      "PATH",
+      "PGHOST",
+      "PGPORT",
+      "PGDATABASE",
+      "PGUSER",
+      "PGPASSWORD",
+      "PGSSLMODE",
+      "PGSSLROOTCERT",
+    ]) {
+      assert.equal(names.has(requiredName), true, `${requiredName} is required`);
+    }
+  }
 });
 
 test("pg_dump 失败时不会留下可误认的最终备份", async (t) => {

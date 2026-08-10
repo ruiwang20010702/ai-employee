@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 
 export const requiredWorkflows = Object.freeze([
-  Object.freeze({ file: "check.yml", name: "检查" }),
-  Object.freeze({ file: "security.yml", name: "安全扫描" }),
+  Object.freeze({ file: "check.yml", name: "检查", releaseEvents: ["push"] }),
+  Object.freeze({ file: "security.yml", name: "安全扫描", releaseEvents: ["push"] }),
 ]);
 
 function defaultRun(command, args, { cwd }) {
@@ -30,12 +30,34 @@ export function validateBranchRef(value) {
   return ref;
 }
 
-export function validateCompletedRun(run, expectedSha, expectedName) {
+export function validateCommitSha(value) {
+  const sha = String(value ?? "");
+  if (!/^[0-9a-f]{40}$/u.test(sha)) {
+    throw new Error("提交编号必须是完整的 40 位小写 SHA");
+  }
+  return sha;
+}
+
+export function validateCompletedRun(
+  run,
+  expectedSha,
+  expectedName,
+  { workflowDatabaseId = null, allowedEvents = null } = {},
+) {
   if (!run || run.name !== expectedName) {
     throw new Error(`缺少工作流结果：${expectedName}`);
   }
   if (run.headSha !== expectedSha) {
     throw new Error(`工作流提交不匹配：${expectedName}`);
+  }
+  if (
+    workflowDatabaseId != null &&
+    Number(run.workflowDatabaseId) !== Number(workflowDatabaseId)
+  ) {
+    throw new Error(`工作流身份不匹配：${expectedName}`);
+  }
+  if (allowedEvents && !allowedEvents.includes(run.event)) {
+    throw new Error(`工作流触发来源不允许：${expectedName}`);
   }
   if (run.status !== "completed" || run.conclusion !== "success") {
     throw new Error(`工作流未成功：${expectedName}`);
@@ -51,9 +73,16 @@ export function validateCompletedRun(run, expectedSha, expectedName) {
   };
 }
 
-export function chooseCurrentRun(runs, workflowName, expectedSha) {
+export function chooseCurrentRun(
+  runs,
+  workflowName,
+  expectedSha,
+  workflowDatabaseId = null,
+) {
   const matching = runs.filter(
-    (run) => run.name === workflowName && run.headSha === expectedSha,
+    (run) => run.name === workflowName && run.headSha === expectedSha &&
+      (workflowDatabaseId == null ||
+        Number(run.workflowDatabaseId) === Number(workflowDatabaseId)),
   );
   const active = matching.find(
     (run) => run.status === "queued" || run.status === "in_progress",
@@ -65,6 +94,54 @@ export function chooseCurrentRun(runs, workflowName, expectedSha) {
     throw new Error(`当前提交已有失败工作流：${workflowName}`);
   }
   return completed ?? null;
+}
+
+export function chooseReleaseRun(
+  runs,
+  workflowName,
+  expectedSha,
+  workflowDatabaseId = null,
+  allowedEvents = null,
+) {
+  const matching = runs
+    .filter((run) => run.name === workflowName && run.headSha === expectedSha &&
+      (workflowDatabaseId == null ||
+        Number(run.workflowDatabaseId) === Number(workflowDatabaseId)) &&
+      (allowedEvents == null || allowedEvents.includes(run.event)))
+    .sort((left, right) => {
+      const timeDifference = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+      if (Number.isFinite(timeDifference) && timeDifference !== 0) {
+        return timeDifference;
+      }
+      return Number(right.databaseId) - Number(left.databaseId);
+    });
+  if (matching.length === 0) {
+    throw new Error(`缺少目标提交的工作流结果：${workflowName}`);
+  }
+  return matching[0];
+}
+
+function loadWorkflowIdentity(workflow, run, cwd) {
+  let identity;
+  try {
+    identity = JSON.parse(run(
+      "gh",
+      ["api", `repos/{owner}/{repo}/actions/workflows/${workflow.file}`],
+      { cwd },
+    ));
+  } catch {
+    throw new Error(`无法验证工作流身份：${workflow.name}`);
+  }
+  if (
+    !Number.isSafeInteger(Number(identity?.id)) ||
+    Number(identity.id) <= 0 ||
+    identity.name !== workflow.name ||
+    identity.path !== `.github/workflows/${workflow.file}` ||
+    identity.state !== "active"
+  ) {
+    throw new Error(`工作流身份无效：${workflow.name}`);
+  }
+  return { ...workflow, workflowDatabaseId: Number(identity.id) };
 }
 
 function parseRunId(output, workflowName) {
@@ -87,8 +164,9 @@ export function verifyGitHubCommit({
   const branch = validateBranchRef(
     ref ?? run("git", ["branch", "--show-current"], { cwd }),
   );
-  const headSha = run("git", ["rev-parse", "HEAD"], { cwd });
-  if (!/^[0-9a-f]{40}$/u.test(headSha)) throw new Error("本地提交编号无效");
+  const headSha = validateCommitSha(run("git", ["rev-parse", "HEAD"], { cwd }));
+  const workflows = requiredWorkflows.map((workflow) =>
+    loadWorkflowIdentity(workflow, run, cwd));
 
   const remoteLine = run(
     "git",
@@ -110,15 +188,20 @@ export function verifyGitHubCommit({
       "--limit",
       "100",
       "--json",
-      "databaseId,name,status,conclusion,event,url,headSha,createdAt",
+      "databaseId,name,status,conclusion,event,url,headSha,createdAt,workflowDatabaseId,workflowName",
     ],
     { cwd },
   );
   const runs = JSON.parse(listOutput || "[]");
   const selected = [];
 
-  for (const workflow of requiredWorkflows) {
-    const existing = chooseCurrentRun(runs, workflow.name, headSha);
+  for (const workflow of workflows) {
+    const existing = chooseCurrentRun(
+      runs,
+      workflow.name,
+      headSha,
+      workflow.workflowDatabaseId,
+    );
     if (existing) {
       selected.push({ workflow, runId: Number(existing.databaseId), reused: true });
       continue;
@@ -146,13 +229,16 @@ export function verifyGitHubCommit({
           "view",
           String(item.runId),
           "--json",
-          "databaseId,name,status,conclusion,event,url,headSha",
+          "databaseId,name,status,conclusion,event,url,headSha,workflowDatabaseId,workflowName",
         ],
         { cwd },
       ),
     );
     results.push({
-      ...validateCompletedRun(view, headSha, item.workflow.name),
+      ...validateCompletedRun(view, headSha, item.workflow.name, {
+        workflowDatabaseId: item.workflow.workflowDatabaseId,
+        allowedEvents: ["push", "workflow_dispatch"],
+      }),
       reused: item.reused,
     });
   }
@@ -162,5 +248,58 @@ export function verifyGitHubCommit({
     ref: branch,
     headSha,
     workflows: results,
+  };
+}
+
+export function verifyGitHubReleaseCommit({
+  cwd = process.cwd(),
+  sha,
+  run = defaultRun,
+} = {}) {
+  const headSha = validateCommitSha(sha);
+  const workflows = requiredWorkflows.map((workflow) =>
+    loadWorkflowIdentity(workflow, run, cwd));
+  const listOutput = run(
+    "gh",
+    [
+      "run",
+      "list",
+      "--commit",
+      headSha,
+      "--limit",
+      "100",
+      "--json",
+      "databaseId,name,status,conclusion,event,url,headSha,createdAt,workflowDatabaseId,workflowName",
+    ],
+    { cwd },
+  );
+  let runs;
+  try {
+    runs = JSON.parse(listOutput || "[]");
+  } catch {
+    throw new Error("GitHub 工作流结果不是有效 JSON");
+  }
+  if (!Array.isArray(runs)) {
+    throw new Error("GitHub 工作流结果格式无效");
+  }
+  return {
+    valid: true,
+    headSha,
+    workflows: workflows.map((workflow) =>
+      validateCompletedRun(
+        chooseReleaseRun(
+          runs,
+          workflow.name,
+          headSha,
+          workflow.workflowDatabaseId,
+          workflow.releaseEvents,
+        ),
+        headSha,
+        workflow.name,
+        {
+          workflowDatabaseId: workflow.workflowDatabaseId,
+          allowedEvents: workflow.releaseEvents,
+        },
+      )),
   };
 }

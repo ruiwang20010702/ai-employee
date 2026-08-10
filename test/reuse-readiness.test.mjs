@@ -38,7 +38,7 @@ test("缺少配置时只读检查给出初始化动作且不假装可预检", as
   assert.equal(result.readOnly, true);
   assert.equal(result.config.exists, false);
   assert.equal(result.readyForPreflight, false);
-  assert.ok(result.nextActions.includes("运行 ai-employee init 创建受保护配置"));
+  assert.ok(result.nextActions.includes("运行 ai-employee init --apply 创建受保护配置"));
 });
 
 test("完整安全配置通过本地复用门禁但不会执行联网预检", async (t) => {
@@ -69,7 +69,7 @@ test("完整安全配置通过本地复用门禁但不会执行联网预检", as
   assert.equal(result.config.inlineSecretValues, 0);
   assert.equal(result.config.externalSecretReferences, 5);
   assert.deepEqual(checked, ["dws", "codex", "pg_dump", "pg_restore", "/usr/bin/git"]);
-  assert.deepEqual(result.nextActions, ["运行 production:preflight 进行联网只读预检"]);
+  assert.deepEqual(result.nextActions, ["运行 ai-employee preflight 进行联网只读预检"]);
   assert.doesNotMatch(JSON.stringify(result), /AI_EMPLOYEE_DATABASE_URL|target-1|self-1/u);
 });
 
@@ -124,22 +124,29 @@ test("畸形外部引用和重复密钥不能通过本地配置检查", async (t
   assert.ok(result.config.requiredEdits.includes("数据密钥和备份密钥必须不同"));
 });
 
-test("初始化入口创建配置且拒绝覆盖", async (t) => {
+test("初始化入口默认只预览，显式应用后创建配置且拒绝覆盖", async (t) => {
   const { directory, configPath } = await fixture(t);
-  const result = await runReuseGuide({ args: ["init"], cwd: directory });
+  const preview = await runReuseGuide({ args: ["init"], cwd: directory });
+  assert.equal(preview.dryRun, true);
+  assert.equal(preview.executed, false);
+  assert.equal(preview.configExists, false);
+  await assert.rejects(readFile(configPath), (error) => error.code === "ENOENT");
+
+  const result = await runReuseGuide({ args: ["init", "--apply"], cwd: directory });
   assert.equal(result.path, configPath);
   assert.equal(result.mode, "600");
+  assert.equal(result.executed, true);
   assert.equal(result.generatedSecrets.length, 0);
   assert.equal(result.externalSecretReferences.length, 4);
   await assert.rejects(
-    runReuseGuide({ args: ["init"], cwd: directory }),
+    runReuseGuide({ args: ["init", "--apply"], cwd: directory }),
     (error) => error.code === "EEXIST",
   );
 });
 
 test("新环境钥匙串命令默认预览且显式应用参数单独传递", async (t) => {
   const { directory, configPath } = await fixture(t);
-  await runReuseGuide({ args: ["init"], cwd: directory });
+  await runReuseGuide({ args: ["init", "--apply"], cwd: directory });
   const calls = [];
   const keychainProvisioner = async (options) => {
     calls.push(options);
@@ -155,4 +162,73 @@ test("新环境钥匙串命令默认预览且显式应用参数单独传递", as
     { configPath, apply: false },
     { configPath, apply: true },
   ]);
+});
+
+test("安装包上线命令默认计划写操作并只从固定包内脚本执行", async (t) => {
+  const { directory, configPath } = await fixture(t);
+  const calls = [];
+  const scriptRunner = async (options) => {
+    calls.push(options);
+    return { applied: [] };
+  };
+
+  const migrationPlan = await runReuseGuide({
+    args: ["migrate", "--config", configPath],
+    cwd: directory,
+    scriptRunner,
+  });
+  assert.equal(migrationPlan.schema, "ai-employee-command-plan/v1");
+  assert.equal(migrationPlan.dryRun, true);
+  assert.equal(migrationPlan.executed, false);
+  assert.equal(migrationPlan.applyRequired, true);
+  assert.match(migrationPlan.packageScript, /\/src\/migrate\.mjs$/u);
+  assert.equal(calls.length, 0);
+
+  const servicePlan = await runReuseGuide({
+    args: ["service", "install", "--config", configPath],
+    cwd: directory,
+    scriptRunner,
+  });
+  assert.equal(servicePlan.action, "install");
+  assert.equal(servicePlan.executed, false);
+  assert.match(servicePlan.boundary, /受控发布流程/u);
+  assert.equal(calls.length, 0);
+
+  const applied = await runReuseGuide({
+    args: ["migrate", "--apply", "--config", configPath],
+    cwd: directory,
+    scriptRunner,
+  });
+  assert.equal(applied.executed, true);
+  assert.deepEqual(applied.result, { applied: [] });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].configPath, configPath);
+  assert.deepEqual(calls[0].args, []);
+
+  const preflightPlan = await runReuseGuide({
+    args: ["preflight", "--dry-run", "--config", configPath],
+    cwd: directory,
+    scriptRunner,
+  });
+  assert.equal(preflightPlan.executed, false);
+  assert.equal(preflightPlan.applyRequired, false);
+  assert.match(preflightPlan.packageScript, /\/scripts\/生产预检\.mjs$/u);
+  assert.equal(calls.length, 1);
+
+  await assert.rejects(
+    runReuseGuide({
+      args: ["doctor", "--apply", "--config", configPath],
+      cwd: directory,
+      scriptRunner,
+    }),
+    /read-only/u,
+  );
+  await assert.rejects(
+    runReuseGuide({
+      args: ["migrate", "--apply", "--dry-run", "--config", configPath],
+      cwd: directory,
+      scriptRunner,
+    }),
+    /cannot be used together/u,
+  );
 });

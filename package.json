@@ -1,6 +1,6 @@
 {
   "name": "ai-employee-dingtalk-listener",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "bin": {
     "ai-employee": "scripts/新环境向导.mjs"
   },
@@ -47,7 +47,9 @@
     "reuse:verify": "node scripts/验证复用安装.mjs",
     "codex:verify": "node scripts/验证Codex插件.mjs",
     "ci:verify": "node scripts/验证GitHub提交.mjs",
+    "release:local": "node scripts/本机版本发布.mjs",
     "rollback:verify": "node scripts/验证服务回退兼容.mjs",
+    "rollback:state-guard": "node scripts/验证服务回退状态.mjs",
     "plan:check": "node scripts/评估任务计划.mjs",
     "config:init": "node scripts/初始化生产配置.mjs",
     "config:provision-keychain": "node scripts/初始化钥匙串密钥.mjs",

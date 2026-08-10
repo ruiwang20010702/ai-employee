@@ -96,7 +96,7 @@ test("Codex 只接收最小会话字段且临时草稿会被删除", async (t) =
       "  shift",
       "done",
       `cat > '${promptFile}'`,
-      "printf '%s' '{\"shouldReply\":true,\"reply\":\"收到，我来看一下。\",\"reason\":\"需要处理\",\"riskLevel\":\"low\",\"confidence\":0.9}' > \"$output\"",
+      "printf '%s' '{\"shouldReply\":true,\"reply\":\"收到，我来看一下。\",\"reason\":\"需要处理\",\"riskLevel\":\"low\",\"confidence\":0.9,\"needsInformation\":false,\"relatedToWaitingTask\":false,\"workRequest\":null}' > \"$output\"",
       "",
     ].join("\n"),
     { mode: 0o700 },
@@ -104,7 +104,7 @@ test("Codex 只接收最小会话字段且临时草稿会被删除", async (t) =
   await chmod(executable, 0o700);
   t.after(() => rm(directory, { recursive: true, force: true }));
   const taskId = "temporary-output-cleanup";
-  await generateReplyDraft(
+  const result = await generateReplyDraft(
     {
       taskId,
       content: "帮我看看",
@@ -125,6 +125,7 @@ test("Codex 只接收最小会话字段且临时草稿会被删除", async (t) =
       ],
     },
   );
+  assert.deepEqual(result.memoryCandidates, []);
   const prompt = await readFile(promptFile, "utf8");
   assert.match(prompt, /帮我看看/u);
   assert.doesNotMatch(prompt, /secret-user-id|secret-message-id|secret-gateway/u);
@@ -132,4 +133,108 @@ test("Codex 只接收最小会话字段且临时草稿会被删除", async (t) =
     new URL(`../.runtime/drafts/${taskId}.response.json`, import.meta.url),
   );
   await assert.rejects(access(outputPath), { code: "ENOENT" });
+});
+
+test("等待任务中的简短补充必须交给上下文判断而不是硬规则静默", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-employee-waiting-fragment-"));
+  const executable = join(directory, "fake-codex");
+  await writeFile(
+    executable,
+    [
+      "#!/bin/sh",
+      "output=''",
+      "while [ \"$#\" -gt 0 ]; do",
+      "  if [ \"$1\" = '--output-last-message' ]; then shift; output=\"$1\"; fi",
+      "  shift",
+      "done",
+      "cat >/dev/null",
+      "printf '%s' '{\"shouldReply\":true,\"reply\":\"收到，按周五规划。\",\"reason\":\"回答了原追问\",\"riskLevel\":\"low\",\"confidence\":0.95,\"needsInformation\":false,\"relatedToWaitingTask\":true,\"workRequest\":null}' > \"$output\"",
+      "",
+    ].join("\n"),
+    { mode: 0o700 },
+  );
+  await chmod(executable, 0o700);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const result = await generateReplyDraft(
+    {
+      taskId: "waiting-short-fragment",
+      content: "周五",
+      messages: [{ content: "周五" }],
+      waitingTask: {
+        originalRequest: "帮我做上线方案",
+        clarificationQuestion: "计划什么时候上线？",
+      },
+    },
+    { codexPath: executable },
+  );
+  assert.equal(result.relatedToWaitingTask, true);
+  assert.equal(result.decisionSource, "codex");
+});
+
+test("可执行工作请求必须同时生成回复草稿", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-employee-work-reply-"));
+  const executable = join(directory, "fake-codex");
+  await writeFile(
+    executable,
+    [
+      "#!/bin/sh",
+      "output=''",
+      "while [ \"$#\" -gt 0 ]; do",
+      "  if [ \"$1\" = '--output-last-message' ]; then shift; output=\"$1\"; fi",
+      "  shift",
+      "done",
+      "cat >/dev/null",
+      "printf '%s' '{\"shouldReply\":false,\"reply\":\"\",\"reason\":\"请求执行工作\",\"riskLevel\":\"low\",\"confidence\":0.95,\"needsInformation\":false,\"relatedToWaitingTask\":false,\"workRequest\":{\"requested\":true,\"objective\":\"整理方案\",\"projectHint\":\"\"},\"memoryCandidates\":[]}' > \"$output\"",
+      "",
+    ].join("\n"),
+    { mode: 0o700 },
+  );
+  await chmod(executable, 0o700);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await assert.rejects(
+    generateReplyDraft(
+      {
+        taskId: "work-request-needs-reply",
+        content: "帮我整理一份方案",
+        messages: [{ content: "帮我整理一份方案" }],
+      },
+      { codexPath: executable },
+    ),
+    /executable work request must include a reply draft/iu,
+  );
+});
+
+test("记忆候选使用脱敏消息别名并回绑精确平台消息", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-employee-memory-source-"));
+  const executable = join(directory, "fake-codex");
+  const promptFile = join(directory, "prompt.txt");
+  await writeFile(
+    executable,
+    [
+      "#!/bin/sh",
+      "output=''",
+      "while [ \"$#\" -gt 0 ]; do",
+      "  if [ \"$1\" = '--output-last-message' ]; then shift; output=\"$1\"; fi",
+      "  shift",
+      "done",
+      `cat > '${promptFile}'`,
+      "printf '%s' '{\"shouldReply\":false,\"reply\":\"\",\"reason\":\"无需回复\",\"riskLevel\":\"low\",\"confidence\":0.95,\"needsInformation\":false,\"relatedToWaitingTask\":false,\"workRequest\":null,\"memoryCandidates\":[{\"type\":\"person\",\"statement\":\"对方偏好简短回复。\",\"factKey\":\"communication.reply_length\",\"sensitivity\":\"internal\",\"retentionDays\":90,\"confidence\":0.95,\"projectHint\":\"\",\"sourceMessageId\":\"message_0\"}]}' > \"$output\"",
+      "",
+    ].join("\n"),
+    { mode: 0o700 },
+  );
+  await chmod(executable, 0o700);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const result = await generateReplyDraft({
+    taskId: "memory-source-alias",
+    content: "以后请简短回复\n另外帮我看下方案",
+    messages: [
+      { id: "actual-first-message", content: "以后请简短回复" },
+      { id: "actual-latest-message", content: "另外帮我看下方案" },
+    ],
+  }, { codexPath: executable });
+  assert.equal(result.memoryCandidates[0].sourceMessageId, "actual-first-message");
+  const prompt = await readFile(promptFile, "utf8");
+  assert.match(prompt, /"sourceMessageId": "message_0"/u);
+  assert.doesNotMatch(prompt, /actual-first-message|actual-latest-message/u);
 });

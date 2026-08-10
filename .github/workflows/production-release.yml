@@ -1,160 +1,82 @@
-name: 生产发布
+name: 生产发布门禁
 
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: 要发布的分支、标签或提交
+      sha:
+        description: 要发布的完整 40 位小写提交 SHA
         required: true
-        default: main
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ai-employee-production
+  group: ai-employee-production-gate
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: 人工批准后发布
-    environment: production
-    runs-on: [self-hosted, macOS, ai-employee-production]
-    timeout-minutes: 15
-    env:
-      AI_EMPLOYEE_DEPLOY_ROOT: ${{ vars.AI_EMPLOYEE_DEPLOY_ROOT }}
+  verify:
+    name: 固定提交并验证云端门禁
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
     steps:
-      - name: 签出当前发布控制器
+      - name: 拒绝可变引用和不完整提交编号
+        id: target
+        shell: bash
+        env:
+          AI_EMPLOYEE_TARGET_SHA: ${{ inputs.sha }}
+        run: |
+          if [[ ! "$AI_EMPLOYEE_TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "生产发布只接受完整的 40 位小写提交 SHA。" >&2
+            exit 1
+          fi
+          echo "deploy_sha=$AI_EMPLOYEE_TARGET_SHA" >> "$GITHUB_OUTPUT"
+      - name: 签出主分支发布控制器
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           path: .deployment-controller
-      - name: 签出目标业务版本
+      - name: 签出待验证的不可变目标
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ steps.target.outputs.deploy_sha }}
           fetch-depth: 0
           path: .release-source
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: .release-source/package-lock.json
       - name: 限制为主分支已审核提交
+        shell: bash
+        env:
+          AI_EMPLOYEE_TARGET_SHA: ${{ steps.target.outputs.deploy_sha }}
         run: |
           cd "$GITHUB_WORKSPACE/.release-source"
-          export AI_EMPLOYEE_DEPLOY_SHA="$(/usr/bin/git rev-parse HEAD)"
-          if ! /usr/bin/git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
-            export AI_EMPLOYEE_APPROVED_BASELINE="$(node -e '
+          test "$(/usr/bin/git rev-parse HEAD)" = "$AI_EMPLOYEE_TARGET_SHA"
+          if ! /usr/bin/git merge-base --is-ancestor "$AI_EMPLOYEE_TARGET_SHA" refs/remotes/origin/main; then
+            AI_EMPLOYEE_APPROVED_BASELINE="$(node -e '
               const fs = require("node:fs");
               const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
               process.stdout.write(String(manifest.commit || ""));
             ' "$GITHUB_WORKSPACE/.deployment-controller/deploy/回退基线.json")"
-            test "$AI_EMPLOYEE_DEPLOY_SHA" = "$AI_EMPLOYEE_APPROVED_BASELINE"
+            test "$AI_EMPLOYEE_TARGET_SHA" = "$AI_EMPLOYEE_APPROVED_BASELINE"
           fi
-          echo "AI_EMPLOYEE_DEPLOY_SHA=$AI_EMPLOYEE_DEPLOY_SHA" >> "$GITHUB_ENV"
-      - name: 准备稳定的版本目录
-        run: |
-          node "$GITHUB_WORKSPACE/.deployment-controller/scripts/准备版本化发布.mjs" prepare \
-            --root "$AI_EMPLOYEE_DEPLOY_ROOT" \
-            --sha "$AI_EMPLOYEE_DEPLOY_SHA" \
-            --run-id "$GITHUB_RUN_ID" \
-            --attempt "$GITHUB_RUN_ATTEMPT" \
-            --github-env "$GITHUB_ENV"
-      - name: 写入目标版本文件
-        run: |
-          /usr/bin/git -C "$GITHUB_WORKSPACE/.release-source" archive --format=tar HEAD |
-            /usr/bin/tar -xf - -C "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-      - run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-          npm ci
-      - run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-          npm audit --audit-level=high
-      - run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-          npm run check
-      - name: 注入受保护的生产配置
+      - name: 验证目标提交的检查与安全扫描
+        working-directory: .deployment-controller
         env:
-          AI_EMPLOYEE_CONFIG_JSON: ${{ secrets.AI_EMPLOYEE_CONFIG_JSON }}
+          GH_TOKEN: ${{ github.token }}
+          AI_EMPLOYEE_TARGET_SHA: ${{ steps.target.outputs.deploy_sha }}
         run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-          node <<'NODE'
-          const fs = require("node:fs");
-          const path = require("node:path");
-          const values = JSON.parse(process.env.AI_EMPLOYEE_CONFIG_JSON || "");
-          const requiredExternal = [
-            "DATABASE_URL",
-            "AI_EMPLOYEE_DATA_KEY",
-            "AI_EMPLOYEE_BACKUP_KEY",
-            "AI_EMPLOYEE_ADMIN_READ_TOKEN",
-            "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
-          ];
-          for (const key of requiredExternal) {
-            if (!/^keychain:\/\//u.test(String(values[key] || ""))) {
-              throw new Error(`macOS remote deployment requires a Keychain reference: ${key}`);
-            }
-          }
-          const runtime = path.join(process.cwd(), ".runtime");
-          const destination = path.join(runtime, "production.json");
-          fs.mkdirSync(runtime, { recursive: true, mode: 0o700 });
-          fs.chmodSync(runtime, 0o700);
-          fs.writeFileSync(destination, `${JSON.stringify(values, null, 2)}\n`, {
-            flag: "wx",
-            mode: 0o600,
-          });
-          NODE
-      - name: 只读生产预检与回退目标门禁
+          node scripts/验证GitHub提交.mjs \
+            --release-sha "$AI_EMPLOYEE_TARGET_SHA"
+      - name: 记录人工发布下一步
+        env:
+          AI_EMPLOYEE_TARGET_SHA: ${{ steps.target.outputs.deploy_sha }}
         run: |
-          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
-          node "$GITHUB_WORKSPACE/.deployment-controller/scripts/验证发布回退目标.mjs" \
-            --release "$AI_EMPLOYEE_RELEASE_DIRECTORY" \
-            --previous "$AI_EMPLOYEE_PREVIOUS_RELEASE"
-      - name: 执行数据库迁移
-        run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
-          npm run db:backup
-          npm run db:migrate
-      - name: 迁移后严格诊断与合成草稿探针
-        run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
-          npm run production:doctor
-          npm run production:codex-probe
-      - name: 标记即将切换常驻服务
-        run: echo "AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED=true" >> "$GITHUB_ENV"
-      - name: 安装并重启常驻服务
-        run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
-          npm run service:install
-          node "$GITHUB_WORKSPACE/.deployment-controller/scripts/清理版本外常驻服务.mjs" \
-            --release "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-      - name: 验证生产服务
-        run: |
-          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
-          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
-          npm run production:service-verify
-      - name: 固定当前成功版本
-        run: |
-          node "$GITHUB_WORKSPACE/.deployment-controller/scripts/准备版本化发布.mjs" activate \
-            --root "$AI_EMPLOYEE_DEPLOY_ROOT" \
-            --release "$AI_EMPLOYEE_RELEASE_DIRECTORY" \
-            --run-id "$GITHUB_RUN_ID" \
-            --attempt "$GITHUB_RUN_ATTEMPT"
-      - name: 发布失败时恢复上一版本服务
-        if: failure()
-        run: |
-          if [ "$AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED" = "true" ] &&
-            [ -n "$AI_EMPLOYEE_PREVIOUS_RELEASE" ]; then
-            cd "$AI_EMPLOYEE_PREVIOUS_RELEASE"
-            export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_PREVIOUS_RELEASE/.runtime/production.json"
-            npm run service:install
-            node "$GITHUB_WORKSPACE/.deployment-controller/scripts/清理版本外常驻服务.mjs" \
-              --release "$AI_EMPLOYEE_PREVIOUS_RELEASE"
-            npm run production:service-verify
-          else
-            echo "常驻服务尚未切换，或没有可验证的上一版本；无需执行服务回退。"
-          fi
+          echo "目标提交 $AI_EMPLOYEE_TARGET_SHA 已通过云端门禁。" >> "$GITHUB_STEP_SUMMARY"
+          echo "生产执行仅允许在已登录的 macOS 用户会话使用 npm run release:local，并再次核对同一 SHA。" >> "$GITHUB_STEP_SUMMARY"

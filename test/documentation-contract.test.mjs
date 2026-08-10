@@ -59,10 +59,31 @@ test("正式文档文件名保持中文统一口径", async () => {
   }
 });
 
-test("候选版与既有生产版本的状态口径不互相冒充", async () => {
-  const matrix = await projectText("docs/完成度矩阵.md");
-  assert.match(matrix, /既有生产技术版本已部署；V2\.0 候选版尚未部署/u);
-  assert.doesNotMatch(matrix, /\| 生产放量 \| 新版已部署/u);
+test("技术部署与业务自动化放量的状态口径不互相冒充", async () => {
+  const [matrix, acceptance, review] = await Promise.all([
+    projectText("docs/完成度矩阵.md"),
+    projectText("docs/验收报告.md"),
+    projectText("docs/统一审查报告.md"),
+  ]);
+  assert.match(matrix, /V2\.0 技术版本已部署/u);
+  assert.match(matrix, /技术发布完成，业务自动化尚未放量/u);
+  assert.match(acceptance, /技术发布完成不等于业务自动化放量/u);
+  assert.match(review, /技术版本已部署.+业务自动化尚未放量/u);
+  for (const text of [matrix, acceptance, review]) {
+    assert.doesNotMatch(text, /V2\.0[^\n|]*(?:尚未提交|尚未推送|尚未部署)/u);
+  }
+});
+
+test("完成度矩阵明确区分目标能力、当前授权和候选版闭环", async () => {
+  const [requirements, matrix] = await Promise.all([
+    projectText("docs/产品需求文档.md"),
+    projectText("docs/完成度矩阵.md"),
+  ]);
+  assert.match(requirements, /产品能力目标，不代表当前生产已经开放相应权限/u);
+  assert.match(matrix, /当前生产授权项目为 0/u);
+  assert.match(matrix, /V2\.1 工作区候选版已实现/u);
+  assert.match(matrix, /第 017 号迁移尚未应用生产/u);
+  assert.match(matrix, /费用估算和实际费用核销尚未闭环/u);
 });
 
 test("新环境文档禁止把生成的生产密钥写入配置", async () => {

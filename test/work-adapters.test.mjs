@@ -604,9 +604,9 @@ test("待办和日程只使用清单固定人员并在创建后回读", async (t
     "const args = process.argv.slice(2);",
     `fs.appendFileSync(${JSON.stringify(argumentsPath)}, JSON.stringify(args)+'\\n');`,
     "if (args[0] === 'todo' && args[2] === 'create') console.log(JSON.stringify({result:{todoTaskId:'todo-1'}}));",
-    "else if (args[0] === 'todo' && args[2] === 'get') console.log(JSON.stringify({result:{id:'todo-1',title:'完成评审'}}));",
+    "else if (args[0] === 'todo' && args[2] === 'get') console.log(JSON.stringify({result:{id:'todo-1',title:'完成评审',priority:'30',due:'2026-08-05T18:00:00+08:00',executorUserIds:['executor-1']}}));",
     "else if (args[0] === 'calendar' && args[2] === 'create') console.log(JSON.stringify({result:{eventId:'event-1'}}));",
-    "else if (args[0] === 'calendar' && args[2] === 'get') console.log(JSON.stringify({result:{id:'event-1',summary:'项目评审'}}));",
+    "else if (args[0] === 'calendar' && args[2] === 'get') console.log(JSON.stringify({result:{id:'event-1',summary:'项目评审',start:'2026-08-05T10:00:00+08:00',end:'2026-08-05T11:00:00+08:00',timezone:'Asia/Shanghai',freeBusy:'busy',attendeeUserIds:['attendee-1']}}));",
     "else process.exit(2);",
   ].join("\n"), { mode: 0o700 });
   const manifest = {
@@ -676,6 +676,112 @@ test("待办和日程只使用清单固定人员并在创建后回读", async (t
   assert.equal(calls.every((call) => call.slice(-2).join(" ") === "--format json"), true);
 });
 
+test("日程回读拒绝未申请的会议室和循环规则", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-calendar-extra-fields-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const executable = join(directory, "fake-dws");
+  const statePath = join(directory, "mode.txt");
+  await writeFile(executable, [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const args = process.argv.slice(2);",
+    "if (args[0] === 'calendar' && args[2] === 'create') console.log(JSON.stringify({result:{eventId:'event-extra'}}));",
+    "else if (args[0] === 'calendar' && args[2] === 'get') {",
+    `  const mode=fs.readFileSync(${JSON.stringify(statePath)},'utf8').trim();`,
+    "  const extra=mode==='room'?{roomId:'unexpected-room'}:{recurrenceType:'weekly',recurrenceInterval:'1',recurrenceCount:'6',recurrenceDaysOfWeek:['tuesday']};",
+    "  console.log(JSON.stringify({result:{id:'event-extra',summary:'项目评审',start:'2026-08-05T10:00:00+08:00',end:'2026-08-05T11:00:00+08:00',timezone:'Asia/Shanghai',freeBusy:'busy',attendeeUserIds:[],...extra}}));",
+    "}",
+    "else process.exit(2);",
+  ].join("\n"), { mode: 0o700 });
+  const manifest = {
+    capabilities: {
+      dingtalk_calendar_create: {
+        allowedAttendeeUserIds: [],
+        allowedRoomNames: ["永澄亭"],
+        allowRecurrence: true,
+        allowedRecurrenceTypes: ["weekly"],
+        maxRecurrenceCount: 10,
+        maxDurationMinutes: 120,
+        maxTitleChars: 120,
+        timeoutMs: 10_000,
+      },
+    },
+  };
+  const adapter = createControlledWorkAdapters({
+    codexPath: "/bin/false",
+    dwsPath: executable,
+  }).dingtalk_calendar_create;
+  const step = {
+    capability: "dingtalk_calendar_create",
+    inputs: {
+      title: "项目评审",
+      start: "2026-08-05T10:00:00+08:00",
+      end: "2026-08-05T11:00:00+08:00",
+      attendeeUserIds: [],
+      timezone: "Asia/Shanghai",
+    },
+  };
+  for (const mode of ["room", "recurrence"]) {
+    await writeFile(statePath, mode);
+    await assert.rejects(
+      adapter.execute({ step, manifest }),
+      /calendar readback did not match created event/u,
+    );
+  }
+});
+
+test("办公动作回读缺少获批字段时标记为需要人工对账", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-office-readback-failure-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const executable = join(directory, "fake-dws");
+  await writeFile(executable, [
+    "#!/usr/bin/env node",
+    "const args = process.argv.slice(2);",
+    "if (args[2] === 'create') console.log(JSON.stringify({result:{todoTaskId:'todo-unknown'}}));",
+    "else if (args[2] === 'get') console.log(JSON.stringify({result:{id:'todo-unknown',title:'完成评审'}}));",
+    "else process.exit(2);",
+  ].join("\n"), { mode: 0o700 });
+  const adapter = createControlledWorkAdapters({
+    codexPath: "/bin/false",
+    dwsPath: executable,
+  }).dingtalk_todo_create;
+  await assert.rejects(
+    adapter.execute({
+      step: {
+        capability: "dingtalk_todo_create",
+        inputs: {
+          title: "完成评审",
+          executorUserIds: ["executor-1"],
+          priority: "30",
+        },
+      },
+      manifest: {
+        capabilities: {
+          dingtalk_todo_create: {
+            allowedExecutorUserIds: ["executor-1"],
+            allowedPriorities: ["30"],
+            maxTitleChars: 120,
+            timeoutMs: 10_000,
+          },
+        },
+      },
+    }),
+    (error) => {
+      assert.match(error.message, /readback did not match/u);
+      assert.deepEqual(error.executionEvidence, {
+        kind: "dingtalk_todo_readback_unknown",
+        inputSha256: error.executionEvidence.inputSha256,
+        taskId: "todo-unknown",
+        verification: "external_side_effect_requires_reconciliation",
+        reconciliationRequired: true,
+        outputStored: false,
+      });
+      assert.match(error.executionEvidence.inputSha256, /^[a-f0-9]{64}$/u);
+      return true;
+    },
+  );
+});
+
 test("日志提交核对固定模板结构、使用临时文件并在提交后回读", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "ai-report-submit-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -696,7 +802,7 @@ test("日志提交核对固定模板结构、使用临时文件并在提交后�
     `  fs.writeFileSync(${JSON.stringify(contentsRecord)}, fs.readFileSync(file));`,
     "  console.log(JSON.stringify({result:{reportId:'report-1'}}));",
     "} else if (args[0] === 'report' && args[1] === 'entry' && args[2] === 'get') {",
-    "  console.log(JSON.stringify({result:{reportId:'report-1',report_name:'项目日报'}}));",
+    "  console.log(JSON.stringify({result:{reportId:'report-1',report_template_id:'template-1',report_name:'项目日报',contents:[{key:'今日完成',content:'完成方案'},{key:'明日计划',content:'推进评审'}]}}));",
     "} else process.exit(2);",
   ].join("\n"), { mode: 0o700 });
   const manifest = {
@@ -798,14 +904,21 @@ test("会议室 ID 只来自同一时段实时搜索且循环日程使用有界�
   t.after(() => rm(directory, { recursive: true, force: true }));
   const executable = join(directory, "fake-dws");
   const argumentsPath = join(directory, "arguments.jsonl");
+  const calendarStatePath = join(directory, "calendar-state.json");
   await writeFile(executable, [
     "#!/usr/bin/env node",
     "const fs = require('node:fs');",
     "const args = process.argv.slice(2);",
     `fs.appendFileSync(${JSON.stringify(argumentsPath)}, JSON.stringify(args)+'\\n');`,
     "if (args[0] === 'calendar' && args[1] === 'room') console.log(JSON.stringify({result:{rooms:[{roomId:'real-room-id',roomName:'永澄亭'}]}}));",
-    "else if (args[0] === 'calendar' && args[2] === 'create') console.log(JSON.stringify({result:{eventId:'event-room'}}));",
-    "else if (args[0] === 'calendar' && args[2] === 'get') console.log(JSON.stringify({result:{eventId:'event-room'}}));",
+    "else if (args[0] === 'calendar' && args[2] === 'create') {",
+    `  fs.writeFileSync(${JSON.stringify(calendarStatePath)}, JSON.stringify({title:args[args.indexOf('--title')+1],roomId:args.includes('--rooms')?args[args.indexOf('--rooms')+1]:null,recurrenceType:args.includes('--recurrence-type')?args[args.indexOf('--recurrence-type')+1]:null,recurrenceInterval:args.includes('--recurrence-interval')?args[args.indexOf('--recurrence-interval')+1]:null,recurrenceCount:args.includes('--recurrence-count')?args[args.indexOf('--recurrence-count')+1]:null,recurrenceDaysOfWeek:args.includes('--recurrence-days-of-week')?args[args.indexOf('--recurrence-days-of-week')+1].split(','):[]}));`,
+    "  console.log(JSON.stringify({result:{eventId:'event-room'}}));",
+    "}",
+    "else if (args[0] === 'calendar' && args[2] === 'get') {",
+    `  const state=JSON.parse(fs.readFileSync(${JSON.stringify(calendarStatePath)},'utf8'));`,
+    "  console.log(JSON.stringify({result:{eventId:'event-room',summary:state.title,start:'2026-08-05T10:00:00+08:00',end:'2026-08-05T11:00:00+08:00',timezone:'Asia/Shanghai',freeBusy:'busy',attendeeUserIds:[],...state}}));",
+    "}",
     "else process.exit(2);",
   ].join("\n"), { mode: 0o700 });
   const manifest = {

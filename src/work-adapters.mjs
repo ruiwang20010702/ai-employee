@@ -299,6 +299,95 @@ function directScalar(object, names) {
   return null;
 }
 
+function directText(object, names) {
+  for (const name of names) {
+    if (typeof object?.[name] === "string") return object[name];
+    if (typeof object?.[name] === "number") return String(object[name]);
+  }
+  return null;
+}
+
+function identityValues(value, output = []) {
+  if (value == null) return output;
+  if (["string", "number"].includes(typeof value)) {
+    for (const item of String(value).split(",").map((part) => part.trim())) {
+      if (item) output.push(item);
+    }
+    return output;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) identityValues(item, output);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  const identity = directScalar(value, [
+    "userId", "user_id", "staffId", "staff_id",
+    "openId", "open_id", "unionId", "union_id",
+  ]);
+  if (identity) output.push(identity);
+  return output;
+}
+
+function namedIdentityValues(payload, names, depth = 0, output = []) {
+  if (depth > 6 || payload == null) return output;
+  if (Array.isArray(payload)) {
+    for (const item of payload) namedIdentityValues(item, names, depth + 1, output);
+    return output;
+  }
+  if (typeof payload !== "object") return output;
+  for (const [name, value] of Object.entries(payload)) {
+    if (names.includes(name)) identityValues(value, output);
+    namedIdentityValues(value, names, depth + 1, output);
+  }
+  return [...new Set(output)];
+}
+
+function sameStringSet(actual, expected) {
+  return JSON.stringify([...new Set(actual)].sort()) ===
+    JSON.stringify([...new Set(expected)].sort());
+}
+
+function sameOptionalScalar(actual, expected) {
+  const normalize = (value) => {
+    if (value == null) return null;
+    const normalized = String(value).trim();
+    return normalized || null;
+  };
+  return normalize(actual) === normalize(expected);
+}
+
+function sameInstant(actual, expected) {
+  if (!actual || !expected) return actual == null && expected == null;
+  const left = new Date(actual).getTime();
+  const right = new Date(expected).getTime();
+  return Number.isFinite(left) && Number.isFinite(right) && left === right;
+}
+
+function reportContentsFromEntry(payload) {
+  return collectObjects(payload).flatMap((object) => {
+    const key = directScalar(object, [
+      "key", "fieldName", "field_name", "reportFieldName", "report_field_name",
+    ]);
+    const content = directText(object, [
+      "content", "value", "fieldValue", "field_value", "reportFieldValue",
+      "report_field_value",
+    ]);
+    return key && content != null ? [{ key, content }] : [];
+  });
+}
+
+function externalSideEffectError(error, evidence) {
+  if (!error.executionEvidence) {
+    error.executionEvidence = {
+      ...evidence,
+      verification: "external_side_effect_requires_reconciliation",
+      reconciliationRequired: true,
+      outputStored: false,
+    };
+  }
+  return error;
+}
+
 function roomsFromSearch(payload) {
   const seen = new Set();
   return collectObjects(payload).flatMap((object) => {
@@ -1034,6 +1123,9 @@ export function createControlledWorkAdapters({
       },
       async execute({ step, manifest }) {
         const input = normalizedOfficeInputs(step, manifest);
+        const inputSha256 = createHash("sha256")
+          .update(JSON.stringify(input))
+          .digest("hex");
         const args = [
           "todo", "task", "create",
           "--title", input.title,
@@ -1041,34 +1133,74 @@ export function createControlledWorkAdapters({
           "--priority", input.priority,
         ];
         if (input.due) args.push("--due", input.due);
-        const createdPayload = await dws(
-          dwsPath,
-          args,
-          manifest.capabilities.dingtalk_todo_create.timeoutMs ?? 60_000,
-        );
+        let createdPayload;
+        try {
+          createdPayload = await dws(
+            dwsPath,
+            args,
+            manifest.capabilities.dingtalk_todo_create.timeoutMs ?? 60_000,
+          );
+        } catch (error) {
+          throw externalSideEffectError(error, {
+            kind: "dingtalk_todo_create_unknown",
+            inputSha256,
+            taskId: null,
+          });
+        }
         const taskId = firstScalar(createdPayload, ["todoTaskId", "taskId", "id"]);
-        if (!taskId) throw new Error("DWS todo create did not return taskId");
-        const readback = await dws(
-          dwsPath,
-          ["todo", "task", "get", "--task-id", taskId],
-          manifest.capabilities.dingtalk_todo_create.timeoutMs ?? 60_000,
-        );
+        if (!taskId) {
+          throw externalSideEffectError(
+            new Error("DWS todo create did not return taskId"),
+            { kind: "dingtalk_todo_create_unknown", inputSha256, taskId: null },
+          );
+        }
+        let readback;
+        try {
+          readback = await dws(
+            dwsPath,
+            ["todo", "task", "get", "--task-id", taskId],
+            manifest.capabilities.dingtalk_todo_create.timeoutMs ?? 60_000,
+          );
+        } catch (error) {
+          throw externalSideEffectError(error, {
+            kind: "dingtalk_todo_readback_unknown",
+            inputSha256,
+            taskId,
+          });
+        }
         const readbackTaskId = firstScalar(
           readback,
           ["todoTaskId", "taskId", "id"],
         );
         const readbackTitle = firstScalar(readback, ["title", "subject"]);
-        if (readbackTaskId !== taskId || (readbackTitle && readbackTitle !== input.title)) {
-          throw new Error("DWS todo readback did not match created task");
+        const readbackPriority = firstScalar(readback, ["priority"]);
+        const readbackDue = firstScalar(
+          readback,
+          ["due", "dueAt", "due_at", "dueTime", "due_time", "dueDate", "due_date"],
+        );
+        const readbackExecutors = namedIdentityValues(readback, [
+          "executorUserIds", "executor_user_ids", "executorStaffIds",
+          "executor_staff_ids", "executors", "executorInfos", "executor_infos",
+        ]);
+        if (
+          readbackTaskId !== taskId ||
+          readbackTitle !== input.title ||
+          readbackPriority !== input.priority ||
+          !sameStringSet(readbackExecutors, input.executorUserIds) ||
+          (input.due && !sameInstant(readbackDue, input.due)) ||
+          (!input.due && readbackDue)
+        ) {
+          throw externalSideEffectError(
+            new Error("DWS todo readback did not match created task"),
+            { kind: "dingtalk_todo_readback_unknown", inputSha256, taskId },
+          );
         }
         return {
           verified: true,
           evidence: {
             kind: "verified_dingtalk_todo",
             taskId,
-            inputSha256: createHash("sha256")
-              .update(JSON.stringify(input))
-              .digest("hex"),
+            inputSha256,
             readbackSha256: createHash("sha256")
               .update(JSON.stringify(dwsResult(readback)))
               .digest("hex"),
@@ -1086,6 +1218,9 @@ export function createControlledWorkAdapters({
       },
       async execute({ step, manifest }) {
         const input = normalizedOfficeInputs(step, manifest);
+        const inputSha256 = createHash("sha256")
+          .update(JSON.stringify(input))
+          .digest("hex");
         let room = null;
         if (input.roomName) {
           const roomsPayload = await dws(
@@ -1132,31 +1267,108 @@ export function createControlledWorkAdapters({
             );
           }
         }
-        const createdPayload = await dws(
-          dwsPath,
-          args,
-          manifest.capabilities.dingtalk_calendar_create.timeoutMs ?? 60_000,
-        );
+        let createdPayload;
+        try {
+          createdPayload = await dws(
+            dwsPath,
+            args,
+            manifest.capabilities.dingtalk_calendar_create.timeoutMs ?? 60_000,
+          );
+        } catch (error) {
+          throw externalSideEffectError(error, {
+            kind: "dingtalk_calendar_create_unknown",
+            inputSha256,
+            eventId: null,
+          });
+        }
         const eventId = firstScalar(createdPayload, ["eventId", "id"]);
-        if (!eventId) throw new Error("DWS calendar create did not return eventId");
-        const readback = await dws(
-          dwsPath,
-          ["calendar", "event", "get", "--id", eventId],
-          manifest.capabilities.dingtalk_calendar_create.timeoutMs ?? 60_000,
-        );
+        if (!eventId) {
+          throw externalSideEffectError(
+            new Error("DWS calendar create did not return eventId"),
+            { kind: "dingtalk_calendar_create_unknown", inputSha256, eventId: null },
+          );
+        }
+        let readback;
+        try {
+          readback = await dws(
+            dwsPath,
+            ["calendar", "event", "get", "--id", eventId],
+            manifest.capabilities.dingtalk_calendar_create.timeoutMs ?? 60_000,
+          );
+        } catch (error) {
+          throw externalSideEffectError(error, {
+            kind: "dingtalk_calendar_readback_unknown",
+            inputSha256,
+            eventId,
+          });
+        }
         const readbackEventId = firstScalar(readback, ["eventId", "id"]);
         const readbackTitle = firstScalar(readback, ["summary", "title"]);
-        if (readbackEventId !== eventId || (readbackTitle && readbackTitle !== input.title)) {
-          throw new Error("DWS calendar readback did not match created event");
+        const readbackStart = firstScalar(
+          readback,
+          ["start", "startAt", "start_at", "startTime", "start_time"],
+        );
+        const readbackEnd = firstScalar(
+          readback,
+          ["end", "endAt", "end_at", "endTime", "end_time"],
+        );
+        const readbackTimezone = firstScalar(readback, ["timezone", "timeZone", "time_zone"]);
+        const readbackFreeBusy = firstScalar(readback, ["freeBusy", "free_busy"]);
+        const readbackDescription = firstScalar(readback, ["description", "desc"]);
+        const readbackLocation = firstScalar(readback, ["location"]);
+        const readbackAttendees = namedIdentityValues(readback, [
+          "attendeeUserIds", "attendee_user_ids", "attendees",
+          "attendeeInfos", "attendee_infos",
+        ]);
+        const readbackRoomId = firstScalar(readback, ["roomId", "room_id"]);
+        const recurrenceType = firstScalar(readback, ["recurrenceType", "recurrence_type"]);
+        const recurrenceInterval = firstScalar(
+          readback,
+          ["recurrenceInterval", "recurrence_interval"],
+        );
+        const recurrenceCount = firstScalar(
+          readback,
+          ["recurrenceCount", "recurrence_count"],
+        );
+        const recurrenceDays = namedIdentityValues(readback, [
+          "recurrenceDaysOfWeek", "recurrence_days_of_week", "daysOfWeek",
+        ]);
+        if (
+          readbackEventId !== eventId ||
+          readbackTitle !== input.title ||
+          !sameInstant(readbackStart, input.start) ||
+          !sameInstant(readbackEnd, input.end) ||
+          readbackTimezone !== input.timezone ||
+          readbackFreeBusy !== input.freeBusy ||
+          !sameOptionalScalar(readbackDescription, input.description) ||
+          !sameOptionalScalar(readbackLocation, input.location) ||
+          !sameStringSet(readbackAttendees, input.attendeeUserIds) ||
+          readbackRoomId !== (room?.roomId ?? null) ||
+          (input.recurrence
+            ? (
+                recurrenceType !== input.recurrence.type ||
+                recurrenceInterval !== String(input.recurrence.interval) ||
+                recurrenceCount !== String(input.recurrence.count) ||
+                !sameStringSet(recurrenceDays, input.recurrence.daysOfWeek)
+              )
+            : (
+                recurrenceType !== null ||
+                recurrenceInterval !== null ||
+                recurrenceCount !== null ||
+                recurrenceDays.length > 0
+              ))
+        ) {
+          throw externalSideEffectError(
+            new Error("DWS calendar readback did not match created event"),
+            { kind: "dingtalk_calendar_readback_unknown", inputSha256, eventId },
+          );
         }
         return {
           verified: true,
           evidence: {
             kind: "verified_dingtalk_calendar_event",
             eventId,
-            inputSha256: createHash("sha256")
-              .update(JSON.stringify(input))
-              .digest("hex"),
+            inputSha256,
             readbackSha256: createHash("sha256")
               .update(JSON.stringify(dwsResult(readback)))
               .digest("hex"),
@@ -1208,31 +1420,78 @@ export function createControlledWorkAdapters({
             mode: 0o600,
             flag: "wx",
           });
-          const submittedPayload = await dws(
-            dwsPath,
-            [
-              "report", "entry", "submit",
-              "--template-id", rule.templateId,
-              "--contents-file", contentsPath,
-            ],
-            rule.timeoutMs ?? 60_000,
-          );
+          const contentSha256 = createHash("sha256")
+            .update(submission.serialized)
+            .digest("hex");
+          let submittedPayload;
+          try {
+            submittedPayload = await dws(
+              dwsPath,
+              [
+                "report", "entry", "submit",
+                "--template-id", rule.templateId,
+                "--contents-file", contentsPath,
+              ],
+              rule.timeoutMs ?? 60_000,
+            );
+          } catch (error) {
+            throw externalSideEffectError(error, {
+              kind: "dingtalk_report_submit_unknown",
+              contentSha256,
+              reportId: null,
+            });
+          }
           const reportId = firstScalar(
             submittedPayload,
             ["reportId", "report_id", "id"],
           );
-          if (!reportId) throw new Error("DWS report submit did not return reportId");
-          const readback = await dws(
-            dwsPath,
-            ["report", "entry", "get", "--report-id", reportId],
-            rule.timeoutMs ?? 60_000,
-          );
+          if (!reportId) {
+            throw externalSideEffectError(
+              new Error("DWS report submit did not return reportId"),
+              { kind: "dingtalk_report_submit_unknown", contentSha256, reportId: null },
+            );
+          }
+          let readback;
+          try {
+            readback = await dws(
+              dwsPath,
+              ["report", "entry", "get", "--report-id", reportId],
+              rule.timeoutMs ?? 60_000,
+            );
+          } catch (error) {
+            throw externalSideEffectError(error, {
+              kind: "dingtalk_report_readback_unknown",
+              contentSha256,
+              reportId,
+            });
+          }
           const readbackReportId = firstScalar(
             readback,
             ["reportId", "report_id", "id"],
           );
-          if (readbackReportId !== reportId) {
-            throw new Error("DWS report readback did not match submitted report");
+          const readbackTemplateId = firstScalar(
+            readback,
+            ["reportTemplateId", "report_template_id", "templateId", "template_id"],
+          );
+          const readbackTemplateName = firstScalar(
+            readback,
+            ["reportTemplateName", "report_template_name", "templateName", "report_name"],
+          );
+          const readbackContents = reportContentsFromEntry(readback)
+            .sort((left, right) => left.key.localeCompare(right.key, "zh-CN"));
+          const expectedContents = submission.contents
+            .map(({ key, content }) => ({ key, content }))
+            .sort((left, right) => left.key.localeCompare(right.key, "zh-CN"));
+          if (
+            readbackReportId !== reportId ||
+            readbackTemplateId !== rule.templateId ||
+            readbackTemplateName !== rule.templateName ||
+            JSON.stringify(readbackContents) !== JSON.stringify(expectedContents)
+          ) {
+            throw externalSideEffectError(
+              new Error("DWS report readback did not match submitted report"),
+              { kind: "dingtalk_report_readback_unknown", contentSha256, reportId },
+            );
           }
           return {
             verified: true,
@@ -1242,9 +1501,7 @@ export function createControlledWorkAdapters({
               templateIdSha256: createHash("sha256")
                 .update(rule.templateId)
                 .digest("hex"),
-              contentSha256: createHash("sha256")
-                .update(submission.serialized)
-                .digest("hex"),
+              contentSha256,
               readbackSha256: createHash("sha256")
                 .update(JSON.stringify(dwsResult(readback)))
                 .digest("hex"),

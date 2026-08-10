@@ -129,6 +129,8 @@ export async function createCapabilityDraft({
     confidence: 1,
     riskLevel: "low",
     reason: "对方询问 AI 员工能力，依据当前全局开关和请求人项目授权生成确定性说明。",
+    needsInformation: false,
+    relatedToWaitingTask: false,
     decisionSource: "capability_catalog",
     decisionKind: "capability_summary",
     workRequest: null,

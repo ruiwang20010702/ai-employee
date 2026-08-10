@@ -4,8 +4,16 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { DataCipher } from "./crypto.mjs";
-import { splitMessageBursts } from "./message-bundling.mjs";
+import {
+  capabilityBudgetSnapshot,
+  normalizeCapabilityBudget,
+} from "./capability-budget.mjs";
+import {
+  shouldFlushMessageBundleEarly,
+  splitMessageBursts,
+} from "./message-bundling.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "./memory-policy.mjs";
+import { validateAutomaticMemoryProposal } from "./memory-candidate.mjs";
 import { memoryDeletionConfirmation } from "./memory-portability.mjs";
 import { validateSourceAccessChange } from "./memory-source-access.mjs";
 import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
@@ -81,9 +89,13 @@ function workPlanFromRow(row, cipher) {
     requester_id: cipher.decrypt(row.requester_ciphertext),
     objective: cipher.decrypt(row.objective_ciphertext),
     plan: JSON.parse(cipher.decrypt(row.plan_ciphertext)),
+    capability_budget: row.capability_budget_ciphertext
+      ? JSON.parse(cipher.decrypt(row.capability_budget_ciphertext))
+      : null,
     requester_ciphertext: undefined,
     objective_ciphertext: undefined,
     plan_ciphertext: undefined,
+    capability_budget_ciphertext: undefined,
   };
 }
 
@@ -153,8 +165,11 @@ export class Store {
         approved_at TEXT,
         approved_by TEXT,
         privacy_erased_at TEXT,
+        continuation_of_task_id TEXT,
+        waiting_information_at TEXT,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(continuation_of_task_id) REFERENCES tasks(id) ON DELETE SET NULL
       );
 
       CREATE INDEX IF NOT EXISTS tasks_claimable
@@ -234,6 +249,8 @@ export class Store {
         objective_ciphertext TEXT NOT NULL,
         plan_ciphertext TEXT NOT NULL,
         plan_hash TEXT NOT NULL UNIQUE,
+        authorization_hash TEXT,
+        capability_budget_ciphertext TEXT,
         max_level TEXT NOT NULL,
         policy_decision TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -309,53 +326,6 @@ export class Store {
         created_at TEXT NOT NULL
       );
     `);
-    const workPlanColumns = new Set(
-      this.db.prepare("PRAGMA table_info(work_plans)").all().map((row) => row.name),
-    );
-    const taskColumns = new Set(
-      this.db.prepare("PRAGMA table_info(tasks)").all().map((row) => row.name),
-    );
-    const reviewColumns = new Set(
-      this.db.prepare("PRAGMA table_info(decision_reviews)").all().map((row) => row.name),
-    );
-    if (!reviewColumns.has("decision_sha256")) {
-      this.db.exec("ALTER TABLE decision_reviews ADD COLUMN decision_sha256 TEXT");
-    }
-    if (!taskColumns.has("draft_ready_at")) {
-      this.db.exec("ALTER TABLE tasks ADD COLUMN draft_ready_at TEXT");
-    }
-    if (!taskColumns.has("decision_at")) {
-      this.db.exec("ALTER TABLE tasks ADD COLUMN decision_at TEXT");
-    }
-    if (!taskColumns.has("privacy_erased_at")) {
-      this.db.exec("ALTER TABLE tasks ADD COLUMN privacy_erased_at TEXT");
-    }
-    if (!workPlanColumns.has("execution_owner")) {
-      this.db.exec("ALTER TABLE work_plans ADD COLUMN execution_owner TEXT");
-    }
-    if (!workPlanColumns.has("lease_expires_at")) {
-      this.db.exec("ALTER TABLE work_plans ADD COLUMN lease_expires_at TEXT");
-    }
-    if (!workPlanColumns.has("cancel_requested_at")) {
-      this.db.exec("ALTER TABLE work_plans ADD COLUMN cancel_requested_at TEXT");
-    }
-    if (!workPlanColumns.has("cancel_requested_by")) {
-      this.db.exec("ALTER TABLE work_plans ADD COLUMN cancel_requested_by TEXT");
-    }
-    if (!workPlanColumns.has("supersedes_work_plan_id")) {
-      this.db.exec("ALTER TABLE work_plans ADD COLUMN supersedes_work_plan_id TEXT");
-    }
-    if (!workPlanColumns.has("revision_actor")) {
-      this.db.exec("ALTER TABLE work_plans ADD COLUMN revision_actor TEXT");
-    }
-    if (!workPlanColumns.has("privacy_erased_at")) {
-      this.db.exec("ALTER TABLE work_plans ADD COLUMN privacy_erased_at TEXT");
-    }
-    this.db.exec(
-      `CREATE UNIQUE INDEX IF NOT EXISTS work_plans_single_revision_idx
-       ON work_plans(supersedes_work_plan_id)
-       WHERE supersedes_work_plan_id IS NOT NULL`,
-    );
     const sentinel = this.db
       .prepare("SELECT value FROM settings WHERE key = 'encryption_sentinel'")
       .get();
@@ -385,6 +355,205 @@ export class Store {
       this.db = null;
       throw new Error("The configured data key does not match this database");
     }
+    const workPlanColumns = new Set(
+      this.db.prepare("PRAGMA table_info(work_plans)").all().map((row) => row.name),
+    );
+    const taskColumns = new Set(
+      this.db.prepare("PRAGMA table_info(tasks)").all().map((row) => row.name),
+    );
+    const reviewColumns = new Set(
+      this.db.prepare("PRAGMA table_info(decision_reviews)").all().map((row) => row.name),
+    );
+    if (!reviewColumns.has("decision_sha256")) {
+      this.db.exec("ALTER TABLE decision_reviews ADD COLUMN decision_sha256 TEXT");
+    }
+    if (!taskColumns.has("draft_ready_at")) {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN draft_ready_at TEXT");
+    }
+    if (!taskColumns.has("decision_at")) {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN decision_at TEXT");
+    }
+    if (!taskColumns.has("privacy_erased_at")) {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN privacy_erased_at TEXT");
+    }
+    if (!taskColumns.has("continuation_of_task_id")) {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN continuation_of_task_id TEXT");
+    }
+    if (!taskColumns.has("waiting_information_at")) {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN waiting_information_at TEXT");
+    }
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS tasks_waiting_information_at
+       ON tasks(conversation_id, sender_user_id, waiting_information_at DESC)
+       WHERE status = 'waiting_information'`,
+    );
+    if (!workPlanColumns.has("execution_owner")) {
+      this.db.exec("ALTER TABLE work_plans ADD COLUMN execution_owner TEXT");
+    }
+    if (!workPlanColumns.has("lease_expires_at")) {
+      this.db.exec("ALTER TABLE work_plans ADD COLUMN lease_expires_at TEXT");
+    }
+    if (!workPlanColumns.has("cancel_requested_at")) {
+      this.db.exec("ALTER TABLE work_plans ADD COLUMN cancel_requested_at TEXT");
+    }
+    if (!workPlanColumns.has("cancel_requested_by")) {
+      this.db.exec("ALTER TABLE work_plans ADD COLUMN cancel_requested_by TEXT");
+    }
+    if (!workPlanColumns.has("supersedes_work_plan_id")) {
+      this.db.exec("ALTER TABLE work_plans ADD COLUMN supersedes_work_plan_id TEXT");
+    }
+    if (!workPlanColumns.has("revision_actor")) {
+      this.db.exec("ALTER TABLE work_plans ADD COLUMN revision_actor TEXT");
+    }
+    if (!workPlanColumns.has("privacy_erased_at")) {
+      this.db.exec("ALTER TABLE work_plans ADD COLUMN privacy_erased_at TEXT");
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (!workPlanColumns.has("authorization_hash")) {
+        this.db.exec("ALTER TABLE work_plans ADD COLUMN authorization_hash TEXT");
+      }
+      if (!workPlanColumns.has("capability_budget_ciphertext")) {
+        this.db.exec("ALTER TABLE work_plans ADD COLUMN capability_budget_ciphertext TEXT");
+      }
+      const unsafeLegacyPlan = this.db.prepare(
+        `SELECT id FROM work_plans
+         WHERE status IN ('executing', 'verifying')
+           AND (authorization_hash IS NULL OR capability_budget_ciphertext IS NULL)
+         LIMIT 1`,
+      ).get();
+      if (unsafeLegacyPlan) {
+        throw new Error(
+          "Cannot migrate capability budgets while legacy work plans are executing",
+        );
+      }
+      const migrationTimestamp = nowIso();
+      const migrationError = this.cipher.encrypt(
+        "Cancelled by system:migration-018 because capability-budget authorization is missing",
+      );
+      this.db.prepare(
+        `UPDATE work_plan_steps
+         SET status = 'cancelled', error_ciphertext = COALESCE(error_ciphertext, ?),
+             completed_at = ?, updated_at = ?
+         WHERE status = 'pending'
+           AND work_plan_id IN (
+             SELECT id FROM work_plans
+             WHERE status IN ('ready', 'awaiting_approval', 'approved')
+               AND (authorization_hash IS NULL OR capability_budget_ciphertext IS NULL)
+           )`,
+      ).run(migrationError, migrationTimestamp, migrationTimestamp);
+      this.db.prepare(
+        `UPDATE work_plans
+         SET status = 'cancelled',
+             cancel_requested_at = COALESCE(cancel_requested_at, ?),
+             cancel_requested_by = COALESCE(cancel_requested_by, 'system:migration-018'),
+             updated_at = ?
+         WHERE status IN ('ready', 'awaiting_approval', 'approved')
+           AND (authorization_hash IS NULL OR capability_budget_ciphertext IS NULL)`,
+      ).run(migrationTimestamp, migrationTimestamp);
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS capability_budget_usage (
+          project_key TEXT NOT NULL,
+          project_id_ciphertext TEXT NOT NULL,
+          authorization_hash TEXT NOT NULL,
+          capability TEXT NOT NULL,
+          limit_count INTEGER NOT NULL CHECK(limit_count > 0),
+          used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(project_key, authorization_hash, capability)
+        );
+      `);
+      const capabilityBudgetColumns = new Set(
+        this.db.prepare("PRAGMA table_info(capability_budget_usage)").all()
+          .map((row) => row.name),
+      );
+      if (
+        capabilityBudgetColumns.has("project_id") &&
+        !capabilityBudgetColumns.has("project_key")
+      ) {
+        const legacyRows = this.db.prepare(
+          "SELECT * FROM capability_budget_usage",
+        ).all();
+        this.db.exec(`
+          ALTER TABLE capability_budget_usage
+          RENAME TO capability_budget_usage_legacy;
+          CREATE TABLE capability_budget_usage (
+            project_key TEXT NOT NULL,
+            project_id_ciphertext TEXT NOT NULL,
+            authorization_hash TEXT NOT NULL,
+            capability TEXT NOT NULL,
+            limit_count INTEGER NOT NULL CHECK(limit_count > 0),
+            used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(project_key, authorization_hash, capability)
+          );
+        `);
+        const migrateBudget = this.db.prepare(
+          `INSERT INTO capability_budget_usage(
+             project_key, project_id_ciphertext, authorization_hash,
+             capability, limit_count, used_count, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const row of legacyRows) {
+          migrateBudget.run(
+            this.cipher.fingerprint(row.project_id),
+            this.cipher.encrypt(row.project_id),
+            row.authorization_hash,
+            row.capability,
+            row.limit_count,
+            row.used_count,
+            row.created_at,
+            row.updated_at,
+          );
+        }
+        this.db.exec("DROP TABLE capability_budget_usage_legacy");
+      }
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS work_plans_capability_budget_insert_guard
+        BEFORE INSERT ON work_plans
+        WHEN NEW.status IN (
+          'ready', 'awaiting_approval', 'approved', 'executing', 'verifying'
+        ) AND (
+          NEW.authorization_hash IS NULL
+          OR NEW.capability_budget_ciphertext IS NULL
+        )
+        BEGIN
+          SELECT RAISE(
+            ABORT,
+            'work plan capability budget authorization is required'
+          );
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS work_plans_capability_budget_update_guard
+        BEFORE UPDATE OF status, authorization_hash, capability_budget_ciphertext
+        ON work_plans
+        WHEN NEW.status IN (
+          'ready', 'awaiting_approval', 'approved', 'executing', 'verifying'
+        ) AND (
+          NEW.authorization_hash IS NULL
+          OR NEW.capability_budget_ciphertext IS NULL
+        )
+        BEGIN
+          SELECT RAISE(
+            ABORT,
+            'work plan capability budget authorization is required'
+          );
+        END;
+      `);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      this.db.close();
+      this.db = null;
+      throw error;
+    }
+    this.db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS work_plans_single_revision_idx
+       ON work_plans(supersedes_work_plan_id)
+       WHERE supersedes_work_plan_id IS NOT NULL`,
+    );
     if (this.path !== ":memory:") {
       await chmod(this.path, 0o600);
       await Promise.all(
@@ -454,29 +623,118 @@ export class Store {
     return inserted;
   }
 
+  nextPendingBundleAt({ quietWindowMs, bundleMaxWaitMs = 8_000, now = new Date() }) {
+    if (
+      !Number.isFinite(quietWindowMs) ||
+      quietWindowMs <= 0 ||
+      !Number.isFinite(bundleMaxWaitMs) ||
+      bundleMaxWaitMs > 8_000 ||
+      bundleMaxWaitMs < quietWindowMs
+    ) {
+      throw new Error("Pending bundle timing configuration is invalid");
+    }
+    const nowMs = new Date(now).getTime();
+    if (!Number.isFinite(nowMs)) throw new Error("Pending bundle current time is invalid");
+    const row = this.db.prepare(
+      `WITH pending_groups AS (
+         SELECT MIN(ingested_at) AS first_ingested,
+                MAX(ingested_at) AS last_ingested,
+                conversation_id,
+                sender_user_id
+         FROM messages
+         WHERE status = 'pending'
+         GROUP BY conversation_id, sender_user_id
+       ), deadlines AS (
+         SELECT first_ingested, last_ingested,
+                MIN(
+                  (julianday(first_ingested) - 2440587.5) * 86400000 + ?,
+                  (julianday(last_ingested) - 2440587.5) * 86400000 + ?
+                ) AS deadline_ms,
+                EXISTS(
+                  SELECT 1 FROM tasks
+                  WHERE tasks.status = 'continuation_pending'
+                    AND tasks.conversation_id = pending_groups.conversation_id
+                    AND tasks.sender_user_id = pending_groups.sender_user_id
+                ) AS continuation_blocked
+         FROM pending_groups
+       )
+       SELECT first_ingested, last_ingested, deadline_ms, continuation_blocked
+       FROM deadlines
+       ORDER BY CASE
+         WHEN continuation_blocked = 1 AND deadline_ms <= ? THEN ?
+         ELSE deadline_ms
+       END
+       LIMIT 1`,
+    ).get(bundleMaxWaitMs, quietWindowMs, nowMs, nowMs + 1_000);
+    if (!row) return null;
+    const first = new Date(row.first_ingested).getTime();
+    const last = new Date(row.last_ingested).getTime();
+    if (!Number.isFinite(first) || !Number.isFinite(last)) {
+      throw new Error("Pending bundle timestamps are invalid");
+    }
+    const deadline = Math.min(first + bundleMaxWaitMs, last + quietWindowMs);
+    return new Date(
+      row.continuation_blocked && deadline <= nowMs
+        ? nowMs + 1_000
+        : deadline,
+    );
+  }
+
   createReadyTasks({
     quietWindowMs,
+    bundleMaxWaitMs = 8_000,
     bundleGapMs = 120_000,
     maxMessagesPerTask = 20,
     maxAttempts = 5,
+    waitingInformationTtlMs = 86_400_000,
     now = new Date(),
   }) {
+    if (!Number.isFinite(waitingInformationTtlMs) || waitingInformationTtlMs <= 0) {
+      throw new Error("Waiting information TTL must be positive");
+    }
+    if (
+      !Number.isFinite(bundleMaxWaitMs) ||
+      bundleMaxWaitMs <= 0 ||
+      bundleMaxWaitMs > 8_000 ||
+      bundleMaxWaitMs < quietWindowMs
+    ) {
+      throw new Error("Bundle maximum wait must be between the quiet window and 8000ms");
+    }
     const cutoff = new Date(now.getTime() - quietWindowMs).toISOString();
+    const maximumWaitCutoff = new Date(
+      now.getTime() - bundleMaxWaitMs,
+    ).toISOString();
+    const waitingCutoff = new Date(
+      now.getTime() - waitingInformationTtlMs,
+    ).toISOString();
     const groups = this.db
       .prepare(
         `
-        SELECT conversation_id, sender_user_id, MAX(ingested_at) AS last_ingested
-        FROM messages
-        WHERE status = 'pending'
-        GROUP BY conversation_id, sender_user_id
-        HAVING last_ingested <= ?
-        ORDER BY last_ingested
+        SELECT * FROM (
+          SELECT conversation_id, sender_user_id,
+                 MIN(ingested_at) AS first_ingested,
+                 MAX(ingested_at) AS last_ingested
+          FROM messages
+          WHERE status = 'pending'
+          GROUP BY conversation_id, sender_user_id
+        ) pending_groups
+        ORDER BY MIN(
+          (julianday(first_ingested) - 2440587.5) * 86400000 + ?,
+          (julianday(last_ingested) - 2440587.5) * 86400000 + ?
+        )
+        LIMIT 500
       `,
       )
-      .all(cutoff);
+      .all(bundleMaxWaitMs, quietWindowMs);
     const created = [];
 
     this.transaction(() => {
+      this.db.prepare(
+        `UPDATE tasks
+         SET status = 'expired', updated_at = ?
+         WHERE status = 'waiting_information'
+           AND COALESCE(waiting_information_at, updated_at) < ?`,
+      ).run(nowIso(now), waitingCutoff);
       const selectMessages = this.db.prepare(`
         SELECT * FROM messages
         WHERE status = 'pending'
@@ -484,11 +742,44 @@ export class Store {
           AND sender_user_id = ?
         ORDER BY create_time, id
       `);
+      const selectLatestMessage = this.db.prepare(`
+        SELECT content FROM messages
+        WHERE status = 'pending'
+          AND conversation_id = ?
+          AND sender_user_id = ?
+        ORDER BY ingested_at DESC, create_time DESC, id DESC
+        LIMIT 1
+      `);
       const insertTask = this.db.prepare(`
         INSERT OR IGNORE INTO tasks (
           id, kind, status, sender_user_id, conversation_id, payload_json,
-          max_attempts, available_at, created_at, updated_at
-        ) VALUES (?, 'reply', 'queued', ?, ?, ?, ?, ?, ?, ?)
+          max_attempts, continuation_of_task_id,
+          available_at, created_at, updated_at
+        ) VALUES (?, 'reply', 'queued', ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const selectWaitingTask = this.db.prepare(`
+        SELECT id, payload_json, result_json,
+               COALESCE(waiting_information_at, updated_at) AS waiting_at
+        FROM tasks
+        WHERE status = 'waiting_information'
+          AND conversation_id = ?
+          AND sender_user_id = ?
+          AND COALESCE(waiting_information_at, updated_at) >= ?
+        ORDER BY COALESCE(waiting_information_at, updated_at) DESC, id DESC
+        LIMIT 2
+      `);
+      const hasContinuationPending = this.db.prepare(`
+        SELECT 1
+        FROM tasks
+        WHERE status = 'continuation_pending'
+          AND conversation_id = ?
+          AND sender_user_id = ?
+        LIMIT 1
+      `);
+      const reserveWaitingTask = this.db.prepare(`
+        UPDATE tasks
+        SET status = 'continuation_pending', updated_at = ?
+        WHERE id = ? AND status = 'waiting_information'
       `);
       const markBundled = this.db.prepare(`
         UPDATE messages SET status = 'bundled', task_id = ?
@@ -496,16 +787,60 @@ export class Store {
       `);
 
       for (const group of groups) {
+        const timingReady = group.last_ingested <= cutoff ||
+          group.first_ingested <= maximumWaitCutoff;
+        if (!timingReady) {
+          const latest = selectLatestMessage.get(
+            group.conversation_id,
+            group.sender_user_id,
+          );
+          if (!latest) continue;
+          const content = this.cipher.decrypt(latest.content);
+          if (!shouldFlushMessageBundleEarly([{ content }])) continue;
+        }
+        if (hasContinuationPending.get(
+          group.conversation_id,
+          group.sender_user_id,
+        )) {
+          continue;
+        }
         const pendingMessages = selectMessages.all(
           group.conversation_id,
           group.sender_user_id,
         );
         if (pendingMessages.length === 0) continue;
+        const waitingRows = selectWaitingTask.all(
+          group.conversation_id,
+          group.sender_user_id,
+          waitingCutoff,
+        );
+        let waitingTask = waitingRows.length === 1
+          ? {
+              id: waitingRows[0].id,
+              payload: JSON.parse(this.cipher.decrypt(waitingRows[0].payload_json)),
+              result: waitingRows[0].result_json
+                ? JSON.parse(this.cipher.decrypt(waitingRows[0].result_json))
+                : null,
+              waitingAt: waitingRows[0].waiting_at,
+            }
+          : null;
         const bursts = splitMessageBursts(pendingMessages, {
           gapMs: bundleGapMs,
           maxMessages: maxMessagesPerTask,
+          boundaryAt: waitingTask?.waitingAt ?? null,
         });
         for (const messages of bursts) {
+          const firstMessageAt = new Date(messages[0].create_time).getTime();
+          const waitingAt = waitingTask
+            ? new Date(waitingTask.waitingAt).getTime()
+            : null;
+          const continuationTask = waitingTask &&
+            Number.isFinite(firstMessageAt) &&
+            Number.isFinite(waitingAt) &&
+            firstMessageAt > waitingAt
+            ? waitingTask
+            : null;
+          const reservesWaitingTask = Boolean(continuationTask);
           const digest = createHash("sha256")
             .update(messages.map((message) => message.id).join("\n"))
             .digest("hex")
@@ -524,6 +859,13 @@ export class Store {
               createTime: message.create_time,
               content: this.cipher.decrypt(message.content),
             })),
+            waitingTask: continuationTask
+              ? {
+                  originalRequest: String(continuationTask.payload?.content ?? "").slice(0, 4_000),
+                  clarificationQuestion: String(continuationTask.result?.reply ?? "").slice(0, 1_000),
+                  waitingAt: continuationTask.waitingAt,
+                }
+              : null,
           };
           const timestamp = nowIso(now);
           const result = insertTask.run(
@@ -532,13 +874,22 @@ export class Store {
             group.conversation_id,
             this.cipher.encrypt(JSON.stringify(payload)),
             maxAttempts,
+            continuationTask?.id ?? null,
             timestamp,
             timestamp,
             timestamp,
           );
           if (result.changes === 0) continue;
+          if (continuationTask) {
+            const reserved = reserveWaitingTask.run(timestamp, continuationTask.id);
+            if (reserved.changes !== 1) {
+              throw new Error("Waiting task could not be reserved");
+            }
+            waitingTask = null;
+          }
           for (const message of messages) markBundled.run(taskId, message.id);
           created.push(taskId);
+          if (reservesWaitingTask) break;
         }
       }
     });
@@ -548,6 +899,10 @@ export class Store {
   claimTask({ leaseMs = 120_000, now = new Date() } = {}) {
     return this.transaction(() => {
       const timestamp = nowIso(now);
+      const exhausted = this.db.prepare(
+        `SELECT id, continuation_of_task_id FROM tasks
+         WHERE status = 'processing' AND lease_until <= ? AND attempts >= max_attempts`,
+      ).all(timestamp);
       this.db
         .prepare(
           `
@@ -561,6 +916,15 @@ export class Store {
         `,
         )
         .run(timestamp, timestamp);
+      const restoreWaitingTask = this.db.prepare(
+        `UPDATE tasks SET status = 'waiting_information', updated_at = ?
+         WHERE id = ? AND status = 'continuation_pending'`,
+      );
+      for (const task of exhausted) {
+        if (task.continuation_of_task_id) {
+          restoreWaitingTask.run(timestamp, task.continuation_of_task_id);
+        }
+      }
       const row = this.db
         .prepare(
           `
@@ -615,8 +979,17 @@ export class Store {
 
   completeDraft(taskId, draft, now = new Date()) {
     const status = draft.shouldReply ? "awaiting_approval" : "no_reply";
-    this.db
-      .prepare(
+    this.transaction(() => {
+      const task = this.db.prepare(
+        `SELECT continuation_of_task_id, sender_user_id, conversation_id
+         FROM tasks WHERE id = ? AND status = 'processing'`,
+      ).get(taskId);
+      if (!task) throw new Error(`Task is not processing: ${taskId}`);
+      if (draft.relatedToWaitingTask && !task.continuation_of_task_id) {
+        throw new Error("Draft cannot continue a missing waiting task");
+      }
+      const result = this.db
+        .prepare(
         `
         UPDATE tasks
         SET status = ?, result_json = ?, draft_ready_at = ?, lease_until = NULL,
@@ -631,14 +1004,39 @@ export class Store {
         nowIso(now),
         taskId,
       );
+      if (result.changes !== 1) throw new Error(`Task is not processing: ${taskId}`);
+      if (task.continuation_of_task_id) {
+        const hasPendingFollowup = draft.relatedToWaitingTask && this.db.prepare(
+          `SELECT 1 FROM messages
+           WHERE status = 'pending'
+             AND sender_user_id = ? AND conversation_id = ?
+           LIMIT 1`,
+        ).get(task.sender_user_id, task.conversation_id);
+        const parentStatus = draft.decisionKind === "manual_reply"
+          ? "cancelled_manual"
+          : draft.relatedToWaitingTask
+            ? hasPendingFollowup
+              ? "waiting_information"
+              : "continued"
+            : "waiting_information";
+        const parent = this.db.prepare(
+          `UPDATE tasks SET status = ?, updated_at = ?
+           WHERE id = ? AND status = 'continuation_pending'`,
+        ).run(parentStatus, nowIso(now), task.continuation_of_task_id);
+        if (parent.changes !== 1) {
+          throw new Error("Waiting task continuation is no longer available");
+        }
+      }
+    });
   }
 
   failTask(taskId, error, now = new Date()) {
     return this.transaction(() => {
       const task = this.db
-        .prepare("SELECT attempts, max_attempts FROM tasks WHERE id = ?")
+        .prepare("SELECT status, attempts, max_attempts, continuation_of_task_id FROM tasks WHERE id = ?")
         .get(taskId);
       if (!task) return null;
+      if (task.status !== "processing") return task.status;
       const dead = task.attempts >= task.max_attempts;
       const delayMs = Math.min(300_000, 1_000 * 2 ** Math.max(0, task.attempts - 1));
       const availableAt = new Date(now.getTime() + delayMs).toISOString();
@@ -649,7 +1047,7 @@ export class Store {
           UPDATE tasks
           SET status = ?, available_at = ?, lease_until = NULL,
               last_error = ?, updated_at = ?
-          WHERE id = ?
+          WHERE id = ? AND status = 'processing'
         `,
         )
         .run(
@@ -659,6 +1057,12 @@ export class Store {
           nowIso(now),
           taskId,
         );
+      if (dead && task.continuation_of_task_id) {
+        this.db.prepare(
+          `UPDATE tasks SET status = 'waiting_information', updated_at = ?
+           WHERE id = ? AND status = 'continuation_pending'`,
+        ).run(nowIso(now), task.continuation_of_task_id);
+      }
       return status;
     });
   }
@@ -669,7 +1073,7 @@ export class Store {
     }
     return this.transaction(() => {
       const task = this.db
-        .prepare("SELECT status FROM tasks WHERE id = ?")
+        .prepare("SELECT status, result_json FROM tasks WHERE id = ?")
         .get(taskId);
       if (!task) throw new Error(`task not found: ${taskId}`);
       if (task.status !== "awaiting_approval") {
@@ -749,6 +1153,12 @@ export class Store {
   beginSideEffect(taskId, capability, now = new Date()) {
     const key = `${capability}:${taskId}`;
     return this.transaction(() => {
+      const task = this.db
+        .prepare("SELECT status FROM tasks WHERE id = ?")
+        .get(taskId);
+      if (task?.status !== "sending") {
+        throw new Error("Task is not sending");
+      }
       const existing = this.db
         .prepare("SELECT * FROM side_effects WHERE idempotency_key = ?")
         .get(key);
@@ -780,7 +1190,17 @@ export class Store {
   completeSideEffect(taskId, capability, receipt, now = new Date()) {
     const key = `${capability}:${taskId}`;
     this.transaction(() => {
-      this.db
+      const task = this.db.prepare(
+        "SELECT result_json FROM tasks WHERE id = ? AND status = 'sending'",
+      ).get(taskId);
+      if (!task) throw new Error("Task is not sending");
+      const draft = task.result_json
+        ? JSON.parse(this.cipher.decrypt(task.result_json))
+        : null;
+      const taskStatus = draft?.needsInformation
+        ? "waiting_information"
+        : "completed";
+      const effect = this.db
         .prepare(
           `
           UPDATE side_effects
@@ -789,15 +1209,24 @@ export class Store {
         `,
         )
         .run(this.cipher.encrypt(JSON.stringify(receipt)), nowIso(now), key);
+      if (effect.changes !== 1) {
+        throw new Error("Side effect was not started");
+      }
       this.db
         .prepare(
           `
           UPDATE tasks
-          SET status = 'completed', lease_until = NULL, updated_at = ?
+          SET status = ?, waiting_information_at = ?,
+              lease_until = NULL, updated_at = ?
           WHERE id = ?
         `,
-        )
-        .run(nowIso(now), taskId);
+      )
+        .run(
+          taskStatus,
+          taskStatus === "waiting_information" ? nowIso(now) : null,
+          nowIso(now),
+          taskId,
+        );
     });
   }
 
@@ -854,9 +1283,62 @@ export class Store {
       );
   }
 
+  _cancelWorkPlansForSourceTask(
+    taskId,
+    now = new Date(),
+    actor = "system:manual-reply",
+  ) {
+    const timestamp = nowIso(now);
+    const rows = this.db.prepare(
+      `SELECT id, status, plan_ciphertext FROM work_plans
+       WHERE privacy_erased_at IS NULL
+         AND status IN ('ready','awaiting_approval','approved','executing','verifying')`,
+    ).all();
+    let cancelled = 0;
+    let cancellationRequested = 0;
+    for (const row of rows) {
+      let sourceTaskId;
+      try {
+        sourceTaskId = JSON.parse(
+          this.cipher.decrypt(row.plan_ciphertext),
+        )?.sourceTaskId;
+      } catch {
+        continue;
+      }
+      if (sourceTaskId !== taskId) continue;
+      if (["ready", "awaiting_approval", "approved"].includes(row.status)) {
+        this.db.prepare(
+          `UPDATE work_plan_steps SET status = 'cancelled',
+           completed_at = ?, updated_at = ?
+           WHERE work_plan_id = ? AND status = 'pending'`,
+        ).run(timestamp, timestamp, row.id);
+        this.db.prepare(
+          `UPDATE work_plans SET status = 'cancelled',
+           cancel_requested_at = ?, cancel_requested_by = ?, updated_at = ?
+           WHERE id = ? AND status IN ('ready','awaiting_approval','approved')`,
+        ).run(timestamp, actor, timestamp, row.id);
+        cancelled += 1;
+      } else {
+        this.db.prepare(
+          `UPDATE work_plans
+           SET cancel_requested_at = COALESCE(cancel_requested_at, ?),
+               cancel_requested_by = COALESCE(cancel_requested_by, ?),
+               updated_at = ?
+           WHERE id = ? AND status IN ('executing','verifying')`,
+        ).run(timestamp, actor, timestamp, row.id);
+        cancellationRequested += 1;
+      }
+    }
+    return { cancelled, cancellationRequested };
+  }
+
   cancelForManualReply(taskId, now = new Date()) {
-    this.db
-      .prepare(
+    return this.transaction(() => {
+      const task = this.db.prepare(
+        "SELECT continuation_of_task_id, result_json FROM tasks WHERE id = ?",
+      ).get(taskId);
+      const result = this.db
+        .prepare(
         `
         UPDATE tasks
         SET status = 'cancelled_manual', lease_until = NULL, updated_at = ?
@@ -864,19 +1346,62 @@ export class Store {
       `,
       )
       .run(nowIso(now), taskId);
+      if (result.changes === 1 && task?.continuation_of_task_id) {
+        const draft = task.result_json
+          ? JSON.parse(this.cipher.decrypt(task.result_json))
+          : null;
+        if (draft?.relatedToWaitingTask) {
+          this.db.prepare(
+            `UPDATE tasks SET status = 'cancelled_manual', updated_at = ?
+             WHERE id = ? AND status = 'continued'`,
+          ).run(nowIso(now), task.continuation_of_task_id);
+        } else {
+          this.db.prepare(
+            `UPDATE tasks SET status = 'cancelled_manual', updated_at = ?
+             WHERE id = ? AND status = 'continuation_pending'`,
+          ).run(nowIso(now), task.continuation_of_task_id);
+        }
+      }
+      this._cancelWorkPlansForSourceTask(taskId, now);
+      return result.changes === 1;
+    });
   }
 
   cancelDraftForManualReply(taskId, now = new Date()) {
-    const result = this.db
-      .prepare(
+    return this.transaction(() => {
+      const task = this.db.prepare(
+        "SELECT continuation_of_task_id, result_json FROM tasks WHERE id = ?",
+      ).get(taskId);
+      const result = this.db
+        .prepare(
         `
         UPDATE tasks
         SET status = 'cancelled_manual', updated_at = ?
-        WHERE id = ? AND status = 'awaiting_approval'
+        WHERE id = ? AND status IN (
+          'processing', 'awaiting_approval', 'waiting_information'
+        )
       `,
       )
       .run(nowIso(now), taskId);
-    return result.changes === 1;
+      if (result.changes === 1 && task?.continuation_of_task_id) {
+        const draft = task.result_json
+          ? JSON.parse(this.cipher.decrypt(task.result_json))
+          : null;
+        if (draft?.relatedToWaitingTask) {
+          this.db.prepare(
+            `UPDATE tasks SET status = 'cancelled_manual', updated_at = ?
+             WHERE id = ? AND status = 'continued'`,
+          ).run(nowIso(now), task.continuation_of_task_id);
+        } else {
+          this.db.prepare(
+            `UPDATE tasks SET status = 'cancelled_manual', updated_at = ?
+             WHERE id = ? AND status = 'continuation_pending'`,
+          ).run(nowIso(now), task.continuation_of_task_id);
+        }
+      }
+      this._cancelWorkPlansForSourceTask(taskId, now);
+      return result.changes === 1;
+    });
   }
 
   getTask(taskId) {
@@ -884,6 +1409,43 @@ export class Store {
       this.db.prepare("SELECT * FROM tasks WHERE id = ? AND privacy_erased_at IS NULL").get(taskId),
       this.cipher,
     );
+  }
+
+  listAutomatedSendEvidence({
+    since = new Date(0),
+    until = new Date(),
+  } = {}) {
+    const rows = this.db.prepare(
+      `SELECT t.id AS task_id, t.conversation_id, t.result_json,
+              e.idempotency_key, e.status AS effect_status,
+              e.receipt_json, e.created_at, e.updated_at
+       FROM side_effects e
+       JOIN tasks t ON t.id = e.task_id
+       WHERE e.capability = 'send_message'
+         AND e.status IN ('started', 'completed', 'unknown')
+         AND e.created_at >= ? AND e.created_at <= ?
+         AND t.privacy_erased_at IS NULL
+       ORDER BY e.created_at`,
+    ).all(nowIso(since), nowIso(until));
+    return rows.flatMap((row) => {
+      const draft = row.result_json
+        ? JSON.parse(this.cipher.decrypt(row.result_json))
+        : null;
+      const content = String(draft?.reply ?? "").trim();
+      if (!content) return [];
+      return [{
+        taskId: row.task_id,
+        idempotencyKey: row.idempotency_key,
+        conversationId: row.conversation_id,
+        content,
+        status: row.effect_status,
+        startedAt: row.created_at,
+        updatedAt: row.updated_at,
+        receipt: row.receipt_json
+          ? JSON.parse(this.cipher.decrypt(row.receipt_json))
+          : null,
+      }];
+    });
   }
 
   listTasks({
@@ -936,19 +1498,33 @@ export class Store {
   }
 
   retryTask(taskId, now = new Date()) {
-    const result = this.db
-      .prepare(
-        `
-        UPDATE tasks
-        SET status = 'queued', attempts = 0, available_at = ?,
-            lease_until = NULL, last_error = NULL, updated_at = ?
-        WHERE id = ? AND status = 'dead'
-      `,
-      )
-      .run(nowIso(now), nowIso(now), taskId);
-    if (result.changes === 0) {
-      throw new Error("Only dead tasks can be retried");
-    }
+    return this.transaction(() => {
+      const task = this.db.prepare(
+        `SELECT status, continuation_of_task_id
+         FROM tasks WHERE id = ?`,
+      ).get(taskId);
+      if (task?.status !== "dead") {
+        throw new Error("Only dead tasks can be retried");
+      }
+      if (task.continuation_of_task_id) {
+        const parent = this.db.prepare(
+          `UPDATE tasks SET status = 'continuation_pending', updated_at = ?
+           WHERE id = ? AND status = 'waiting_information'`,
+        ).run(nowIso(now), task.continuation_of_task_id);
+        if (parent.changes !== 1) {
+          throw new Error("Waiting task continuation cannot be retried");
+        }
+      }
+      const result = this.db.prepare(
+        `UPDATE tasks
+         SET status = 'queued', attempts = 0, available_at = ?,
+             lease_until = NULL, last_error = NULL, updated_at = ?
+         WHERE id = ? AND status = 'dead'`,
+      ).run(nowIso(now), nowIso(now), taskId);
+      if (result.changes !== 1) {
+        throw new Error("Only dead tasks can be retried");
+      }
+    });
   }
 
   dismissDeadTask(taskId, actor, reason = "", now = new Date()) {
@@ -974,14 +1550,27 @@ export class Store {
     }
     this.transaction(() => {
       const task = this.db
-        .prepare("SELECT status FROM tasks WHERE id = ?")
+        .prepare("SELECT status, result_json FROM tasks WHERE id = ?")
         .get(taskId);
       if (task?.status !== "send_unknown") {
         throw new Error("Task is not in send_unknown state");
       }
+      const sideEffect = this.db.prepare(
+        `SELECT created_at FROM side_effects
+         WHERE task_id = ? AND capability = 'send_message'`,
+      ).get(taskId);
+      if (!sideEffect?.created_at) {
+        throw new Error("Unknown send side effect ledger is missing");
+      }
       const timestamp = nowIso(now);
       if (resolution === "sent") {
-        this.db
+        const draft = task.result_json
+          ? JSON.parse(this.cipher.decrypt(task.result_json))
+          : null;
+        const taskStatus = draft?.needsInformation
+          ? "waiting_information"
+          : "completed";
+        const completedEffect = this.db
           .prepare(
             `
             UPDATE side_effects
@@ -997,15 +1586,24 @@ export class Store {
             timestamp,
             taskId,
           );
+        if (completedEffect.changes !== 1) {
+          throw new Error("Unknown send side effect ledger is missing");
+        }
         this.db
           .prepare(
             `
             UPDATE tasks
-            SET status = 'completed', last_error = NULL, updated_at = ?
+            SET status = ?, waiting_information_at = ?,
+                last_error = NULL, updated_at = ?
             WHERE id = ?
           `,
           )
-          .run(timestamp, taskId);
+          .run(
+            taskStatus,
+            taskStatus === "waiting_information" ? sideEffect.created_at : null,
+            timestamp,
+            taskId,
+          );
       } else {
         this.db
           .prepare(
@@ -1143,6 +1741,88 @@ export class Store {
     return id;
   }
 
+  proposeMemoryCandidate(input, now = new Date()) {
+    validateAutomaticMemoryProposal(input, now);
+    const memory = validateMemoryProposal(input);
+    const subjectKey = this.cipher.fingerprint(memory.subject);
+    const factKey = memory.scope.factKey;
+    const statement = memory.statement.trim();
+    return this.transaction(() => {
+      const sourceTask = this.db.prepare(
+        "SELECT payload_json FROM tasks WHERE id = ?",
+      ).get(memory.sourceVersion);
+      const sourcePayload = sourceTask?.payload_json
+        ? JSON.parse(this.cipher.decrypt(sourceTask.payload_json))
+        : null;
+      if (!(sourcePayload?.messages ?? []).some(
+        (message) => String(message.id) === memory.sourceId,
+      )) {
+        throw new Error("Automatic memory source does not belong to its source task");
+      }
+      const comparable = this.db.prepare(
+        `SELECT * FROM memory_items
+         WHERE deleted_at IS NULL
+           AND status IN ('proposed', 'confirmed')
+           AND type = ? AND subject_key = ? AND project_id IS ?
+           AND (expires_at IS NULL OR expires_at > ?)
+         ORDER BY updated_at DESC`,
+      ).all(
+        memory.type,
+        subjectKey,
+        memory.projectId,
+        nowIso(now),
+      ).map((row) => memoryFromRow(row, this.cipher))
+        .filter((item) => memoryFactKey(item) === factKey);
+      const duplicate = comparable.find(
+        (item) => item.statement.trim() === statement,
+      );
+      if (duplicate) {
+        return { created: false, id: duplicate.id, reason: "duplicate" };
+      }
+      const id = `memory_${randomUUID()}`;
+      const timestamp = nowIso(now);
+      this.db.prepare(
+        `INSERT INTO memory_items(
+          id, type, subject_key, subject_ciphertext, project_id,
+          statement_ciphertext, source_type, source_id_ciphertext,
+          source_version, source_access_status, source_access_reason,
+          scope_ciphertext, confidence, status,
+          sensitivity, expires_at, created_by, updated_by, supersedes_id,
+          created_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'proposed',?,?,?,?,?,?,?)`,
+      ).run(
+        id,
+        memory.type,
+        subjectKey,
+        this.cipher.encrypt(memory.subject),
+        memory.projectId,
+        this.cipher.encrypt(memory.statement),
+        memory.sourceType,
+        this.cipher.encrypt(memory.sourceId),
+        memory.sourceVersion,
+        "not_required",
+        null,
+        this.cipher.encrypt(JSON.stringify(memory.scope)),
+        memory.confidence,
+        memory.sensitivity,
+        memory.expiresAt.toISOString(),
+        memory.createdBy,
+        memory.createdBy,
+        null,
+        timestamp,
+        timestamp,
+      );
+      return {
+        created: true,
+        id,
+        status: "proposed",
+        conflictCount: comparable.filter(
+          (item) => item.status === "confirmed" && item.statement.trim() !== statement,
+        ).length,
+      };
+    });
+  }
+
   confirmMemory(id, actor, now = new Date(), { supersedesId = null } = {}) {
     return this.transaction(() => {
       const memory = this.db
@@ -1157,6 +1837,21 @@ export class Store {
           new Date(memory.source_access_expires_at) <= now)
       ) {
         throw new Error("gbrain memory source access must be verified before confirmation");
+      }
+      if (memory.source_type === "dingtalk_message") {
+        const sourceTask = this.db.prepare(
+          `SELECT payload_json FROM tasks
+           WHERE id = ? AND privacy_erased_at IS NULL`,
+        ).get(memory.source_version);
+        const sourcePayload = sourceTask?.payload_json
+          ? JSON.parse(this.cipher.decrypt(sourceTask.payload_json))
+          : null;
+        const sourceId = this.cipher.decrypt(memory.source_id_ciphertext);
+        if (!(sourcePayload?.messages ?? []).some(
+          (message) => String(message.id) === sourceId,
+        )) {
+          throw new Error("DingTalk memory source must remain verifiable before confirmation");
+        }
       }
       const active = this.db.prepare(
         `SELECT * FROM memory_items
@@ -1374,23 +2069,45 @@ export class Store {
     if (!["ALLOW", "REQUIRE_APPROVAL"].includes(assessment.decision)) {
       throw new Error("Denied work plan cannot be registered");
     }
-    const id = `plan_${assessment.planHash.slice(0, 24)}`;
-    const erased = this.db.prepare(
-      "SELECT privacy_erased_at FROM work_plans WHERE id = ?",
-    ).get(id);
-    if (erased?.privacy_erased_at) {
-      throw new Error("Erased work plan content cannot be recreated unchanged");
+    const capabilityBudgetJson = capabilityBudgetSnapshot(
+      assessment.capabilityBudget,
+    );
+    const capabilityBudget = JSON.parse(capabilityBudgetJson);
+    if (
+      capabilityBudget.projectId !== assessment.plan.projectId ||
+      capabilityBudget.authorizationHash !== assessment.authorizationHash
+    ) {
+      throw new Error("Work plan capability budget is not bound to its authorization");
     }
-    const timestamp = nowIso(now);
-    this.db
-      .prepare(
+    const id = `plan_${assessment.planHash.slice(0, 24)}`;
+    return this.transaction(() => {
+      if (assessment.plan.sourceTaskId) {
+        const sourceTask = this.db.prepare(
+          `SELECT status, privacy_erased_at FROM tasks WHERE id = ?`,
+        ).get(assessment.plan.sourceTaskId);
+        if (
+          !sourceTask ||
+          sourceTask.privacy_erased_at ||
+          ["cancelled_manual", "cancelled_operator"].includes(sourceTask.status)
+        ) {
+          throw new Error("Work plan source task is no longer actionable");
+        }
+      }
+      const erased = this.db.prepare(
+        "SELECT privacy_erased_at FROM work_plans WHERE id = ?",
+      ).get(id);
+      if (erased?.privacy_erased_at) {
+        throw new Error("Erased work plan content cannot be recreated unchanged");
+      }
+      const timestamp = nowIso(now);
+      const inserted = this.db.prepare(
         `INSERT OR IGNORE INTO work_plans(
           id, project_id, requester_key, requester_ciphertext,
-          objective_ciphertext, plan_ciphertext, plan_hash, max_level,
+          objective_ciphertext, plan_ciphertext, plan_hash,
+          authorization_hash, capability_budget_ciphertext, max_level,
           policy_decision, status, created_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ).run(
         id,
         assessment.plan.projectId,
         this.cipher.fingerprint(assessment.plan.requesterId),
@@ -1398,21 +2115,82 @@ export class Store {
         this.cipher.encrypt(assessment.plan.objective),
         this.cipher.encrypt(JSON.stringify(assessment.plan)),
         assessment.planHash,
+        assessment.authorizationHash,
+        this.cipher.encrypt(capabilityBudgetJson),
         assessment.maxLevel,
         assessment.decision,
         assessment.decision === "ALLOW" ? "ready" : "awaiting_approval",
         timestamp,
         timestamp,
       );
-    const insertStep = this.db.prepare(
-      `INSERT OR IGNORE INTO work_plan_steps(
-        work_plan_id, step_id, position, capability, status, updated_at
-      ) VALUES (?, ?, ?, ?, 'pending', ?)`,
-    );
-    assessment.plan.steps.forEach((step, position) => {
-      insertStep.run(id, step.id, position, step.capability, timestamp);
+      const legacyPlan = inserted.changes === 0
+        ? this.db.prepare(
+            `SELECT status, approval_version, cancel_requested_by,
+                    authorization_hash, capability_budget_ciphertext
+             FROM work_plans WHERE id = ? AND plan_hash = ?`,
+          ).get(id, assessment.planHash)
+        : null;
+      const restoringLegacyPlan = legacyPlan?.status === "cancelled" &&
+        legacyPlan.cancel_requested_by === "system:migration-018" &&
+        (!legacyPlan.authorization_hash || !legacyPlan.capability_budget_ciphertext);
+      if (restoringLegacyPlan) {
+        const latestApproval = this.db.prepare(
+          `SELECT MAX(approval_version) AS approval_version
+           FROM work_plan_approvals WHERE work_plan_id = ?`,
+        ).get(id);
+        const approvalVersion = Math.max(
+          Number(legacyPlan.approval_version ?? 1),
+          Number(latestApproval?.approval_version ?? 0),
+        ) + 1;
+        const restored = this.db.prepare(
+          `UPDATE work_plans
+           SET project_id = ?, requester_key = ?, requester_ciphertext = ?,
+               objective_ciphertext = ?, plan_ciphertext = ?,
+               authorization_hash = ?, capability_budget_ciphertext = ?,
+               max_level = ?, policy_decision = ?, status = ?,
+               approval_version = ?, execution_owner = NULL,
+               lease_expires_at = NULL, cancel_requested_at = NULL,
+               cancel_requested_by = NULL, updated_at = ?
+           WHERE id = ? AND plan_hash = ? AND status = 'cancelled'
+             AND cancel_requested_by = 'system:migration-018'
+             AND (authorization_hash IS NULL OR capability_budget_ciphertext IS NULL)`,
+        ).run(
+          assessment.plan.projectId,
+          this.cipher.fingerprint(assessment.plan.requesterId),
+          this.cipher.encrypt(assessment.plan.requesterId),
+          this.cipher.encrypt(assessment.plan.objective),
+          this.cipher.encrypt(JSON.stringify(assessment.plan)),
+          assessment.authorizationHash,
+          this.cipher.encrypt(capabilityBudgetJson),
+          assessment.maxLevel,
+          assessment.decision,
+          assessment.decision === "ALLOW" ? "ready" : "awaiting_approval",
+          approvalVersion,
+          timestamp,
+          id,
+          assessment.planHash,
+        );
+        if (restored.changes !== 1) {
+          throw new Error("Legacy work plan could not be registered safely");
+        }
+      }
+      const insertStep = this.db.prepare(restoringLegacyPlan
+        ? `INSERT INTO work_plan_steps(
+             work_plan_id, step_id, position, capability, status, updated_at
+           ) VALUES (?, ?, ?, ?, 'pending', ?)
+           ON CONFLICT(work_plan_id, step_id) DO UPDATE SET
+             position = excluded.position, capability = excluded.capability,
+             status = 'pending', evidence_ciphertext = NULL,
+             error_ciphertext = NULL, started_at = NULL, completed_at = NULL,
+             updated_at = excluded.updated_at`
+        : `INSERT OR IGNORE INTO work_plan_steps(
+             work_plan_id, step_id, position, capability, status, updated_at
+           ) VALUES (?, ?, ?, ?, 'pending', ?)`);
+      assessment.plan.steps.forEach((step, position) => {
+        insertStep.run(id, step.id, position, step.capability, timestamp);
+      });
+      return this.getWorkPlan(id);
     });
-    return this.getWorkPlan(id);
   }
 
   reviseWorkPlan(id, assessment, actor, now = new Date()) {
@@ -1431,6 +2209,28 @@ export class Store {
         currentPlanHash: currentRow.plan_hash,
         assessment,
       });
+      if (assessment.plan.sourceTaskId) {
+        const sourceTask = this.db.prepare(
+          "SELECT status, privacy_erased_at FROM tasks WHERE id = ?",
+        ).get(assessment.plan.sourceTaskId);
+        if (
+          !sourceTask ||
+          sourceTask.privacy_erased_at ||
+          ["cancelled_manual", "cancelled_operator"].includes(sourceTask.status)
+        ) {
+          throw new Error("Work plan source task is no longer actionable");
+        }
+      }
+      const capabilityBudgetJson = capabilityBudgetSnapshot(
+        assessment.capabilityBudget,
+      );
+      const capabilityBudget = JSON.parse(capabilityBudgetJson);
+      if (
+        capabilityBudget.projectId !== assessment.plan.projectId ||
+        capabilityBudget.authorizationHash !== assessment.authorizationHash
+      ) {
+        throw new Error("Work plan capability budget is not bound to its authorization");
+      }
       const revisedId = `plan_${assessment.planHash.slice(0, 24)}`;
       if (this.db.prepare("SELECT 1 FROM work_plans WHERE id = ?").get(revisedId)) {
         throw new Error("Revised work plan already exists");
@@ -1439,10 +2239,11 @@ export class Store {
       this.db.prepare(
         `INSERT INTO work_plans(
           id, project_id, requester_key, requester_ciphertext,
-          objective_ciphertext, plan_ciphertext, plan_hash, max_level,
+          objective_ciphertext, plan_ciphertext, plan_hash,
+          authorization_hash, capability_budget_ciphertext, max_level,
           policy_decision, status, supersedes_work_plan_id, revision_actor,
           created_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,'awaiting_approval',?,?,?,?)`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,'awaiting_approval',?,?,?,?)`,
       ).run(
         revisedId,
         assessment.plan.projectId,
@@ -1451,6 +2252,8 @@ export class Store {
         this.cipher.encrypt(assessment.plan.objective),
         this.cipher.encrypt(JSON.stringify(assessment.plan)),
         assessment.planHash,
+        assessment.authorizationHash,
+        this.cipher.encrypt(capabilityBudgetJson),
         assessment.maxLevel,
         assessment.decision,
         id,
@@ -1541,7 +2344,7 @@ export class Store {
   consumeWorkPlanAuthorization(
     id,
     now = new Date(),
-    { owner = null, leaseExpiresAt = null } = {},
+    { owner = null, leaseExpiresAt = null, capabilityBudget = null } = {},
   ) {
     if (owner && !(leaseExpiresAt instanceof Date && leaseExpiresAt > now)) {
       throw new Error("Execution lease expiry must be in the future");
@@ -1551,7 +2354,90 @@ export class Store {
         .prepare("SELECT * FROM work_plans WHERE id = ?")
         .get(id);
       if (!plan) throw new Error("Work plan not found");
+      let sourceTaskId;
+      try {
+        sourceTaskId = JSON.parse(
+          this.cipher.decrypt(plan.plan_ciphertext),
+        )?.sourceTaskId;
+      } catch {
+        throw new Error("Stored work plan is invalid");
+      }
+      if (sourceTaskId) {
+        const sourceTask = this.db.prepare(
+          "SELECT status, privacy_erased_at FROM tasks WHERE id = ?",
+        ).get(sourceTaskId);
+        if (
+          !sourceTask ||
+          sourceTask.privacy_erased_at ||
+          ["cancelled_manual", "cancelled_operator"].includes(sourceTask.status)
+        ) {
+          throw new Error("Work plan source task is no longer actionable");
+        }
+      }
+      if (!plan.authorization_hash || !plan.capability_budget_ciphertext) {
+        throw new Error("Work plan capability budget is not bound; register a new plan");
+      }
+      let budget;
+      try {
+        budget = normalizeCapabilityBudget(JSON.parse(
+          this.cipher.decrypt(plan.capability_budget_ciphertext),
+        ));
+      } catch {
+        throw new Error("Stored work plan capability budget is invalid");
+      }
+      if (
+        budget.projectId !== plan.project_id ||
+        budget.authorizationHash !== plan.authorization_hash
+      ) {
+        throw new Error("Stored capability budget does not match work plan authorization");
+      }
+      if (
+        capabilityBudget != null &&
+        capabilityBudgetSnapshot(capabilityBudget) !== capabilityBudgetSnapshot(budget)
+      ) {
+        throw new Error("Capability budget does not match the registered work plan");
+      }
+      const consumeBudget = () => {
+        const timestamp = nowIso(now);
+        const insert = this.db.prepare(
+          `INSERT OR IGNORE INTO capability_budget_usage(
+             project_key, project_id_ciphertext, authorization_hash,
+             capability, limit_count, used_count, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+        );
+        const consume = this.db.prepare(
+          `UPDATE capability_budget_usage
+           SET used_count = used_count + ?, updated_at = ?
+           WHERE project_key = ? AND authorization_hash = ? AND capability = ?
+             AND limit_count = ? AND used_count + ? <= limit_count`,
+        );
+        const projectKey = this.cipher.fingerprint(budget.projectId);
+        for (const entry of budget.entries) {
+          insert.run(
+            projectKey,
+            this.cipher.encrypt(budget.projectId),
+            budget.authorizationHash,
+            entry.capability,
+            entry.limit,
+            timestamp,
+            timestamp,
+          );
+          const result = consume.run(
+            entry.amount,
+            timestamp,
+            projectKey,
+            budget.authorizationHash,
+            entry.capability,
+            entry.limit,
+            entry.amount,
+          );
+          if (result.changes !== 1) {
+            throw new Error(`Capability authorization budget exhausted: ${entry.capability}`);
+          }
+        }
+      };
       if (plan.status === "ready" && plan.policy_decision === "ALLOW") {
+        consumeBudget();
         this.db.prepare(
           `UPDATE work_plans SET status = 'executing', execution_owner = ?,
            lease_expires_at = ?, updated_at = ? WHERE id = ?`,
@@ -1566,6 +2452,7 @@ export class Store {
            AND expires_at > ? AND consumed < max_consumptions`,
       ).get(id, plan.approval_version, plan.plan_hash, nowIso(now));
       if (!approval) throw new Error("Work plan approval is invalid or expired");
+      consumeBudget();
       this.db.prepare(
         "UPDATE work_plan_approvals SET consumed = consumed + 1 WHERE id = ?",
       ).run(approval.id);
@@ -1575,6 +2462,31 @@ export class Store {
       ).run(owner, leaseExpiresAt?.toISOString() ?? null, nowIso(now), id);
       return true;
     });
+  }
+
+  listCapabilityBudgetUsage({ projectId = null } = {}) {
+    const rows = projectId
+      ? this.db.prepare(
+        `SELECT project_key, project_id_ciphertext, authorization_hash, capability,
+                limit_count, used_count, updated_at
+         FROM capability_budget_usage
+         WHERE project_key = ? ORDER BY capability`,
+      ).all(this.cipher.fingerprint(projectId))
+      : this.db.prepare(
+        `SELECT project_key, project_id_ciphertext, authorization_hash, capability,
+                limit_count, used_count, updated_at
+         FROM capability_budget_usage
+         ORDER BY project_key, capability`,
+      ).all();
+    return rows.map((row) => ({
+      projectId: this.cipher.decrypt(row.project_id_ciphertext) || null,
+      authorizationHash: row.authorization_hash,
+      capability: row.capability,
+      limit: row.limit_count,
+      used: row.used_count,
+      remaining: row.limit_count - row.used_count,
+      updatedAt: row.updated_at,
+    }));
   }
 
   renewWorkPlanLease(id, owner, leaseExpiresAt, now = new Date()) {
@@ -2126,6 +3038,29 @@ export class Store {
         "SELECT * FROM memory_items WHERE deleted_at IS NULL AND updated_at < ?",
       ).all(selector.value.toISOString());
     }
+    if (taskRows.length > 0) {
+      const byId = new Map(memoryRows.map((row) => [row.id, row]));
+      const selectSourceMemories = this.db.prepare(
+        `SELECT * FROM memory_items
+         WHERE deleted_at IS NULL
+           AND source_type = 'dingtalk_message'
+           AND source_version = ?`,
+      );
+      for (const task of taskRows) {
+        for (const row of selectSourceMemories.all(task.id)) {
+          byId.set(row.id, row);
+        }
+      }
+      memoryRows = [...byId.values()];
+    }
+    let capabilityBudgetRows;
+    if (selector.type === "project") {
+      capabilityBudgetRows = this.db.prepare(
+        "SELECT * FROM capability_budget_usage WHERE project_key = ?",
+      ).all(this.cipher.fingerprint(selector.value));
+    } else {
+      capabilityBudgetRows = [];
+    }
     const taskById = new Map(taskRows.map((row) => [row.id, row]));
     const eligibleTaskIds = new Set(
       taskRows.filter((row) => taskStatus.has(row.status)).map((row) => row.id),
@@ -2206,6 +3141,8 @@ export class Store {
       messages: eligibleMessages.map(token),
       workPlans: planRows.filter((row) => planStatus.has(row.status)).map(token),
       memories: memoryRows.map(token),
+      capabilityBudgets: capabilityBudgetRows.map((row) =>
+        `${row.project_key}:${row.authorization_hash}:${row.capability}:${row.updated_at}`),
       identityReferences: [...new Set(identityReferences)],
     };
     const blocked = {
@@ -2227,6 +3164,11 @@ export class Store {
         messages: eligibleMessages.map((row) => row.id),
         workPlans: planRows.filter((row) => planStatus.has(row.status)).map((row) => row.id),
         memories: memoryRows.map((row) => row.id),
+        capabilityBudgets: capabilityBudgetRows.map((row) => ({
+          projectKey: row.project_key,
+          authorizationHash: row.authorization_hash,
+          capability: row.capability,
+        })),
         checkpointRewrites,
       },
     };
@@ -2279,7 +3221,8 @@ export class Store {
       const erasePlan = this.db.prepare(
         `UPDATE work_plans SET project_id = 'deleted', requester_key = ?,
            requester_ciphertext = ?, objective_ciphertext = ?, plan_ciphertext = ?,
-           plan_hash = ?, execution_owner = NULL, lease_expires_at = NULL,
+           plan_hash = ?, authorization_hash = NULL, capability_budget_ciphertext = ?,
+           execution_owner = NULL, lease_expires_at = NULL,
            cancel_requested_at = NULL, cancel_requested_by = NULL,
            revision_actor = CASE WHEN revision_actor IS NULL THEN NULL ELSE 'deleted' END,
            privacy_erased_at = ?, updated_at = ?
@@ -2292,6 +3235,7 @@ export class Store {
           encryptedEmpty,
           encryptedObject,
           this.cipher.fingerprint(`deleted-plan:${id}:${randomUUID()}`),
+          encryptedObject,
           timestamp,
           timestamp,
           id,
@@ -2300,6 +3244,19 @@ export class Store {
           .run(encryptedEmpty, id);
         this.db.prepare("UPDATE work_plan_steps SET evidence_ciphertext = NULL, error_ciphertext = NULL WHERE work_plan_id = ?")
           .run(id);
+      }
+      const eraseCapabilityBudget = this.db.prepare(
+        `UPDATE capability_budget_usage SET project_id_ciphertext = ?, updated_at = ?
+         WHERE project_key = ? AND authorization_hash = ? AND capability = ?`,
+      );
+      for (const budget of candidates.ids.capabilityBudgets) {
+        eraseCapabilityBudget.run(
+          encryptedEmpty,
+          timestamp,
+          budget.projectKey,
+          budget.authorizationHash,
+          budget.capability,
+        );
       }
       const eraseMemory = this.db.prepare(
         `UPDATE memory_items SET subject_key = ?, subject_ciphertext = ?, project_id = NULL,
@@ -2360,7 +3317,7 @@ export class Store {
           SELECT id FROM tasks
           WHERE status IN (
             'completed', 'no_reply', 'rejected', 'cancelled_manual',
-            'cancelled_operator', 'expired'
+            'cancelled_operator', 'expired', 'continued'
           )
             AND updated_at < ?
         `,

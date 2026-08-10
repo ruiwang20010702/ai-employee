@@ -4,6 +4,7 @@ import {
   evaluatePlan,
   validateProjectManifest,
 } from "./capability-policy.mjs";
+import { capabilityBudgetForPlan } from "./capability-budget.mjs";
 
 function required(value, name, maxLength = 4_000) {
   if (typeof value !== "string" || !value.trim()) {
@@ -110,10 +111,17 @@ export function assessWorkPlan({ plan, manifest, now = new Date() }) {
     steps: normalized.steps,
     now,
   });
+  const authorizationHash = createHash("sha256")
+    .update(JSON.stringify(stable(authorization)))
+    .digest("hex");
   const planHash = createHash("sha256")
     .update(JSON.stringify(stable({ plan: normalized, authorization })))
     .digest("hex");
-  return { ...policy, planHash, plan: normalized };
+  const assessment = { ...policy, authorizationHash, planHash, plan: normalized };
+  return {
+    ...assessment,
+    capabilityBudget: capabilityBudgetForPlan(assessment, authorization),
+  };
 }
 
 export function validateWorkPlanRevision({

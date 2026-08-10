@@ -80,7 +80,6 @@ test("完整测试失败后仍停止临时数据库并清理专用目录", async
   await Promise.all([
     mkdir(postgresBin),
     mkdir(isolatedTemporaryDirectory),
-    mkdir(project),
     mkdir(join(project, "test"), { recursive: true }),
   ]);
   const executable = async (name, body) => {

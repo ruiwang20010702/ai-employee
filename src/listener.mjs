@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfig } from "./config.mjs";
-import { DwsAdapter } from "./dws.mjs";
+import { bindMessagesToSender, DwsAdapter } from "./dws.mjs";
 import { createProductionStore } from "./production-store.mjs";
 import { safeErrorCode } from "./logging.mjs";
 import { isMainModule } from "./main-module.mjs";
@@ -75,11 +75,11 @@ export async function ingestTarget({
     overlapMs: config.overlapMs,
     initialLookbackHours: config.initialLookbackHours,
   });
-  const messages = await dws.fetchBySender({
+  const messages = bindMessagesToSender(await dws.fetchBySender({
     senderUserId: userId,
     start,
     end: now,
-  });
+  }), userId);
   const inserted = await store.ingestMessages(messages, now);
   await store.setCheckpoint(checkpointKey(userId), now.toISOString(), now);
   return { fetched: messages.length, inserted };
@@ -123,19 +123,99 @@ export async function startListener({
   let debounceTimer;
   let fallbackTimer;
   let bundleSweepTimer;
+  let bundleSweepRunning = false;
+  let bundleSweepReschedule = false;
+  let bundleSweepDueAt = null;
+  let bundleScheduleGeneration = 0;
   let heartbeatTimer;
   const watchers = [];
 
+  const scheduleBundleRetry = (delayMs = 250) => {
+    if (stopping) return;
+    const delay = Math.max(100, Number(delayMs) || 250);
+    bundleScheduleGeneration += 1;
+    clearTimeout(bundleSweepTimer);
+    bundleSweepDueAt = Date.now() + delay;
+    bundleSweepTimer = setTimeout(runBundleSweep, delay);
+  };
+
   const createTasks = async () => {
-    if (await store.isPaused()) return [];
-    const taskIds = await store.createReadyTasks({
+    try {
+      if (await store.isPaused()) {
+        scheduleBundleRetry(config.pausedBundleRecheckMs ?? 1_000);
+        return [];
+      }
+      const taskIds = await store.createReadyTasks({
+        quietWindowMs: config.quietWindowMs,
+        bundleMaxWaitMs: config.bundleMaxWaitMs,
+        bundleGapMs: config.bundleGapMs,
+        maxMessagesPerTask: config.maxMessagesPerTask,
+        maxAttempts: config.maxTaskAttempts,
+        waitingInformationTtlMs: config.waitingInformationTtlMs,
+      });
+      if (taskIds.length > 0) log("tasks.queued", { count: taskIds.length });
+      await scheduleNextBundleSweep();
+      return taskIds;
+    } catch (error) {
+      scheduleBundleRetry(250);
+      throw error;
+    }
+  };
+
+  const runBundleSweep = () => {
+    if (stopping) return;
+    if (bundleSweepRunning) {
+      bundleSweepReschedule = true;
+      return;
+    }
+    bundleSweepRunning = true;
+    bundleSweepDueAt = null;
+    const operation = createTasks()
+      .catch((error) => {
+        log("listener.bundle_error", {
+          errorCode: safeErrorCode(error),
+        });
+      })
+      .finally(async () => {
+        bundleSweepRunning = false;
+        activeOperations.delete(operation);
+        if (bundleSweepReschedule) {
+          bundleSweepReschedule = false;
+          await scheduleNextBundleSweep().catch((error) => {
+            log("listener.bundle_error", {
+              errorCode: safeErrorCode(error),
+            });
+            scheduleBundleRetry(250);
+          });
+        }
+      });
+    activeOperations.add(operation);
+  };
+
+  const scheduleNextBundleSweep = async () => {
+    if (stopping) return;
+    const generation = ++bundleScheduleGeneration;
+    const next = await store.nextPendingBundleAt?.({
       quietWindowMs: config.quietWindowMs,
-      bundleGapMs: config.bundleGapMs,
-      maxMessagesPerTask: config.maxMessagesPerTask,
-      maxAttempts: config.maxTaskAttempts,
+      bundleMaxWaitMs: config.bundleMaxWaitMs,
     });
-    if (taskIds.length > 0) log("tasks.queued", { count: taskIds.length });
-    return taskIds;
+    if (stopping || generation !== bundleScheduleGeneration) return;
+    clearTimeout(bundleSweepTimer);
+    bundleSweepTimer = null;
+    if (!next) {
+      bundleSweepDueAt = null;
+      return;
+    }
+    const nextTime = new Date(next).getTime();
+    if (!Number.isFinite(nextTime)) {
+      throw new Error("Pending bundle deadline is invalid");
+    }
+    bundleSweepDueAt = nextTime;
+    const remaining = nextTime - Date.now();
+    bundleSweepTimer = setTimeout(
+      runBundleSweep,
+      remaining > 0 ? remaining : 100,
+    );
   };
 
   const runCheck = async (trigger) => {
@@ -298,18 +378,6 @@ export async function startListener({
       ?.finally(() => activeOperations.delete(operation));
     if (operation) activeOperations.add(operation);
   }, config.heartbeatMs);
-  bundleSweepTimer = setInterval(async () => {
-    if (stopping) return;
-    const operation = createTasks()
-      .catch((error) => {
-        log("listener.bundle_error", {
-          errorCode: safeErrorCode(error),
-        });
-      })
-      .finally(() => activeOperations.delete(operation));
-    activeOperations.add(operation);
-    await operation;
-  }, Math.min(config.quietWindowMs, 1_000));
   log("listener.started", {
     targets: config.targetUserIds.length,
     groups: config.targetGroupIds.length,
@@ -323,7 +391,8 @@ export async function startListener({
     pendingTrigger = null;
     for (const watcher of watchers) watcher.close();
     clearInterval(fallbackTimer);
-    clearInterval(bundleSweepTimer);
+    bundleScheduleGeneration += 1;
+    clearTimeout(bundleSweepTimer);
     clearInterval(heartbeatTimer);
     clearTimeout(debounceTimer);
     await Promise.allSettled([...activeOperations]);

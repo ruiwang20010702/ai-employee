@@ -7,15 +7,43 @@ function occurredAt(message) {
   return timestamp;
 }
 
+const explicitEarlyFlushPatterns = Object.freeze([
+  /^(?:\[紧急\]|【紧急】|紧急\s*[:：]|P[01](?:\s|[:：]))/iu,
+  /(?:\[发完\]|【发完】|（发完）|\(发完\)|以上(?:是|为)(?:全部|完整)(?:内容|需求)?|需求描述完毕|可以开始(?:处理|执行)?了)[。.!！]?$/u,
+]);
+
+function messageContent(message) {
+  return String(
+    message.content ??
+    message.text ??
+    message.messageContent ??
+    "",
+  ).trim();
+}
+
+export function shouldFlushMessageBundleEarly(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return false;
+  const content = messageContent(messages.at(-1));
+  return content.length > 0 && explicitEarlyFlushPatterns.some(
+    (pattern) => pattern.test(content),
+  );
+}
+
 export function splitMessageBursts(
   messages,
-  { gapMs = 120_000, maxMessages = 20 } = {},
+  { gapMs = 120_000, maxMessages = 20, boundaryAt = null } = {},
 ) {
   if (!Number.isFinite(gapMs) || gapMs <= 0) {
     throw new Error("gapMs must be a positive number");
   }
   if (!Number.isSafeInteger(maxMessages) || maxMessages <= 0) {
     throw new Error("maxMessages must be a positive integer");
+  }
+  const boundaryTime = boundaryAt == null
+    ? null
+    : new Date(boundaryAt).getTime();
+  if (boundaryAt != null && !Number.isFinite(boundaryTime)) {
+    throw new Error("boundaryAt must be a valid timestamp");
   }
   const ordered = [...messages].sort((left, right) => {
     const timeDifference = occurredAt(left) - occurredAt(right);
@@ -31,6 +59,9 @@ export function splitMessageBursts(
     if (
       !current ||
       current.length >= maxMessages ||
+      (boundaryTime != null &&
+        occurredAt(previous) <= boundaryTime &&
+        occurredAt(message) > boundaryTime) ||
       occurredAt(message) - occurredAt(previous) > gapMs
     ) {
       bursts.push([message]);

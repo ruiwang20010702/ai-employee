@@ -1,4 +1,6 @@
 import { assessWorkPlan } from "./work-plan.mjs";
+import { capabilityCatalog } from "./capability-policy.mjs";
+import { createHash } from "node:crypto";
 import { safeErrorCode } from "./logging.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { pausedPlanScopes } from "./scoped-pause.mjs";
@@ -70,8 +72,9 @@ export async function executeWorkPlan({
       ? {
           owner: executionOwner,
           leaseExpiresAt: new Date(authorizationTime.getTime() + leaseMs),
+          capabilityBudget: current.capabilityBudget,
         }
-      : {},
+      : { capabilityBudget: current.capabilityBudget },
   );
   let leaseError = null;
   let leaseRenewal = Promise.resolve();
@@ -154,7 +157,22 @@ export async function executeWorkPlan({
       await store.updateWorkPlanStep(
         planId,
         step.id,
-        { status: "executing" },
+        {
+          status: "executing",
+          evidence: capabilityCatalog[step.capability]?.sideEffect
+            ? {
+                kind: "side_effect_intent",
+                capability: step.capability,
+                intentSha256: createHash("sha256").update(JSON.stringify({
+                  planHash: registered.plan_hash,
+                  stepId: step.id,
+                  capability: step.capability,
+                  inputs: step.inputs ?? {},
+                })).digest("hex"),
+                reconciliationRequiredIfInterrupted: true,
+              }
+            : null,
+        },
         now(),
       );
       const result = await adapter.execute({
@@ -165,9 +183,12 @@ export async function executeWorkPlan({
         signal: stepController.signal,
       });
       await checkCancellation();
-      if (cancellationPollError) throw cancellationPollError;
       if (!result || result.verified !== true || !result.evidence) {
         throw new Error("Execution adapter did not provide verified evidence");
+      }
+      if (cancellationPollError) {
+        cancellationPollError.executionEvidence ??= result.evidence;
+        throw cancellationPollError;
       }
       await leaseRenewal;
       if (leaseError) {

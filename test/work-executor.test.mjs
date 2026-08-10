@@ -83,6 +83,71 @@ test("执行前重新校验策略并逐步保存验证证据", async (t) => {
   );
 });
 
+test("外部副作用调用前先持久化不可复用的执行意图", async (t) => {
+  const store = await fixture(t);
+  const sideEffectManifest = {
+    version: 1,
+    projectId: "side-effect-project",
+    name: "副作用测试",
+    rootDirectory: "/workspace/project",
+    requesters: ["user-1"],
+    capabilities: {
+      dingtalk_todo_create: {
+        mode: "approval_required",
+        allowedExecutorUserIds: ["executor-1"],
+        allowedPriorities: ["20"],
+        maxTitleChars: 120,
+      },
+    },
+  };
+  const assessed = assessWorkPlan({
+    manifest: sideEffectManifest,
+    plan: {
+      version: 1,
+      projectId: sideEffectManifest.projectId,
+      requesterId: "user-1",
+      objective: "创建已批准待办",
+      steps: [{
+        id: "todo",
+        capability: "dingtalk_todo_create",
+        description: "创建待办",
+        expectedEvidence: "逐字段回读一致",
+        rollback: "另行审批删除",
+        inputs: {
+          title: "完成评审",
+          executorUserIds: ["executor-1"],
+          priority: "20",
+        },
+      }],
+    },
+  });
+  const plan = store.registerWorkPlan(assessed);
+  store.decideWorkPlan(plan.id, {
+    decision: "approved",
+    actor: "approver",
+    planHash: assessed.planHash,
+  });
+  let persistedIntent;
+  const result = await executeWorkPlan({
+    store,
+    planId: plan.id,
+    manifest: sideEffectManifest,
+    adapters: {
+      dingtalk_todo_create: {
+        async execute() {
+          persistedIntent = store.listWorkPlanSteps(plan.id)[0].evidence;
+          return { verified: true, evidence: { kind: "verified_todo" } };
+        },
+      },
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(persistedIntent.kind, "side_effect_intent");
+  assert.equal(persistedIntent.capability, "dingtalk_todo_create");
+  assert.match(persistedIntent.intentSha256, /^[a-f0-9]{64}$/u);
+  assert.equal(persistedIntent.reconciliationRequiredIfInterrupted, true);
+});
+
 test("适配器失败时停止后续步骤并记录稳定错误分类", async (t) => {
   const store = await fixture(t);
   const plan = store.registerWorkPlan(assessment());
@@ -115,6 +180,78 @@ test("适配器失败时停止后续步骤并记录稳定错误分类", async (t
   assert.equal(documentRan, false);
   assert.equal(store.getWorkPlan(plan.id).status, "failed");
   assert.equal(store.listWorkPlanSteps(plan.id)[0].evidence.exitCode, 1);
+});
+
+test("副作用完成后取消状态查询失败仍保留回读证据", async (t) => {
+  const store = await fixture(t);
+  const sideEffectManifest = {
+    version: 1,
+    projectId: "poll-evidence-project",
+    name: "取消查询证据测试",
+    rootDirectory: "/workspace/project",
+    requesters: ["user-1"],
+    capabilities: {
+      dingtalk_todo_create: {
+        mode: "approval_required",
+        allowedExecutorUserIds: ["executor-1"],
+        allowedPriorities: ["20"],
+        maxTitleChars: 120,
+      },
+    },
+  };
+  const assessed = assessWorkPlan({
+    manifest: sideEffectManifest,
+    plan: {
+      version: 1,
+      projectId: sideEffectManifest.projectId,
+      requesterId: "user-1",
+      objective: "创建待办并验证取消查询故障",
+      steps: [{
+        id: "todo",
+        capability: "dingtalk_todo_create",
+        description: "创建待办",
+        expectedEvidence: "逐字段回读一致",
+        rollback: "另行审批删除",
+        inputs: {
+          title: "完成评审",
+          executorUserIds: ["executor-1"],
+          priority: "20",
+        },
+      }],
+    },
+  });
+  const plan = store.registerWorkPlan(assessed);
+  store.decideWorkPlan(plan.id, {
+    decision: "approved",
+    actor: "approver",
+    planHash: assessed.planHash,
+  });
+  const originalCancellationCheck = store.isWorkPlanCancellationRequested.bind(store);
+  let sideEffectCompleted = false;
+  store.isWorkPlanCancellationRequested = async (...args) => {
+    if (sideEffectCompleted) throw new Error("cancellation status unavailable");
+    return originalCancellationCheck(...args);
+  };
+  const evidence = {
+    kind: "verified_todo",
+    externalId: "todo-verified-1",
+    readbackMatched: true,
+  };
+  const result = await executeWorkPlan({
+    store,
+    planId: plan.id,
+    manifest: sideEffectManifest,
+    adapters: {
+      dingtalk_todo_create: {
+        async execute() {
+          sideEffectCompleted = true;
+          return { verified: true, evidence };
+        },
+      },
+    },
+  });
+  assert.equal(result.status, "failed");
+  assert.deepEqual(store.listWorkPlanSteps(plan.id)[0].evidence, evidence);
 });
 
 test("适配器预检失败时不消费审批或执行任何步骤", async (t) => {

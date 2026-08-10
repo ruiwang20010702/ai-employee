@@ -134,6 +134,12 @@ export async function activateVersionedRelease({
   releaseDirectory: releaseInput,
   runId,
   attempt,
+  verifyActivation = async ({ current, release }) => {
+    const activated = await realpath(current);
+    if (activated !== release || (await readlink(current)) !== release) {
+      throw new Error("Current release verification failed");
+    }
+  },
 } = {}) {
   const releaseRunId = cleanScalar(runId, "Run ID", /^[0-9]{1,30}$/u);
   const releaseAttempt = cleanScalar(attempt, "Run attempt", /^[0-9]{1,10}$/u);
@@ -145,11 +151,19 @@ export async function activateVersionedRelease({
   }
   await protectedRelease(release);
   const current = join(root, "current");
+  let previous = null;
   try {
     const metadata = await lstat(current);
     if (!metadata.isSymbolicLink()) {
       throw new Error("Current release marker must remain a symbolic link");
     }
+    previous = await realpath(current).catch(() => {
+      throw new Error("Current release marker is broken");
+    });
+    if (!inside(releases, previous)) {
+      throw new Error("Current release escaped the approved releases directory");
+    }
+    await protectedRelease(previous);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -157,14 +171,32 @@ export async function activateVersionedRelease({
   try {
     await symlink(release, temporary);
     await rename(temporary, current);
+    await verifyActivation({ current, release });
+  } catch (error) {
+    try {
+      if (previous) {
+        const rollback = `${temporary}-rollback`;
+        await unlink(rollback).catch((cleanupError) => {
+          if (cleanupError.code !== "ENOENT") throw cleanupError;
+        });
+        await symlink(previous, rollback);
+        await rename(rollback, current);
+      } else {
+        await unlink(current).catch((cleanupError) => {
+          if (cleanupError.code !== "ENOENT") throw cleanupError;
+        });
+      }
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "Current release verification and rollback both failed",
+      );
+    }
+    throw error;
   } finally {
     await unlink(temporary).catch((error) => {
       if (error.code !== "ENOENT") throw error;
     });
-  }
-  const activated = await realpath(current);
-  if (activated !== release || (await readlink(current)) !== release) {
-    throw new Error("Current release verification failed");
   }
   return { activated: true, releaseDirectory: release };
 }

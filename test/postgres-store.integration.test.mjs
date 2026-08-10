@@ -6,6 +6,7 @@ import { migrate } from "../src/migrate.mjs";
 import { createPostgresPool } from "../src/postgres.mjs";
 import { PostgresStore } from "../src/postgres-store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
+import { capabilityBudgetForPlan } from "../src/capability-budget.mjs";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const temporaryDatabase = process.env.TEST_DATABASE_TEMP === "true";
@@ -51,6 +52,7 @@ async function fixture(t) {
     await pool.query("DELETE FROM work_plan_steps WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM work_plan_approvals WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM work_plans WHERE tenant_id = $1", [tenantId]);
+    await pool.query("DELETE FROM capability_budget_usage WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM memory_items WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM messages WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM privacy_erased_messages WHERE tenant_id = $1", [tenantId]);
@@ -82,6 +84,55 @@ function messages() {
   ];
 }
 
+async function sendPostgresClarification(store, taskId, now) {
+  await store.claimTask({ now });
+  await store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "请补充目标上线日期。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "缺少必要信息",
+    needsInformation: true,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, now);
+  await store.decideTask(
+    taskId,
+    { decision: "approved", actor: "tester" },
+    now,
+  );
+  await store.claimApprovedTask({ now });
+  await store.beginSideEffect(taskId, "send_message", now);
+  await store.completeSideEffect(taskId, "send_message", { success: true }, now);
+}
+
+async function markPostgresClarificationUnknown(store, taskId, now) {
+  await store.claimTask({ now });
+  await store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "请补充目标上线日期。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "缺少必要信息",
+    needsInformation: true,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, now);
+  await store.decideTask(
+    taskId,
+    { decision: "approved", actor: "tester" },
+    now,
+  );
+  await store.claimApprovedTask({ now });
+  await store.beginSideEffect(taskId, "send_message", now);
+  await store.markSideEffectUnknown(
+    taskId,
+    "send_message",
+    new Error("delivery result unavailable"),
+    now,
+  );
+}
+
 integration("PostgreSQL 消息去重、合并和加密存储", async (t) => {
   const store = await fixture(t);
   const base = new Date("2026-07-31T10:00:02.000Z");
@@ -109,6 +160,77 @@ integration("PostgreSQL 消息去重、合并和加密存储", async (t) => {
   assert.equal(raw.rows[0].payload_ciphertext.includes("昨天的方案"), false);
 });
 
+integration("PostgreSQL 显式紧急信号可以提前结束安静窗口", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-10T08:00:00.000Z");
+  await store.ingestMessages([{
+    id: "postgres-early-urgent",
+    senderUserId: "u1",
+    senderName: "测试用户",
+    conversationId: "c1",
+    createTime: base.toISOString(),
+    content: "[紧急] 生产服务异常",
+  }], base);
+  const taskIds = await store.createReadyTasks({
+    quietWindowMs: 3_000,
+    bundleMaxWaitMs: 8_000,
+    now: new Date(base.getTime() + 100),
+  });
+  assert.equal(taskIds.length, 1);
+  assert.equal(
+    (await store.getTask(taskIds[0])).payload.content,
+    "[紧急] 生产服务异常",
+  );
+});
+
+integration("PostgreSQL 连续输入在 7999ms 不触发并在 8000ms 硬截止", async (t) => {
+  const store = await fixture(t);
+  const firstAt = new Date("2026-08-10T08:00:00.000Z");
+  await store.ingestMessages([{
+    id: "postgres-max-wait-1",
+    senderUserId: "u1",
+    senderName: "测试用户",
+    conversationId: "c1",
+    createTime: firstAt.toISOString(),
+    content: "第一段",
+  }], firstAt);
+  const secondAt = new Date(firstAt.getTime() + 7_500);
+  await store.ingestMessages([{
+    id: "postgres-max-wait-2",
+    senderUserId: "u1",
+    senderName: "测试用户",
+    conversationId: "c1",
+    createTime: secondAt.toISOString(),
+    content: "第二段",
+  }], secondAt);
+  assert.equal(
+    (await store.nextPendingBundleAt({
+      quietWindowMs: 3_000,
+      bundleMaxWaitMs: 8_000,
+    })).toISOString(),
+    new Date(firstAt.getTime() + 8_000).toISOString(),
+  );
+  assert.deepEqual(await store.createReadyTasks({
+    quietWindowMs: 3_000,
+    bundleMaxWaitMs: 8_000,
+    now: new Date(firstAt.getTime() + 7_999),
+  }), []);
+  const taskIds = await store.createReadyTasks({
+    quietWindowMs: 3_000,
+    bundleMaxWaitMs: 8_000,
+    now: new Date(firstAt.getTime() + 8_000),
+  });
+  assert.equal(taskIds.length, 1);
+  assert.equal(
+    (await store.getTask(taskIds[0])).payload.content,
+    "第一段\n第二段",
+  );
+  assert.equal(await store.nextPendingBundleAt({
+    quietWindowMs: 3_000,
+    bundleMaxWaitMs: 8_000,
+  }), null);
+});
+
 integration("PostgreSQL Worker 租约使用 SKIP LOCKED 防止重复领取", async (t) => {
   const store = await fixture(t);
   const base = new Date("2026-07-31T10:00:00.000Z");
@@ -123,6 +245,562 @@ integration("PostgreSQL Worker 租约使用 SKIP LOCKED 防止重复领取", asy
   ]);
   assert.equal([first, second].filter(Boolean).length, 1);
   assert.equal((first ?? second).id, taskId);
+});
+
+integration("PostgreSQL 等待信息任务只关联唯一同会话补充", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  const waitingAt = new Date(base.getTime() + 20);
+  await sendPostgresClarification(store, parentId, waitingAt);
+  assert.equal((await store.getTask(parentId)).status, "waiting_information");
+
+  const answerAt = new Date(base.getTime() + 1_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-wait-answer",
+    createTime: answerAt.toISOString(),
+    content: "下周一上线",
+  }], answerAt);
+  const [childId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    waitingInformationTtlMs: 60_000,
+    now: new Date(answerAt.getTime() + 10),
+  });
+  const child = await store.getTask(childId);
+  assert.equal(child.continuation_of_task_id, parentId);
+  assert.equal(child.payload.waitingTask.clarificationQuestion, "请补充目标上线日期。");
+  assert.equal(
+    new Date((await store.getTask(parentId)).waiting_information_at).toISOString(),
+    waitingAt.toISOString(),
+  );
+
+  await store.claimTask({ now: new Date(answerAt.getTime() + 20) });
+  await store.completeDraft(childId, {
+    shouldReply: true,
+    reply: "收到，将按下周一上线规划。",
+    confidence: 0.95,
+    riskLevel: "medium",
+    reason: "回答了原追问",
+    needsInformation: false,
+    relatedToWaitingTask: true,
+    workRequest: null,
+  }, new Date(answerAt.getTime() + 20));
+  assert.equal((await store.getTask(parentId)).status, "continued");
+  assert.equal(
+    await store.cancelDraftForManualReply(
+      childId,
+      new Date(answerAt.getTime() + 30),
+    ),
+    true,
+  );
+  assert.equal((await store.getTask(parentId)).status, "cancelled_manual");
+});
+
+integration("PostgreSQL 补充任务生成期间人工接管会释放父任务", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await sendPostgresClarification(store, parentId, new Date(base.getTime() + 20));
+  const answerAt = new Date(base.getTime() + 1_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-manual-processing-answer",
+    createTime: answerAt.toISOString(),
+    content: "下周一上线",
+  }], answerAt);
+  const [childId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(answerAt.getTime() + 10),
+  });
+  await store.claimTask({ now: new Date(answerAt.getTime() + 20) });
+  assert.equal((await store.getTask(childId)).status, "processing");
+  assert.equal((await store.getTask(parentId)).status, "continuation_pending");
+  assert.equal(
+    await store.cancelDraftForManualReply(childId, new Date(answerAt.getTime() + 30)),
+    true,
+  );
+  assert.equal((await store.getTask(parentId)).status, "cancelled_manual");
+});
+
+integration("PostgreSQL 同批多段补充不会在首段相关后丢失等待链", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await sendPostgresClarification(
+    store,
+    parentId,
+    new Date(base.getTime() + 20),
+  );
+  const answerAt = new Date(base.getTime() + 1_000);
+  await store.ingestMessages([
+    {
+      ...messages()[0],
+      id: "postgres-multi-answer-1",
+      createTime: answerAt.toISOString(),
+      content: "周五",
+    },
+    {
+      ...messages()[0],
+      id: "postgres-multi-answer-2",
+      createTime: new Date(answerAt.getTime() + 1).toISOString(),
+      content: "更正为下周一",
+    },
+  ], new Date(answerAt.getTime() + 1));
+  const created = await store.createReadyTasks({
+    quietWindowMs: 1,
+    maxMessagesPerTask: 1,
+    now: new Date(answerAt.getTime() + 10),
+  });
+  assert.equal(created.length, 1);
+  await store.claimTask({ now: new Date(answerAt.getTime() + 20) });
+  await store.completeDraft(created[0], {
+    shouldReply: false,
+    reply: "",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "第一段属于补充信息",
+    needsInformation: false,
+    relatedToWaitingTask: true,
+    workRequest: null,
+  }, new Date(answerAt.getTime() + 20));
+  assert.equal((await store.getTask(parentId)).status, "waiting_information");
+  const [secondChildId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    maxMessagesPerTask: 1,
+    now: new Date(answerAt.getTime() + 30),
+  });
+  assert.equal(
+    (await store.getTask(secondChildId)).continuation_of_task_id,
+    parentId,
+  );
+});
+
+integration("PostgreSQL 追问后的历史补录不会冒充补充信息", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 5),
+  });
+  const waitingAt = new Date(base.getTime() + 20_000);
+  await sendPostgresClarification(store, parentId, waitingAt);
+
+  const historicalAt = new Date(base.getTime() + 10_000);
+  const answerAt = new Date(base.getTime() + 30_000);
+  await store.ingestMessages([
+    {
+      ...messages()[0],
+      id: "postgres-boundary-old-backfill",
+      createTime: historicalAt.toISOString(),
+      content: "这是追问前遗漏的历史消息",
+    },
+    {
+      ...messages()[0],
+      id: "postgres-boundary-real-answer",
+      createTime: answerAt.toISOString(),
+      content: "下周一上线",
+    },
+  ], new Date(base.getTime() + 40_000));
+  const created = await store.createReadyTasks({
+    quietWindowMs: 1,
+    bundleGapMs: 120_000,
+    now: new Date(base.getTime() + 40_010),
+  });
+  assert.equal(created.length, 2);
+  const tasks = await Promise.all(created.map((id) => store.getTask(id)));
+  const oldTask = tasks.find((task) =>
+    task.payload.messageIds.includes("postgres-boundary-old-backfill"));
+  const answerTask = tasks.find((task) =>
+    task.payload.messageIds.includes("postgres-boundary-real-answer"));
+  assert.equal(oldTask.continuation_of_task_id, null);
+  assert.equal(oldTask.payload.waitingTask, null);
+  assert.equal(answerTask.continuation_of_task_id, parentId);
+  assert.equal(
+    answerTask.payload.waitingTask.clarificationQuestion,
+    "请补充目标上线日期。",
+  );
+  assert.equal((await store.getTask(parentId)).status, "continuation_pending");
+});
+
+integration("PostgreSQL 连续补充消息等待前一条释放后再关联", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await sendPostgresClarification(store, parentId, new Date(base.getTime() + 20));
+  const firstAt = new Date(base.getTime() + 1_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-serial-first",
+    createTime: firstAt.toISOString(),
+    content: "周五",
+  }], firstAt);
+  const [firstChildId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(firstAt.getTime() + 10),
+  });
+
+  const secondAt = new Date(base.getTime() + 2_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-serial-second",
+    createTime: secondAt.toISOString(),
+    content: "改成下周一",
+  }], secondAt);
+  assert.deepEqual(await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(secondAt.getTime() + 10),
+  }), []);
+  assert.equal(
+    (await store.nextPendingBundleAt({
+      quietWindowMs: 1,
+      now: new Date(secondAt.getTime() + 10),
+    })).toISOString(),
+    new Date(secondAt.getTime() + 1_010).toISOString(),
+  );
+  await store.claimTask({ now: new Date(secondAt.getTime() + 20) });
+  await store.completeDraft(firstChildId, {
+    shouldReply: false,
+    reply: "",
+    confidence: 0.8,
+    riskLevel: "low",
+    reason: "第一条不是最终补充",
+    needsInformation: false,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, new Date(secondAt.getTime() + 20));
+  const [secondChildId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(secondAt.getTime() + 30),
+  });
+  assert.equal((await store.getTask(secondChildId)).continuation_of_task_id, parentId);
+});
+
+integration("PostgreSQL 补充任务死亡后可安全恢复并重试原链", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await sendPostgresClarification(store, parentId, new Date(base.getTime() + 20));
+  const answerAt = new Date(base.getTime() + 1_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-retry-continuation",
+    createTime: answerAt.toISOString(),
+    content: "周五",
+  }], answerAt);
+  const [childId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    maxAttempts: 1,
+    now: new Date(answerAt.getTime() + 10),
+  });
+  await store.claimTask({ now: new Date(answerAt.getTime() + 20) });
+  assert.equal(
+    await store.failTask(childId, new Error("permanent"), new Date(answerAt.getTime() + 20)),
+    "dead",
+  );
+  assert.equal((await store.getTask(parentId)).status, "waiting_information");
+  await store.retryTask(childId, new Date(answerAt.getTime() + 30));
+  assert.equal((await store.getTask(parentId)).status, "continuation_pending");
+  await store.claimTask({ now: new Date(answerAt.getTime() + 40) });
+  await store.completeDraft(childId, {
+    shouldReply: true,
+    reply: "收到，继续处理。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "重试后确认是补充信息",
+    needsInformation: false,
+    relatedToWaitingTask: true,
+    workRequest: null,
+  }, new Date(answerAt.getTime() + 40));
+  assert.equal((await store.getTask(parentId)).status, "continued");
+});
+
+integration("PostgreSQL 无关补充会释放预留并恢复原等待任务", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await sendPostgresClarification(store, parentId, new Date(base.getTime() + 20));
+
+  const unrelatedAt = new Date(base.getTime() + 1_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-unrelated-continuation",
+    createTime: unrelatedAt.toISOString(),
+    content: "另外预算是多少？",
+  }], unrelatedAt);
+  const [childId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(unrelatedAt.getTime() + 10),
+  });
+  assert.equal((await store.getTask(parentId)).status, "continuation_pending");
+
+  await store.claimTask({ now: new Date(unrelatedAt.getTime() + 20) });
+  await store.completeDraft(childId, {
+    shouldReply: false,
+    reply: "",
+    confidence: 0.95,
+    riskLevel: "low",
+    reason: "这是另一个问题，不是原追问的答案",
+    needsInformation: false,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, new Date(unrelatedAt.getTime() + 20));
+  assert.equal((await store.getTask(childId)).status, "no_reply");
+  assert.equal((await store.getTask(parentId)).status, "waiting_information");
+});
+
+integration("PostgreSQL 多个等待候选时不猜测补充信息归属", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [firstParentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await sendPostgresClarification(
+    store,
+    firstParentId,
+    new Date(base.getTime() + 20),
+  );
+
+  const secondRequestAt = new Date(base.getTime() + 1_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-second-waiting-request",
+    createTime: secondRequestAt.toISOString(),
+    content: "另外一个项目预算怎么定？",
+  }], secondRequestAt);
+  const [secondParentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(secondRequestAt.getTime() + 10),
+  });
+  await store.claimTask({ now: new Date(secondRequestAt.getTime() + 20) });
+  await store.completeDraft(secondParentId, {
+    shouldReply: true,
+    reply: "请补充预算范围。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "这是独立问题且缺少预算范围",
+    needsInformation: true,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, new Date(secondRequestAt.getTime() + 20));
+  assert.equal((await store.getTask(firstParentId)).status, "waiting_information");
+  await store.decideTask(secondParentId, {
+    decision: "approved",
+    actor: "tester",
+  }, new Date(secondRequestAt.getTime() + 30));
+  await store.claimApprovedTask({ now: new Date(secondRequestAt.getTime() + 30) });
+  await store.beginSideEffect(
+    secondParentId,
+    "send_message",
+    new Date(secondRequestAt.getTime() + 30),
+  );
+  await store.completeSideEffect(
+    secondParentId,
+    "send_message",
+    { success: true },
+    new Date(secondRequestAt.getTime() + 30),
+  );
+
+  const answerAt = new Date(base.getTime() + 2_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-ambiguous-answer",
+    createTime: answerAt.toISOString(),
+    content: "100 万",
+  }], answerAt);
+  const [answerTaskId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(answerAt.getTime() + 10),
+  });
+  const answerTask = await store.getTask(answerTaskId);
+  assert.equal(answerTask.continuation_of_task_id, null);
+  assert.equal(answerTask.payload.waitingTask, null);
+  assert.equal((await store.getTask(firstParentId)).status, "waiting_information");
+  assert.equal((await store.getTask(secondParentId)).status, "waiting_information");
+});
+
+integration("PostgreSQL 等待信息超过 TTL 后过期且不再关联", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await sendPostgresClarification(store, parentId, new Date(base.getTime() + 20));
+
+  const lateAt = new Date(base.getTime() + 61_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-expired-answer",
+    createTime: lateAt.toISOString(),
+    content: "下周一上线",
+  }], lateAt);
+  const [childId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    waitingInformationTtlMs: 60_000,
+    now: new Date(lateAt.getTime() + 10),
+  });
+  assert.equal((await store.getTask(parentId)).status, "expired");
+  assert.equal((await store.getTask(childId)).continuation_of_task_id, null);
+  assert.equal((await store.getTask(childId)).payload.waitingTask, null);
+});
+
+integration("PostgreSQL 人工确认追问已发送后进入等待且不能重复确认", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [taskId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await markPostgresClarificationUnknown(
+    store,
+    taskId,
+    new Date(base.getTime() + 20),
+  );
+  assert.equal((await store.getTask(taskId)).status, "send_unknown");
+
+  const confirmedAt = new Date(base.getTime() + 30);
+  await store.resolveUnknownSend(taskId, "sent", "operator", confirmedAt);
+  const confirmed = await store.getTask(taskId);
+  assert.equal(confirmed.status, "waiting_information");
+  assert.equal(
+    new Date(confirmed.waiting_information_at).toISOString(),
+    new Date(base.getTime() + 20).toISOString(),
+  );
+  await assert.rejects(
+    store.resolveUnknownSend(taskId, "sent", "operator", confirmedAt),
+    /Task is not in send_unknown state/u,
+  );
+
+  const answerBeforeConfirmation = new Date(base.getTime() + 25);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-answer-before-send-confirmation",
+    createTime: answerBeforeConfirmation.toISOString(),
+    content: "下周一上线",
+  }], new Date(base.getTime() + 35));
+  const [childId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 40),
+  });
+  assert.equal((await store.getTask(childId)).continuation_of_task_id, taskId);
+});
+
+integration("PostgreSQL 人工确认追问未发送后清理账本并允许安全重发", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [taskId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await markPostgresClarificationUnknown(
+    store,
+    taskId,
+    new Date(base.getTime() + 20),
+  );
+
+  const resolvedAt = new Date(base.getTime() + 30);
+  await store.resolveUnknownSend(taskId, "not_sent", "operator", resolvedAt);
+  const resolved = await store.getTask(taskId);
+  assert.equal(resolved.status, "approved");
+  assert.equal(resolved.waiting_information_at, null);
+  const ledger = await store.pool.query(
+    `SELECT status FROM side_effects
+     WHERE tenant_id = $1 AND task_id = $2 AND capability = 'send_message'`,
+    [store.tenantId, taskId],
+  );
+  assert.equal(ledger.rowCount, 0);
+
+  assert.equal(
+    (await store.claimApprovedTask({ now: new Date(base.getTime() + 40) })).id,
+    taskId,
+  );
+  const retried = await store.beginSideEffect(
+    taskId,
+    "send_message",
+    new Date(base.getTime() + 40),
+  );
+  assert.equal(retried.idempotency_key, `send_message:${taskId}`);
+  assert.equal(retried.status, "started");
+});
+
+integration("PostgreSQL 并发建任务只能原子预留一次等待链", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages([messages()[0]], base);
+  const [parentId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await sendPostgresClarification(store, parentId, new Date(base.getTime() + 20));
+
+  const answerAt = new Date(base.getTime() + 1_000);
+  await store.ingestMessages([{
+    ...messages()[0],
+    id: "postgres-concurrent-answer",
+    createTime: answerAt.toISOString(),
+    content: "下周一上线",
+  }], answerAt);
+  const secondPool = createPostgresPool(store.config);
+  try {
+    const secondStore = await new PostgresStore(store.config, {
+      pool: secondPool,
+    }).open();
+    const results = await Promise.all([
+      store.createReadyTasks({
+        quietWindowMs: 1,
+        now: new Date(answerAt.getTime() + 10),
+      }),
+      secondStore.createReadyTasks({
+        quietWindowMs: 1,
+        now: new Date(answerAt.getTime() + 10),
+      }),
+    ]);
+    assert.deepEqual(results.map((ids) => ids.length).sort(), [0, 1]);
+    const [childId] = results.flat();
+    const child = await store.getTask(childId);
+    assert.equal(child.continuation_of_task_id, parentId);
+    assert.equal(child.payload.messageIds.includes("postgres-concurrent-answer"), true);
+    assert.equal((await store.getTask(parentId)).status, "continuation_pending");
+    const bundled = await store.pool.query(
+      `SELECT status, task_id FROM messages
+       WHERE tenant_id = $1 AND platform_message_id = $2`,
+      [store.tenantId, "postgres-concurrent-answer"],
+    );
+    assert.deepEqual(bundled.rows[0], { status: "bundled", task_id: childId });
+  } finally {
+    await secondPool.end();
+  }
 });
 
 integration("PostgreSQL 联系人和群聊局部暂停加密保存并审计恢复", async (t) => {
@@ -272,6 +950,43 @@ integration("PostgreSQL 审批、幂等发送账本和审计形成闭环", async
     [store.tenantId, taskId],
   );
   assert.ok(audit.rows.some((row) => row.event_type === "send.completed"));
+});
+
+integration("PostgreSQL 非发送态和缺失副作用账本均拒绝确认", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages(messages().slice(0, 1), base);
+  const [taskId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await assert.rejects(
+    store.beginSideEffect(taskId, "send_message", base),
+    /Task is not sending/u,
+  );
+  await store.claimTask({ now: new Date(base.getTime() + 20) });
+  await store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "我先看一下。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "需要回复",
+  }, new Date(base.getTime() + 20));
+  await store.decideTask(taskId, {
+    decision: "approved",
+    actor: "integration-test",
+  }, new Date(base.getTime() + 30));
+  await store.claimApprovedTask({ now: new Date(base.getTime() + 30) });
+  await assert.rejects(
+    store.completeSideEffect(
+      taskId,
+      "send_message",
+      { success: true },
+      new Date(base.getTime() + 40),
+    ),
+    /Side effect was not started/u,
+  );
+  assert.equal((await store.getTask(taskId)).status, "sending");
 });
 
 integration("PostgreSQL 运营指标记录草稿就绪和审批时间", async (t) => {
@@ -449,6 +1164,87 @@ sharedSchemaIntegration("PostgreSQL 复合外键阻止跨租户关联任务", as
   );
 });
 
+integration("PostgreSQL 自动记忆候选原子去重且冲突留待人工确认", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-10T09:00:00.000Z");
+  const sourceAt = new Date("2026-08-10T08:00:00.000Z");
+  await store.ingestMessages([
+    ...["message-1", "message-2", "message-3"].map((id, index) => ({
+      id,
+      senderUserId: "candidate-user",
+      senderName: "测试用户",
+      conversationId: "candidate-conversation",
+      createTime: new Date(sourceAt.getTime() + index).toISOString(),
+      content: "对方明确表达了回复长度偏好。",
+    })),
+  ], sourceAt);
+  const [sourceTaskId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(sourceAt.getTime() + 10),
+  });
+  await store.claimTask({ now: new Date(sourceAt.getTime() + 20) });
+  await store.completeDraft(sourceTaskId, {
+    shouldReply: false,
+    reply: "",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "无需回复",
+    needsInformation: false,
+    relatedToWaitingTask: false,
+    workRequest: null,
+  }, new Date(sourceAt.getTime() + 20));
+  const base = {
+    type: "person",
+    subject: "candidate-user",
+    statement: "对方明确偏好简短回复。",
+    sourceType: "dingtalk_message",
+    sourceId: "message-1",
+    sourceVersion: sourceTaskId,
+    scope: { factKey: "communication.reply_length" },
+    confidence: 0.9,
+    sensitivity: "internal",
+    expiresAt: new Date(now.getTime() + 90 * 86_400_000),
+    createdBy: "system:memory-candidate",
+  };
+  const results = await Promise.all([
+    store.proposeMemoryCandidate(base, now),
+    store.proposeMemoryCandidate({ ...base, sourceId: "message-2" }, now),
+  ]);
+  assert.equal(results.filter((result) => result.created).length, 1);
+  assert.equal(results.filter((result) => result.reason === "duplicate").length, 1);
+  const [candidate] = await store.listMemories({ status: "proposed" });
+  assert.equal(candidate.source_type, "dingtalk_message");
+  assert.equal((await store.searchMemories({ query: "简短", now })).length, 0);
+  await store.confirmMemory(candidate.id, "owner", now);
+
+  const conflict = await store.proposeMemoryCandidate({
+    ...base,
+    statement: "对方明确偏好详细回复。",
+    sourceId: "message-3",
+  }, new Date(now.getTime() + 1_000));
+  assert.equal(conflict.created, true);
+  assert.equal(conflict.conflictCount, 1);
+  await assert.rejects(
+    store.confirmMemory(conflict.id, "owner", new Date(now.getTime() + 2_000)),
+    /supersedesId/u,
+  );
+  await store.pool.query(
+    `UPDATE tasks SET payload_ciphertext = $3
+     WHERE tenant_id = $1 AND id = $2`,
+    [store.tenantId, sourceTaskId, store.cipher.encrypt("{}")],
+  );
+  await assert.rejects(
+    store.confirmMemory(
+      conflict.id,
+      "owner",
+      new Date(now.getTime() + 3_000),
+      { supersedesId: candidate.id },
+    ),
+    /source must remain verifiable/u,
+  );
+  assert.equal((await store.listMemories({ status: "confirmed" })).length, 1);
+});
+
 integration("PostgreSQL 正式记忆包含确认、来源、过期和撤销门禁", async (t) => {
   const store = await fixture(t);
   const id = await store.proposeMemory({
@@ -563,6 +1359,37 @@ integration("PostgreSQL 冲突记忆必须显式替代且不产生双活事实",
   assert.equal((await store.listMemories({ status: "confirmed" })).length, 1);
 });
 
+integration("PostgreSQL 并发确认同一事实范围最多产生一条正式记忆", async (t) => {
+  const store = await fixture(t);
+  const base = {
+    type: "project",
+    subject: "并发发布口径",
+    projectId: "concurrent-project",
+    sourceType: "operator",
+    createdBy: "owner",
+    scope: { factKey: "release.rule" },
+  };
+  const [firstId, secondId] = await Promise.all([
+    store.proposeMemory({
+      ...base,
+      statement: "必须先完成安全扫描。",
+      sourceId: "source-first",
+    }),
+    store.proposeMemory({
+      ...base,
+      statement: "可以跳过安全扫描。",
+      sourceId: "source-second",
+    }),
+  ]);
+  const results = await Promise.allSettled([
+    store.confirmMemory(firstId, "owner"),
+    store.confirmMemory(secondId, "owner"),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.equal((await store.listMemories({ status: "confirmed" })).length, 1);
+});
+
 integration("PostgreSQL 记忆永久删除擦除正文并保留无正文审计", async (t) => {
   const store = await fixture(t);
   const id = await store.proposeMemory({
@@ -635,13 +1462,26 @@ integration("PostgreSQL 按人隐私擦除在串行事务中清空正文和关�
     sourceId: "private-message",
     createdBy: "u1",
   }, new Date(base.getTime() + 31));
+  const derivedMemory = await store.proposeMemoryCandidate({
+    type: "principle",
+    subject: "organization",
+    statement: "消息中形成的协作原则",
+    sourceType: "dingtalk_message",
+    sourceId: "m1",
+    sourceVersion: taskId,
+    scope: { factKey: "collaboration.principle" },
+    confidence: 0.9,
+    sensitivity: "internal",
+    expiresAt: new Date(base.getTime() + 86_400_000),
+    createdBy: "system:memory-candidate",
+  }, new Date(base.getTime() + 31));
   const preview = await store.previewPrivacyErasure(
     { personId: "u1" },
     new Date(base.getTime() + 40),
   );
   assert.match(preview.confirmation, /^ERASE-/u);
   assert.equal(preview.counts.tasks, 1);
-  assert.equal(preview.counts.memories, 1);
+  assert.equal(preview.counts.memories, 2);
   assert.equal(JSON.stringify(preview).includes("u1"), false);
   await store.erasePrivacyData(
     { personId: "u1" },
@@ -651,6 +1491,7 @@ integration("PostgreSQL 按人隐私擦除在串行事务中清空正文和关�
   );
   assert.equal(await store.getTask(taskId), null);
   assert.equal(await store.getMemory(memoryId), null);
+  assert.equal(await store.getMemory(derivedMemory.id), null);
   assert.equal(await store.ingestMessages(messages().slice(0, 1), new Date(base.getTime() + 50)), 0);
   const raw = await store.pool.query(
     `SELECT t.privacy_erased_at, t.payload_ciphertext,
@@ -717,11 +1558,27 @@ integration("PostgreSQL 按项目擦除计划及其明确绑定的来源任务",
   const plan = await store.registerWorkPlan(assessment, new Date(base.getTime() + 30));
   assert.equal((await store.previewPrivacyErasure({ projectId: "privacy_project" })).confirmation, null);
   await store.requestWorkPlanCancellation(plan.id, "operator", new Date(base.getTime() + 40));
+  await store.pool.query(
+    `INSERT INTO capability_budget_usage(
+       tenant_id, project_key, project_id_ciphertext,
+       authorization_hash, capability,
+       limit_count, used_count, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, 1, 1, $6, $6)`,
+    [
+      store.tenantId,
+      store.cipher.fingerprint("privacy_project"),
+      store.cipher.encrypt("privacy_project"),
+      "a".repeat(64),
+      "research",
+      new Date(base.getTime() + 41),
+    ],
+  );
   const preview = await store.previewPrivacyErasure(
     { projectId: "privacy_project" }, new Date(base.getTime() + 50),
   );
   assert.equal(preview.counts.tasks, 1);
   assert.equal(preview.counts.workPlans, 1);
+  assert.equal(preview.counts.capabilityBudgets, 1);
   await store.erasePrivacyData(
     { projectId: "privacy_project" }, preview.confirmation, "operator", new Date(base.getTime() + 50),
   );
@@ -735,7 +1592,57 @@ integration("PostgreSQL 按项目擦除计划及其明确绑定的来源任务",
   assert.equal(raw.rows[0].project_id, "deleted");
   assert.deepEqual(JSON.parse(store.cipher.decrypt(raw.rows[0].plan_ciphertext)), {});
   assert.ok(raw.rows[0].privacy_erased_at);
-  await assert.rejects(store.registerWorkPlan(assessment), /cannot be recreated/u);
+  const retainedBudget = await store.pool.query(
+    `SELECT project_id_ciphertext, used_count
+     FROM capability_budget_usage WHERE tenant_id = $1`,
+    [store.tenantId],
+  );
+  assert.equal(retainedBudget.rowCount, 1);
+  assert.equal(store.cipher.decrypt(retainedBudget.rows[0].project_id_ciphertext), "");
+  assert.equal(retainedBudget.rows[0].used_count, 1);
+  await assert.rejects(
+    store.registerWorkPlan(assessment),
+    /source task is no longer actionable|cannot be recreated/u,
+  );
+});
+
+integration("PostgreSQL 按时间擦除不会重置安全能力预算", async (t) => {
+  const store = await fixture(t);
+  const old = new Date("2026-08-01T10:00:00.000Z");
+  await store.proposeMemory({
+    type: "principle",
+    subject: "organization",
+    statement: "已过期的临时口径",
+    sourceType: "operator",
+    sourceId: "old-source",
+    createdBy: "operator",
+  }, old);
+  await store.pool.query(
+    `INSERT INTO capability_budget_usage(
+       tenant_id, project_key, project_id_ciphertext,
+       authorization_hash, capability, limit_count, used_count,
+       created_at, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,1,1,$6,$6)`,
+    [
+      store.tenantId,
+      store.cipher.fingerprint("retained_budget_project"),
+      store.cipher.encrypt("retained_budget_project"),
+      "b".repeat(64),
+      "research",
+      old,
+    ],
+  );
+  const selector = { before: "2026-08-02T00:00:00.000Z" };
+  const now = new Date("2026-08-05T00:00:00.000Z");
+  const preview = await store.previewPrivacyErasure(selector, now);
+  assert.equal(preview.counts.capabilityBudgets, 0);
+  await store.erasePrivacyData(selector, preview.confirmation, "operator", now);
+  const retained = await store.pool.query(
+    `SELECT used_count FROM capability_budget_usage WHERE tenant_id = $1`,
+    [store.tenantId],
+  );
+  assert.equal(retained.rowCount, 1);
+  assert.equal(retained.rows[0].used_count, 1);
 });
 
 integration("PostgreSQL 记忆导出审计不保存目标路径或正文", async (t) => {
@@ -846,6 +1753,157 @@ integration("PostgreSQL 任务计划审批绑定哈希并只能消费一次", as
   );
 });
 
+integration("PostgreSQL 能力次数预算在并发计划间原子扣减", async (t) => {
+  const store = await fixture(t);
+  const manifest = {
+    version: 1,
+    projectId: "budget_project",
+    name: "预算项目",
+    rootDirectory: "/workspace/budget",
+    requesters: ["user-1"],
+    capabilities: { research: { mode: "automatic", maxRuns: 1 } },
+  };
+  const makeAssessment = (objective) => assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: "budget_project",
+      requesterId: "user-1",
+      objective,
+      steps: [{
+        id: "research",
+        capability: "research",
+        description: objective,
+        inputs: {},
+        expectedEvidence: "研究结果",
+      }],
+    },
+  });
+  const firstAssessment = makeAssessment("第一次研究");
+  const secondAssessment = makeAssessment("第二次研究");
+  const [first, second] = await Promise.all([
+    store.registerWorkPlan(firstAssessment),
+    store.registerWorkPlan(secondAssessment),
+  ]);
+  const results = await Promise.allSettled([
+    store.consumeWorkPlanAuthorization(first.id, new Date(), {
+      capabilityBudget: capabilityBudgetForPlan(firstAssessment, manifest),
+    }),
+    store.consumeWorkPlanAuthorization(second.id, new Date(), {
+      capabilityBudget: capabilityBudgetForPlan(secondAssessment, manifest),
+    }),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match(
+    results.find((result) => result.status === "rejected").reason.message,
+    /budget exhausted/u,
+  );
+  assert.deepEqual(
+    (await store.listCapabilityBudgetUsage({ projectId: "budget_project" }))
+      .map(({ capability, limit, used, remaining }) => ({
+        capability,
+        limit,
+        used,
+        remaining,
+      })),
+    [{ capability: "research", limit: 1, used: 1, remaining: 0 }],
+  );
+});
+
+integration("PostgreSQL 拒绝伪造授权哈希且不创建新预算账本", async (t) => {
+  const store = await fixture(t);
+  const manifest = {
+    version: 1,
+    projectId: "budget_forgery_project",
+    name: "预算防伪项目",
+    rootDirectory: "/workspace/budget-forgery",
+    requesters: ["user-1"],
+    capabilities: { research: { mode: "automatic", maxRuns: 1 } },
+  };
+  const assessment = assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: manifest.projectId,
+      requesterId: "user-1",
+      objective: "验证授权绑定",
+      steps: [{
+        id: "research",
+        capability: "research",
+        description: "研究",
+        inputs: {},
+        expectedEvidence: "结论",
+      }],
+    },
+  });
+  const plan = await store.registerWorkPlan(assessment);
+  const forged = {
+    ...capabilityBudgetForPlan(assessment, manifest),
+    authorizationHash: "f".repeat(64),
+  };
+  await assert.rejects(
+    store.consumeWorkPlanAuthorization(plan.id, new Date(), {
+      capabilityBudget: forged,
+    }),
+    /does not match the registered work plan/u,
+  );
+  assert.equal((await store.listCapabilityBudgetUsage()).length, 0);
+});
+
+integration("PostgreSQL 多能力预算后一项失败时整体回滚", async (t) => {
+  const store = await fixture(t);
+  const manifest = {
+    version: 1,
+    projectId: "budget_atomic_project",
+    name: "预算原子项目",
+    rootDirectory: "/workspace/budget-atomic",
+    requesters: ["user-1"],
+    capabilities: {
+      document_draft: { mode: "automatic", maxRuns: 1 },
+      research: { mode: "automatic", maxRuns: 1 },
+    },
+  };
+  const makeAssessment = (objective, capabilities) => assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: manifest.projectId,
+      requesterId: "user-1",
+      objective,
+      steps: capabilities.map((capability) => ({
+        id: capability,
+        capability,
+        description: capability,
+        inputs: {},
+        expectedEvidence: "证据",
+      })),
+    },
+  });
+  const researchAssessment = makeAssessment("先耗尽 research", ["research"]);
+  const researchPlan = await store.registerWorkPlan(researchAssessment);
+  await store.consumeWorkPlanAuthorization(researchPlan.id, new Date(), {
+    capabilityBudget: capabilityBudgetForPlan(researchAssessment, manifest),
+  });
+
+  const combinedAssessment = makeAssessment(
+    "尝试同时消耗",
+    ["document_draft", "research"],
+  );
+  const combinedPlan = await store.registerWorkPlan(combinedAssessment);
+  await assert.rejects(
+    store.consumeWorkPlanAuthorization(combinedPlan.id, new Date(), {
+      capabilityBudget: capabilityBudgetForPlan(combinedAssessment, manifest),
+    }),
+    /budget exhausted/u,
+  );
+  assert.deepEqual(
+    (await store.listCapabilityBudgetUsage({ projectId: manifest.projectId }))
+      .map(({ capability, used }) => ({ capability, used })),
+    [{ capability: "research", used: 1 }],
+  );
+});
+
 integration("PostgreSQL 计划修订废止旧计划并记录审计链", async (t) => {
   const store = await fixture(t);
   const manifest = {
@@ -924,6 +1982,90 @@ integration("PostgreSQL 支持单计划取消", async (t) => {
   );
   assert.equal((await store.getWorkPlan(plan.id)).status, "cancelled");
   assert.equal((await store.listWorkPlanSteps(plan.id))[0].status, "cancelled");
+});
+
+integration("PostgreSQL 人工接管同时约束关联执行计划", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-10T08:00:00.000Z");
+  const manifest = {
+    version: 1,
+    projectId: "postgres_manual_takeover",
+    name: "人工接管测试",
+    rootDirectory: "/workspace/postgres-manual-takeover",
+    requesters: ["u1"],
+    capabilities: { research: { mode: "automatic", maxRuns: 5 } },
+  };
+  const enqueueSourceTask = async (suffix, offsetMs) => {
+    const receivedAt = new Date(base.getTime() + offsetMs);
+    await store.ingestMessages([{
+      ...messages()[0],
+      id: `postgres-manual-takeover-${suffix}`,
+      conversationId: `postgres-manual-takeover-${suffix}`,
+      createTime: receivedAt.toISOString(),
+      content: `请研究${suffix}`,
+    }], receivedAt);
+    const [taskId] = await store.createReadyTasks({
+      quietWindowMs: 1,
+      now: new Date(receivedAt.getTime() + 10),
+    });
+    await store.claimTask({ now: new Date(receivedAt.getTime() + 10) });
+    await store.completeDraft(taskId, {
+      shouldReply: true,
+      reply: "已形成执行计划。",
+      confidence: 0.95,
+      riskLevel: "low",
+      reason: "识别为工作请求",
+      decisionSource: "model",
+      decisionKind: "work_request",
+    }, new Date(receivedAt.getTime() + 20));
+    return taskId;
+  };
+  const assessmentFor = (taskId, objective) => assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: manifest.projectId,
+      requesterId: "u1",
+      sourceTaskId: taskId,
+      objective,
+      steps: [{
+        id: "research",
+        capability: "research",
+        description: objective,
+        expectedEvidence: "研究结果",
+      }],
+    },
+  });
+
+  const readyTaskId = await enqueueSourceTask("ready", 0);
+  const readyAssessment = assessmentFor(readyTaskId, "尚未开始的研究");
+  const readyPlan = await store.registerWorkPlan(readyAssessment);
+  assert.equal(await store.cancelDraftForManualReply(readyTaskId), true);
+  assert.equal((await store.getTask(readyTaskId)).status, "cancelled_manual");
+  assert.equal((await store.getWorkPlan(readyPlan.id)).status, "cancelled");
+  assert.equal((await store.listWorkPlanSteps(readyPlan.id))[0].status, "cancelled");
+  await assert.rejects(
+    store.registerWorkPlan(readyAssessment),
+    /source task is no longer actionable/u,
+  );
+
+  const executingTaskId = await enqueueSourceTask("executing", 1_000);
+  const executingPlan = await store.registerWorkPlan(
+    assessmentFor(executingTaskId, "已经开始的研究"),
+  );
+  assert.equal(
+    await store.consumeWorkPlanAuthorization(executingPlan.id),
+    true,
+  );
+  assert.equal(await store.cancelDraftForManualReply(executingTaskId), true);
+  const stopped = await store.getWorkPlan(executingPlan.id);
+  assert.equal(stopped.status, "executing");
+  assert.ok(stopped.cancel_requested_at);
+  assert.equal(stopped.cancel_requested_by, "system:manual-reply");
+  await assert.rejects(
+    store.consumeWorkPlanAuthorization(executingPlan.id),
+    /source task is no longer actionable|not authorized/u,
+  );
 });
 
 integration("PostgreSQL 幂等创建计划结果回传草稿", async (t) => {

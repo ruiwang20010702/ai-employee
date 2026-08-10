@@ -1,8 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DataCipher } from "./crypto.mjs";
+import {
+  capabilityBudgetSnapshot,
+  normalizeCapabilityBudget,
+} from "./capability-budget.mjs";
 import { checkPostgres, createPostgresPool } from "./postgres.mjs";
-import { splitMessageBursts } from "./message-bundling.mjs";
+import {
+  shouldFlushMessageBundleEarly,
+  splitMessageBursts,
+} from "./message-bundling.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "./memory-policy.mjs";
+import { validateAutomaticMemoryProposal } from "./memory-candidate.mjs";
 import { memoryDeletionConfirmation } from "./memory-portability.mjs";
 import { validateSourceAccessChange } from "./memory-source-access.mjs";
 import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
@@ -87,6 +95,10 @@ function memoryFromRow(row, cipher) {
   };
 }
 
+function memoryFactLockKey({ tenantId, type, subjectKey, projectId, factKey }) {
+  return [tenantId, type, subjectKey, projectId ?? "", factKey ?? ""].join("\n");
+}
+
 function workPlanFromRow(row, cipher) {
   if (!row) return null;
   return {
@@ -94,9 +106,13 @@ function workPlanFromRow(row, cipher) {
     requester_id: cipher.decrypt(row.requester_ciphertext),
     objective: cipher.decrypt(row.objective_ciphertext),
     plan: JSON.parse(cipher.decrypt(row.plan_ciphertext)),
+    capability_budget: row.capability_budget_ciphertext
+      ? JSON.parse(cipher.decrypt(row.capability_budget_ciphertext))
+      : null,
     requester_ciphertext: undefined,
     objective_ciphertext: undefined,
     plan_ciphertext: undefined,
+    capability_budget_ciphertext: undefined,
   };
 }
 
@@ -248,28 +264,133 @@ export class PostgresStore {
     });
   }
 
+  async nextPendingBundleAt({
+    quietWindowMs,
+    bundleMaxWaitMs = 8_000,
+    now = new Date(),
+  }) {
+    if (
+      !Number.isFinite(quietWindowMs) ||
+      quietWindowMs <= 0 ||
+      !Number.isFinite(bundleMaxWaitMs) ||
+      bundleMaxWaitMs > 8_000 ||
+      bundleMaxWaitMs < quietWindowMs
+    ) {
+      throw new Error("Pending bundle timing configuration is invalid");
+    }
+    const current = toDate(now);
+    const result = await this.pool.query(
+      `SELECT MIN(CASE
+         WHEN continuation_blocked AND deadline_at <= $4
+           THEN $4 + interval '1 second'
+         ELSE deadline_at
+       END) AS next_at
+       FROM (
+         SELECT MIN(ingested_at) AS first_ingested,
+                MAX(ingested_at) AS last_ingested,
+                LEAST(
+                  MIN(ingested_at) + $2 * interval '1 millisecond',
+                  MAX(ingested_at) + $3 * interval '1 millisecond'
+                ) AS deadline_at,
+                EXISTS(
+                  SELECT 1 FROM tasks
+                  WHERE tasks.tenant_id = $1
+                    AND tasks.status = 'continuation_pending'
+                    AND tasks.conversation_key = messages.conversation_key
+                    AND tasks.sender_key = messages.sender_key
+                ) AS continuation_blocked
+         FROM messages
+         WHERE tenant_id = $1 AND status = 'pending'
+         GROUP BY conversation_key, sender_key
+       ) pending_groups`,
+      [this.tenantId, bundleMaxWaitMs, quietWindowMs, current],
+    );
+    return result.rows[0]?.next_at ?? null;
+  }
+
   async createReadyTasks({
     quietWindowMs,
+    bundleMaxWaitMs = 8_000,
     bundleGapMs = 120_000,
     maxMessagesPerTask = 20,
     maxAttempts = 5,
+    waitingInformationTtlMs = 86_400_000,
     now = new Date(),
   }) {
+    if (!Number.isFinite(waitingInformationTtlMs) || waitingInformationTtlMs <= 0) {
+      throw new Error("Waiting information TTL must be positive");
+    }
+    if (
+      !Number.isFinite(bundleMaxWaitMs) ||
+      bundleMaxWaitMs <= 0 ||
+      bundleMaxWaitMs > 8_000 ||
+      bundleMaxWaitMs < quietWindowMs
+    ) {
+      throw new Error("Bundle maximum wait must be between the quiet window and 8000ms");
+    }
     const cutoff = new Date(now.getTime() - quietWindowMs);
+    const maximumWaitCutoff = new Date(now.getTime() - bundleMaxWaitMs);
+    const waitingCutoff = new Date(now.getTime() - waitingInformationTtlMs);
     return this.transaction(async (client) => {
+      await client.query(
+        `UPDATE tasks
+         SET status = 'expired', updated_at = $2
+         WHERE tenant_id = $1
+           AND status = 'waiting_information'
+           AND COALESCE(waiting_information_at, updated_at) < $3`,
+        [this.tenantId, now, waitingCutoff],
+      );
       const groups = await client.query(
         `
-        SELECT conversation_key, sender_key
+        SELECT conversation_key, sender_key,
+               MIN(ingested_at) AS first_ingested,
+               MAX(ingested_at) AS last_ingested
         FROM messages
         WHERE tenant_id = $1 AND status = 'pending'
         GROUP BY conversation_key, sender_key
-        HAVING MAX(ingested_at) <= $2
-        ORDER BY MAX(ingested_at)
+        ORDER BY LEAST(
+          MIN(ingested_at) + $2 * interval '1 millisecond',
+          MAX(ingested_at) + $3 * interval '1 millisecond'
+        )
+        LIMIT 500
       `,
-        [this.tenantId, cutoff],
+        [this.tenantId, bundleMaxWaitMs, quietWindowMs],
       );
       const created = [];
       for (const group of groups.rows) {
+        const timingReady = group.last_ingested <= cutoff ||
+          group.first_ingested <= maximumWaitCutoff;
+        if (!timingReady) {
+          const latest = await client.query(
+            `SELECT content_ciphertext
+             FROM messages
+             WHERE tenant_id = $1
+               AND conversation_key = $2
+               AND sender_key = $3
+               AND status = 'pending'
+             ORDER BY ingested_at DESC, occurred_at DESC,
+                      platform_message_id DESC
+             LIMIT 1`,
+            [this.tenantId, group.conversation_key, group.sender_key],
+          );
+          if (latest.rowCount === 0) continue;
+          const content = this.cipher.decrypt(
+            latest.rows[0].content_ciphertext,
+          );
+          if (!shouldFlushMessageBundleEarly([{ content }])) continue;
+        }
+        const continuationInFlight = await client.query(
+          `SELECT id
+           FROM tasks
+           WHERE tenant_id = $1
+             AND conversation_key = $2
+             AND sender_key = $3
+             AND status = 'continuation_pending'
+           LIMIT 1
+           FOR UPDATE`,
+          [this.tenantId, group.conversation_key, group.sender_key],
+        );
+        if (continuationInFlight.rowCount > 0) continue;
         const selected = await client.query(
           `
           SELECT *
@@ -284,11 +405,50 @@ export class PostgresStore {
           [this.tenantId, group.conversation_key, group.sender_key],
         );
         if (selected.rowCount === 0) continue;
+        const waitingRows = await client.query(
+          `SELECT id, payload_ciphertext, result_ciphertext,
+                  COALESCE(waiting_information_at, updated_at) AS waiting_at
+           FROM tasks
+           WHERE tenant_id = $1
+             AND conversation_key = $2
+             AND sender_key = $3
+             AND status = 'waiting_information'
+             AND COALESCE(waiting_information_at, updated_at) >= $4
+           ORDER BY COALESCE(waiting_information_at, updated_at) DESC, id DESC
+           LIMIT 2
+           FOR UPDATE`,
+          [
+            this.tenantId,
+            group.conversation_key,
+            group.sender_key,
+            waitingCutoff,
+          ],
+        );
+        let waitingTask = waitingRows.rowCount === 1
+          ? {
+              id: waitingRows.rows[0].id,
+              payload: JSON.parse(
+                this.cipher.decrypt(waitingRows.rows[0].payload_ciphertext),
+              ),
+              result: waitingRows.rows[0].result_ciphertext
+                ? JSON.parse(
+                    this.cipher.decrypt(waitingRows.rows[0].result_ciphertext),
+                  )
+                : null,
+              waitingAt: waitingRows.rows[0].waiting_at,
+            }
+          : null;
         const bursts = splitMessageBursts(selected.rows, {
           gapMs: bundleGapMs,
           maxMessages: maxMessagesPerTask,
+          boundaryAt: waitingTask?.waitingAt ?? null,
         });
         for (const rows of bursts) {
+          const continuationTask = waitingTask &&
+            rows[0].occurred_at.getTime() > waitingTask.waitingAt.getTime()
+            ? waitingTask
+            : null;
+          const reservesWaitingTask = Boolean(continuationTask);
           const digest = createHash("sha256")
             .update(
               `${this.tenantId}\n${rows
@@ -311,6 +471,17 @@ export class PostgresStore {
               createTime: message.occurred_at.toISOString(),
               content: this.cipher.decrypt(message.content_ciphertext),
             })),
+            waitingTask: continuationTask
+              ? {
+                  originalRequest: String(
+                    continuationTask.payload?.content ?? "",
+                  ).slice(0, 4_000),
+                  clarificationQuestion: String(
+                    continuationTask.result?.reply ?? "",
+                  ).slice(0, 1_000),
+                  waitingAt: continuationTask.waitingAt.toISOString(),
+                }
+              : null,
           };
           const inserted = await client.query(
             `
@@ -318,9 +489,10 @@ export class PostgresStore {
               id, tenant_id, kind, status, sender_key,
               sender_user_id_ciphertext, conversation_key,
               conversation_id_ciphertext, payload_ciphertext,
-              max_attempts, available_at, created_at, updated_at
+              max_attempts, continuation_of_task_id,
+              available_at, created_at, updated_at
             ) VALUES (
-              $1,$2,'reply','queued',$3,$4,$5,$6,$7,$8,$9,$9,$9
+              $1,$2,'reply','queued',$3,$4,$5,$6,$7,$8,$9,$10,$10,$10
             )
             ON CONFLICT (id) DO NOTHING
           `,
@@ -333,10 +505,24 @@ export class PostgresStore {
               rows.at(-1).conversation_id_ciphertext,
               this.cipher.encrypt(JSON.stringify(payload)),
               maxAttempts,
+              continuationTask?.id ?? null,
               now,
             ],
           );
           if (inserted.rowCount === 0) continue;
+          if (continuationTask) {
+            const reserved = await client.query(
+              `UPDATE tasks
+               SET status = 'continuation_pending', updated_at = $3
+               WHERE tenant_id = $1 AND id = $2
+                 AND status = 'waiting_information'`,
+              [this.tenantId, continuationTask.id, now],
+            );
+            if (reserved.rowCount !== 1) {
+              throw new Error("Waiting task could not be reserved");
+            }
+            waitingTask = null;
+          }
           await client.query(
             `
             UPDATE messages
@@ -357,6 +543,7 @@ export class PostgresStore {
             details: { messageCount: rows.length },
           });
           created.push(taskId);
+          if (reservesWaitingTask) break;
         }
       }
       return created;
@@ -365,7 +552,7 @@ export class PostgresStore {
 
   async claimTask({ leaseMs = 120_000, now = new Date() } = {}) {
     return this.transaction(async (client) => {
-      await client.query(
+      const exhausted = await client.query(
         `
         UPDATE tasks
         SET status = 'dead', lease_until = NULL,
@@ -375,6 +562,7 @@ export class PostgresStore {
           AND status = 'processing'
           AND lease_until <= $2
           AND attempts >= max_attempts
+        RETURNING continuation_of_task_id
       `,
         [
           this.tenantId,
@@ -382,6 +570,16 @@ export class PostgresStore {
           this.cipher.encrypt("processing lease exhausted"),
         ],
       );
+      for (const task of exhausted.rows) {
+        if (!task.continuation_of_task_id) continue;
+        await client.query(
+          `UPDATE tasks
+           SET status = 'waiting_information', updated_at = $3
+           WHERE tenant_id = $1 AND id = $2
+             AND status = 'continuation_pending'`,
+          [this.tenantId, task.continuation_of_task_id, now],
+        );
+      }
       const selected = await client.query(
         `
         SELECT *
@@ -450,6 +648,20 @@ export class PostgresStore {
   async completeDraft(taskId, draft, now = new Date()) {
     const status = draft.shouldReply ? "awaiting_approval" : "no_reply";
     return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT continuation_of_task_id, sender_key, conversation_key
+         FROM tasks
+         WHERE id = $1 AND tenant_id = $2 AND status = 'processing'
+         FOR UPDATE`,
+        [taskId, this.tenantId],
+      );
+      if (selected.rowCount !== 1) {
+        throw new Error(`Task is not processing: ${taskId}`);
+      }
+      const continuationId = selected.rows[0].continuation_of_task_id;
+      if (draft.relatedToWaitingTask && !continuationId) {
+        throw new Error("Draft cannot continue a missing waiting task");
+      }
       const result = await client.query(
         `
         UPDATE tasks
@@ -468,6 +680,42 @@ export class PostgresStore {
       if (result.rowCount !== 1) {
         throw new Error(`Task is not processing: ${taskId}`);
       }
+      if (continuationId) {
+        const hasPendingFollowup = draft.relatedToWaitingTask
+          ? await client.query(
+              `SELECT 1 FROM messages
+               WHERE tenant_id = $1 AND status = 'pending'
+                 AND sender_key = $2 AND conversation_key = $3
+               LIMIT 1`,
+              [
+                this.tenantId,
+                selected.rows[0].sender_key,
+                selected.rows[0].conversation_key,
+              ],
+            )
+          : null;
+        const parent = await client.query(
+          `UPDATE tasks
+           SET status = $3, updated_at = $4
+           WHERE tenant_id = $1 AND id = $2
+             AND status = 'continuation_pending'`,
+          [
+            this.tenantId,
+            continuationId,
+            draft.decisionKind === "manual_reply"
+              ? "cancelled_manual"
+              : draft.relatedToWaitingTask
+                ? hasPendingFollowup?.rowCount > 0
+                  ? "waiting_information"
+                  : "continued"
+                : "waiting_information",
+            now,
+          ],
+        );
+        if (parent.rowCount !== 1) {
+          throw new Error("Waiting task continuation is no longer available");
+        }
+      }
       await this.audit(client, {
         taskId,
         eventType: draft.shouldReply
@@ -485,7 +733,7 @@ export class PostgresStore {
     return this.transaction(async (client) => {
       const selected = await client.query(
         `
-        SELECT attempts, max_attempts
+        SELECT status, attempts, max_attempts, continuation_of_task_id
         FROM tasks
         WHERE id = $1 AND tenant_id = $2
         FOR UPDATE
@@ -494,6 +742,7 @@ export class PostgresStore {
       );
       if (selected.rowCount === 0) return null;
       const task = selected.rows[0];
+      if (task.status !== "processing") return task.status;
       const dead = task.attempts >= task.max_attempts;
       const delayMs = Math.min(
         300_000,
@@ -505,7 +754,7 @@ export class PostgresStore {
         UPDATE tasks
         SET status = $3, available_at = $4, lease_until = NULL,
             last_error_ciphertext = $5, updated_at = $6
-        WHERE id = $1 AND tenant_id = $2
+        WHERE id = $1 AND tenant_id = $2 AND status = 'processing'
       `,
         [
           taskId,
@@ -516,6 +765,15 @@ export class PostgresStore {
           now,
         ],
       );
+      if (dead && task.continuation_of_task_id) {
+        await client.query(
+          `UPDATE tasks
+           SET status = 'waiting_information', updated_at = $3
+           WHERE tenant_id = $1 AND id = $2
+             AND status = 'continuation_pending'`,
+          [this.tenantId, task.continuation_of_task_id, now],
+        );
+      }
       await this.audit(client, {
         taskId,
         eventType: `task.${status}`,
@@ -638,6 +896,15 @@ export class PostgresStore {
   async beginSideEffect(taskId, capability, now = new Date()) {
     return this.transaction(async (client) => {
       const key = `${capability}:${taskId}`;
+      const task = await client.query(
+        `SELECT status FROM tasks
+         WHERE id = $1 AND tenant_id = $2
+         FOR UPDATE`,
+        [taskId, this.tenantId],
+      );
+      if (task.rows[0]?.status !== "sending") {
+        throw new Error("Task is not sending");
+      }
       await client.query(
         `
         INSERT INTO side_effects(
@@ -668,6 +935,20 @@ export class PostgresStore {
   async completeSideEffect(taskId, capability, receipt, now = new Date()) {
     return this.transaction(async (client) => {
       const key = `${capability}:${taskId}`;
+      const task = await client.query(
+        `SELECT result_ciphertext
+         FROM tasks
+         WHERE id = $1 AND tenant_id = $2 AND status = 'sending'
+         FOR UPDATE`,
+        [taskId, this.tenantId],
+      );
+      if (task.rowCount !== 1) throw new Error("Task is not sending");
+      const draft = task.rows[0].result_ciphertext
+        ? JSON.parse(this.cipher.decrypt(task.rows[0].result_ciphertext))
+        : null;
+      const taskStatus = draft?.needsInformation
+        ? "waiting_information"
+        : "completed";
       const effect = await client.query(
         `
         UPDATE side_effects
@@ -687,10 +968,17 @@ export class PostgresStore {
       await client.query(
         `
         UPDATE tasks
-        SET status = 'completed', lease_until = NULL, updated_at = $3
+        SET status = $3, waiting_information_at = $4,
+            lease_until = NULL, updated_at = $5
         WHERE id = $1 AND tenant_id = $2
       `,
-        [taskId, this.tenantId, now],
+        [
+          taskId,
+          this.tenantId,
+          taskStatus,
+          taskStatus === "waiting_information" ? now : null,
+          now,
+        ],
       );
       await this.audit(client, {
         taskId,
@@ -768,9 +1056,88 @@ export class PostgresStore {
     );
   }
 
+  async _cancelWorkPlansForSourceTask(
+    client,
+    taskId,
+    now = new Date(),
+    actor = "system:manual-reply",
+  ) {
+    const candidates = await client.query(
+      `SELECT id, plan_ciphertext FROM work_plans
+       WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+         AND status IN ('ready','awaiting_approval','approved','executing','verifying')`,
+      [this.tenantId],
+    );
+    const ids = candidates.rows.flatMap((row) => {
+      try {
+        const plan = JSON.parse(this.cipher.decrypt(row.plan_ciphertext));
+        return plan?.sourceTaskId === taskId ? [row.id] : [];
+      } catch {
+        return [];
+      }
+    });
+    if (ids.length === 0) return { cancelled: 0, cancellationRequested: 0 };
+    const selected = await client.query(
+      `SELECT id, status FROM work_plans
+       WHERE tenant_id = $1 AND id = ANY($2::text[])
+       FOR UPDATE`,
+      [this.tenantId, ids],
+    );
+    let cancelled = 0;
+    let cancellationRequested = 0;
+    for (const plan of selected.rows) {
+      if (["ready", "awaiting_approval", "approved"].includes(plan.status)) {
+        await client.query(
+          `UPDATE work_plan_steps SET status = 'cancelled',
+           completed_at = $3, updated_at = $3
+           WHERE tenant_id = $1 AND work_plan_id = $2 AND status = 'pending'`,
+          [this.tenantId, plan.id, now],
+        );
+        await client.query(
+          `UPDATE work_plans SET status = 'cancelled',
+           cancel_requested_at = $3, cancel_requested_by = $4, updated_at = $3
+           WHERE tenant_id = $1 AND id = $2
+             AND status IN ('ready','awaiting_approval','approved')`,
+          [this.tenantId, plan.id, now, actor],
+        );
+        cancelled += 1;
+      } else if (["executing", "verifying"].includes(plan.status)) {
+        await client.query(
+          `UPDATE work_plans
+           SET cancel_requested_at = COALESCE(cancel_requested_at, $3),
+               cancel_requested_by = COALESCE(cancel_requested_by, $4),
+               updated_at = $3
+           WHERE tenant_id = $1 AND id = $2
+             AND status IN ('executing','verifying')`,
+          [this.tenantId, plan.id, now, actor],
+        );
+        cancellationRequested += 1;
+      } else {
+        continue;
+      }
+      await this.audit(client, {
+        taskId,
+        eventType: "work_plan.manual_takeover",
+        actor,
+        details: {
+          workPlanId: plan.id,
+          result: ["executing", "verifying"].includes(plan.status)
+            ? "cancellation_requested"
+            : "cancelled",
+        },
+      });
+    }
+    return { cancelled, cancellationRequested };
+  }
+
   async cancelForManualReply(taskId, now = new Date()) {
     return this.transaction(async (client) => {
-      await client.query(
+      const selected = await client.query(
+        `SELECT continuation_of_task_id, result_ciphertext
+         FROM tasks WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [taskId, this.tenantId],
+      );
+      const result = await client.query(
         `
         UPDATE tasks
         SET status = 'cancelled_manual', lease_until = NULL, updated_at = $3
@@ -778,6 +1145,26 @@ export class PostgresStore {
       `,
         [taskId, this.tenantId, now],
       );
+      const task = selected.rows[0];
+      if (result.rowCount === 1 && task?.continuation_of_task_id) {
+        const draft = task.result_ciphertext
+          ? JSON.parse(this.cipher.decrypt(task.result_ciphertext))
+          : null;
+        if (draft?.relatedToWaitingTask) {
+          await client.query(
+            `UPDATE tasks SET status = 'cancelled_manual', updated_at = $3
+             WHERE id = $1 AND tenant_id = $2 AND status = 'continued'`,
+            [task.continuation_of_task_id, this.tenantId, now],
+          );
+        } else {
+          await client.query(
+            `UPDATE tasks SET status = 'cancelled_manual', updated_at = $3
+             WHERE id = $1 AND tenant_id = $2 AND status = 'continuation_pending'`,
+            [task.continuation_of_task_id, this.tenantId, now],
+          );
+        }
+      }
+      await this._cancelWorkPlansForSourceTask(client, taskId, now);
       await this.audit(client, {
         taskId,
         eventType: "send.cancelled_manual",
@@ -787,14 +1174,42 @@ export class PostgresStore {
 
   async cancelDraftForManualReply(taskId, now = new Date()) {
     return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT continuation_of_task_id, result_ciphertext
+         FROM tasks WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [taskId, this.tenantId],
+      );
       const result = await client.query(
         `
         UPDATE tasks
         SET status = 'cancelled_manual', updated_at = $3
-        WHERE id = $1 AND tenant_id = $2 AND status = 'awaiting_approval'
+        WHERE id = $1 AND tenant_id = $2
+          AND status IN (
+            'processing', 'awaiting_approval', 'waiting_information'
+          )
       `,
         [taskId, this.tenantId, now],
       );
+      const task = selected.rows[0];
+      if (result.rowCount === 1 && task?.continuation_of_task_id) {
+        const draft = task.result_ciphertext
+          ? JSON.parse(this.cipher.decrypt(task.result_ciphertext))
+          : null;
+        if (draft?.relatedToWaitingTask) {
+          await client.query(
+            `UPDATE tasks SET status = 'cancelled_manual', updated_at = $3
+             WHERE id = $1 AND tenant_id = $2 AND status = 'continued'`,
+            [task.continuation_of_task_id, this.tenantId, now],
+          );
+        } else {
+          await client.query(
+            `UPDATE tasks SET status = 'cancelled_manual', updated_at = $3
+             WHERE id = $1 AND tenant_id = $2 AND status = 'continuation_pending'`,
+            [task.continuation_of_task_id, this.tenantId, now],
+          );
+        }
+      }
+      await this._cancelWorkPlansForSourceTask(client, taskId, now);
       if (result.rowCount === 0) return false;
       await this.audit(client, {
         taskId,
@@ -810,6 +1225,47 @@ export class PostgresStore {
       [taskId, this.tenantId],
     );
     return taskFromRow(result.rows[0], this.cipher);
+  }
+
+  async listAutomatedSendEvidence({
+    since = new Date(0),
+    until = new Date(),
+  } = {}) {
+    const result = await this.pool.query(
+      `SELECT t.id AS task_id, t.conversation_id_ciphertext,
+              t.result_ciphertext, e.idempotency_key,
+              e.status AS effect_status, e.receipt_ciphertext,
+              e.created_at, e.updated_at
+       FROM side_effects e
+       JOIN tasks t
+         ON t.tenant_id = e.tenant_id AND t.id = e.task_id
+       WHERE e.tenant_id = $1
+         AND e.capability = 'send_message'
+         AND e.status IN ('started', 'completed', 'unknown')
+         AND e.created_at >= $2 AND e.created_at <= $3
+         AND t.privacy_erased_at IS NULL
+       ORDER BY e.created_at`,
+      [this.tenantId, since, until],
+    );
+    return result.rows.flatMap((row) => {
+      const draft = row.result_ciphertext
+        ? JSON.parse(this.cipher.decrypt(row.result_ciphertext))
+        : null;
+      const content = String(draft?.reply ?? "").trim();
+      if (!content) return [];
+      return [{
+        taskId: row.task_id,
+        idempotencyKey: row.idempotency_key,
+        conversationId: this.cipher.decrypt(row.conversation_id_ciphertext),
+        content,
+        status: row.effect_status,
+        startedAt: row.created_at,
+        updatedAt: row.updated_at,
+        receipt: row.receipt_ciphertext
+          ? JSON.parse(this.cipher.decrypt(row.receipt_ciphertext))
+          : null,
+      }];
+    });
   }
 
   async listTasks({
@@ -880,6 +1336,29 @@ export class PostgresStore {
 
   async retryTask(taskId, now = new Date()) {
     return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT status, continuation_of_task_id
+         FROM tasks
+         WHERE id = $1 AND tenant_id = $2
+         FOR UPDATE`,
+        [taskId, this.tenantId],
+      );
+      const task = selected.rows[0];
+      if (task?.status !== "dead") {
+        throw new Error("Only dead tasks can be retried");
+      }
+      if (task.continuation_of_task_id) {
+        const parent = await client.query(
+          `UPDATE tasks
+           SET status = 'continuation_pending', updated_at = $3
+           WHERE id = $1 AND tenant_id = $2
+             AND status = 'waiting_information'`,
+          [task.continuation_of_task_id, this.tenantId, now],
+        );
+        if (parent.rowCount !== 1) {
+          throw new Error("Waiting task continuation cannot be retried");
+        }
+      }
       const result = await client.query(
         `UPDATE tasks
          SET status = 'queued', attempts = 0, available_at = $3,
@@ -930,7 +1409,7 @@ export class PostgresStore {
     return this.transaction(async (client) => {
       const selected = await client.query(
         `
-        SELECT status
+        SELECT status, result_ciphertext
         FROM tasks
         WHERE id = $1 AND tenant_id = $2
         FOR UPDATE
@@ -940,8 +1419,24 @@ export class PostgresStore {
       if (selected.rows[0]?.status !== "send_unknown") {
         throw new Error("Task is not in send_unknown state");
       }
+      const sideEffect = await client.query(
+        `SELECT created_at FROM side_effects
+         WHERE task_id = $1 AND tenant_id = $2
+           AND capability = 'send_message'
+         FOR UPDATE`,
+        [taskId, this.tenantId],
+      );
+      if (sideEffect.rowCount !== 1) {
+        throw new Error("Unknown send side effect ledger is missing");
+      }
       if (resolution === "sent") {
-        await client.query(
+        const draft = selected.rows[0].result_ciphertext
+          ? JSON.parse(this.cipher.decrypt(selected.rows[0].result_ciphertext))
+          : null;
+        const taskStatus = draft?.needsInformation
+          ? "waiting_information"
+          : "completed";
+        const completedEffect = await client.query(
           `
           UPDATE side_effects
           SET status = 'completed', receipt_ciphertext = $3,
@@ -956,13 +1451,25 @@ export class PostgresStore {
             now,
           ],
         );
+        if (completedEffect.rowCount !== 1) {
+          throw new Error("Unknown send side effect ledger is missing");
+        }
         await client.query(
           `
           UPDATE tasks
-          SET status = 'completed', last_error_ciphertext = NULL, updated_at = $3
+          SET status = $3, waiting_information_at = $4,
+              last_error_ciphertext = NULL, updated_at = $5
           WHERE id = $1 AND tenant_id = $2
         `,
-          [taskId, this.tenantId, now],
+          [
+            taskId,
+            this.tenantId,
+            taskStatus,
+            taskStatus === "waiting_information"
+              ? sideEffect.rows[0].created_at
+              : null,
+            now,
+          ],
         );
       } else {
         await client.query(
@@ -1136,8 +1643,123 @@ export class PostgresStore {
     return id;
   }
 
+  async proposeMemoryCandidate(input, now = new Date()) {
+    validateAutomaticMemoryProposal(input, now);
+    const memory = validateMemoryProposal(input);
+    const subjectKey = this.cipher.fingerprint(memory.subject);
+    const factKey = memory.scope.factKey;
+    const statement = memory.statement.trim();
+    return this.transaction(async (client) => {
+      const sourceTask = await client.query(
+        `SELECT payload_ciphertext FROM tasks
+         WHERE tenant_id = $1 AND id = $2
+         FOR SHARE`,
+        [this.tenantId, memory.sourceVersion],
+      );
+      const sourcePayload = sourceTask.rows[0]?.payload_ciphertext
+        ? JSON.parse(this.cipher.decrypt(sourceTask.rows[0].payload_ciphertext))
+        : null;
+      if (!(sourcePayload?.messages ?? []).some(
+        (message) => String(message.id) === memory.sourceId,
+      )) {
+        throw new Error("Automatic memory source does not belong to its source task");
+      }
+      const lockKey = memoryFactLockKey({
+        tenantId: this.tenantId,
+        type: memory.type,
+        subjectKey,
+        projectId: memory.projectId,
+        factKey,
+      });
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [lockKey]);
+      const selected = await client.query(
+        `SELECT * FROM memory_items
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND status IN ('proposed', 'confirmed')
+           AND type = $2 AND subject_key = $3
+           AND project_id IS NOT DISTINCT FROM $4
+           AND (expires_at IS NULL OR expires_at > $5)
+         ORDER BY updated_at DESC
+         FOR UPDATE`,
+        [this.tenantId, memory.type, subjectKey, memory.projectId, now],
+      );
+      const comparable = selected.rows.map((row) => memoryFromRow(row, this.cipher))
+        .filter((item) => memoryFactKey(item) === factKey);
+      const duplicate = comparable.find(
+        (item) => item.statement.trim() === statement,
+      );
+      if (duplicate) {
+        return { created: false, id: duplicate.id, reason: "duplicate" };
+      }
+      const id = `memory_${randomUUID()}`;
+      await client.query(
+        `INSERT INTO memory_items(
+          id, tenant_id, type, subject_key, subject_ciphertext, project_id,
+          statement_ciphertext, source_type, source_id_ciphertext,
+          source_version, source_access_status, source_access_reason,
+          scope_ciphertext, confidence, status,
+          sensitivity, expires_at, created_by, updated_by, supersedes_id,
+          created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'not_required',NULL,$11,$12,'proposed',$13,$14,$15,$15,NULL,$16,$16)`,
+        [
+          id,
+          this.tenantId,
+          memory.type,
+          subjectKey,
+          this.cipher.encrypt(memory.subject),
+          memory.projectId,
+          this.cipher.encrypt(memory.statement),
+          memory.sourceType,
+          this.cipher.encrypt(memory.sourceId),
+          memory.sourceVersion,
+          this.cipher.encrypt(JSON.stringify(memory.scope)),
+          memory.confidence,
+          memory.sensitivity,
+          memory.expiresAt,
+          memory.createdBy,
+          now,
+        ],
+      );
+      await this.audit(client, {
+        eventType: "memory.proposed",
+        actor: memory.createdBy,
+        details: {
+          memoryId: id,
+          type: memory.type,
+          projectId: memory.projectId,
+          automatic: true,
+        },
+      });
+      return {
+        created: true,
+        id,
+        status: "proposed",
+        conflictCount: comparable.filter(
+          (item) => item.status === "confirmed" && item.statement.trim() !== statement,
+        ).length,
+      };
+    });
+  }
+
   async confirmMemory(id, actor, now = new Date(), { supersedesId = null } = {}) {
     return this.transaction(async (client) => {
+      const identityResult = await client.query(
+        `SELECT * FROM memory_items
+         WHERE tenant_id = $1 AND id = $2`,
+        [this.tenantId, id],
+      );
+      if (identityResult.rowCount === 0) throw new Error(`Memory not found: ${id}`);
+      const identity = identityResult.rows[0];
+      const identityFactKey = memoryFactKey(memoryFromRow(identity, this.cipher));
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        memoryFactLockKey({
+          tenantId: this.tenantId,
+          type: identity.type,
+          subjectKey: identity.subject_key,
+          projectId: identity.project_id,
+          factKey: identityFactKey,
+        }),
+      ]);
       const selected = await client.query(
         `SELECT * FROM memory_items
          WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
@@ -1154,6 +1776,29 @@ export class PostgresStore {
       ) {
         throw new Error("gbrain memory source access must be verified before confirmation");
       }
+      if (memory.source_type === "dingtalk_message") {
+        const sourceTask = await client.query(
+          `SELECT payload_ciphertext FROM tasks
+           WHERE tenant_id = $1 AND id = $2
+             AND privacy_erased_at IS NULL
+           FOR SHARE`,
+          [this.tenantId, memory.source_version],
+        );
+        const sourcePayload = sourceTask.rows[0]?.payload_ciphertext
+          ? JSON.parse(this.cipher.decrypt(sourceTask.rows[0].payload_ciphertext))
+          : null;
+        const sourceId = this.cipher.decrypt(memory.source_id_ciphertext);
+        if (!(sourcePayload?.messages ?? []).some(
+          (message) => String(message.id) === sourceId,
+        )) {
+          throw new Error("DingTalk memory source must remain verifiable before confirmation");
+        }
+      }
+      const candidate = memoryFromRow(memory, this.cipher);
+      const factKey = memoryFactKey(candidate);
+      if (factKey !== identityFactKey) {
+        throw new Error("Memory fact identity changed during confirmation");
+      }
       const activeResult = await client.query(
         `SELECT * FROM memory_items
          WHERE tenant_id = $1 AND status = 'confirmed' AND deleted_at IS NULL
@@ -1166,8 +1811,6 @@ export class PostgresStore {
          ORDER BY updated_at DESC FOR UPDATE`,
         [this.tenantId, memory.type, memory.subject_key, memory.project_id, now],
       );
-      const candidate = memoryFromRow(memory, this.cipher);
-      const factKey = memoryFactKey(candidate);
       const comparable = factKey
         ? activeResult.rows.filter(
             (item) => memoryFactKey(memoryFromRow(item, this.cipher)) === factKey,
@@ -1436,8 +2079,33 @@ export class PostgresStore {
     if (!["ALLOW", "REQUIRE_APPROVAL"].includes(assessment.decision)) {
       throw new Error("Denied work plan cannot be registered");
     }
+    const capabilityBudgetJson = capabilityBudgetSnapshot(
+      assessment.capabilityBudget,
+    );
+    const capabilityBudget = JSON.parse(capabilityBudgetJson);
+    if (
+      capabilityBudget.projectId !== assessment.plan.projectId ||
+      capabilityBudget.authorizationHash !== assessment.authorizationHash
+    ) {
+      throw new Error("Work plan capability budget is not bound to its authorization");
+    }
     const id = `plan_${assessment.planHash.slice(0, 24)}`;
     await this.transaction(async (client) => {
+      if (assessment.plan.sourceTaskId) {
+        const sourceTask = await client.query(
+          `SELECT status, privacy_erased_at FROM tasks
+           WHERE tenant_id = $1 AND id = $2 FOR SHARE`,
+          [this.tenantId, assessment.plan.sourceTaskId],
+        );
+        const source = sourceTask.rows[0];
+        if (
+          !source ||
+          source.privacy_erased_at ||
+          ["cancelled_manual", "cancelled_operator"].includes(source.status)
+        ) {
+          throw new Error("Work plan source task is no longer actionable");
+        }
+      }
       const erased = await client.query(
         `SELECT privacy_erased_at FROM work_plans
          WHERE tenant_id = $1 AND id = $2`,
@@ -1446,13 +2114,15 @@ export class PostgresStore {
       if (erased.rows[0]?.privacy_erased_at) {
         throw new Error("Erased work plan content cannot be recreated unchanged");
       }
-      await client.query(
+      const inserted = await client.query(
         `INSERT INTO work_plans(
           id, tenant_id, project_id, requester_key, requester_ciphertext,
-          objective_ciphertext, plan_ciphertext, plan_hash, max_level,
+          objective_ciphertext, plan_ciphertext, plan_hash,
+          authorization_hash, capability_budget_ciphertext, max_level,
           policy_decision, status, created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
-        ON CONFLICT (tenant_id, plan_hash) DO NOTHING`,
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)
+        ON CONFLICT (tenant_id, plan_hash) DO NOTHING
+        RETURNING id`,
         [
           id,
           this.tenantId,
@@ -1462,19 +2132,95 @@ export class PostgresStore {
           this.cipher.encrypt(assessment.plan.objective),
           this.cipher.encrypt(JSON.stringify(assessment.plan)),
           assessment.planHash,
+          assessment.authorizationHash,
+          this.cipher.encrypt(capabilityBudgetJson),
           assessment.maxLevel,
           assessment.decision,
           assessment.decision === "ALLOW" ? "ready" : "awaiting_approval",
           now,
         ],
       );
+      const legacyResult = inserted.rowCount === 0
+        ? await client.query(
+            `SELECT status, approval_version, cancel_requested_by,
+                    authorization_hash, capability_budget_ciphertext,
+                    privacy_erased_at
+             FROM work_plans
+             WHERE tenant_id = $1 AND id = $2 AND plan_hash = $3
+             FOR UPDATE`,
+            [this.tenantId, id, assessment.planHash],
+          )
+        : null;
+      const legacyPlan = legacyResult?.rows[0];
+      if (legacyPlan?.privacy_erased_at) {
+        throw new Error("Erased work plan content cannot be recreated unchanged");
+      }
+      const restoringLegacyPlan = legacyPlan?.status === "cancelled" &&
+        legacyPlan.cancel_requested_by === "system:migration-018" &&
+        (!legacyPlan.authorization_hash || !legacyPlan.capability_budget_ciphertext);
+      if (restoringLegacyPlan) {
+        const latestApproval = await client.query(
+          `SELECT MAX(approval_version) AS approval_version
+           FROM work_plan_approvals
+           WHERE tenant_id = $1 AND work_plan_id = $2`,
+          [this.tenantId, id],
+        );
+        const approvalVersion = Math.max(
+          Number(legacyPlan.approval_version ?? 1),
+          Number(latestApproval.rows[0]?.approval_version ?? 0),
+        ) + 1;
+        const restored = await client.query(
+          `UPDATE work_plans
+           SET project_id = $4, requester_key = $5, requester_ciphertext = $6,
+               objective_ciphertext = $7, plan_ciphertext = $8,
+               authorization_hash = $9, capability_budget_ciphertext = $10,
+               max_level = $11, policy_decision = $12, status = $13,
+               approval_version = $14, execution_owner = NULL,
+               lease_expires_at = NULL, cancel_requested_at = NULL,
+               cancel_requested_by = NULL, updated_at = $15
+           WHERE tenant_id = $1 AND id = $2 AND plan_hash = $3
+             AND status = 'cancelled'
+             AND cancel_requested_by = 'system:migration-018'
+             AND privacy_erased_at IS NULL
+             AND (authorization_hash IS NULL OR capability_budget_ciphertext IS NULL)
+           RETURNING id`,
+          [
+            this.tenantId,
+            id,
+            assessment.planHash,
+            assessment.plan.projectId,
+            this.cipher.fingerprint(assessment.plan.requesterId),
+            this.cipher.encrypt(assessment.plan.requesterId),
+            this.cipher.encrypt(assessment.plan.objective),
+            this.cipher.encrypt(JSON.stringify(assessment.plan)),
+            assessment.authorizationHash,
+            this.cipher.encrypt(capabilityBudgetJson),
+            assessment.maxLevel,
+            assessment.decision,
+            assessment.decision === "ALLOW" ? "ready" : "awaiting_approval",
+            approvalVersion,
+            now,
+          ],
+        );
+        if (restored.rowCount !== 1) {
+          throw new Error("Legacy work plan could not be registered safely");
+        }
+      }
       for (const [position, step] of assessment.plan.steps.entries()) {
         await client.query(
           `INSERT INTO work_plan_steps(
             tenant_id, work_plan_id, step_id, position,
             capability, status, updated_at
           ) VALUES ($1,$2,$3,$4,$5,'pending',$6)
-          ON CONFLICT (tenant_id, work_plan_id, step_id) DO NOTHING`,
+          ON CONFLICT (tenant_id, work_plan_id, step_id) DO ${
+            restoringLegacyPlan
+              ? `UPDATE SET position = EXCLUDED.position,
+                   capability = EXCLUDED.capability, status = 'pending',
+                   evidence_ciphertext = NULL, error_ciphertext = NULL,
+                   started_at = NULL, completed_at = NULL,
+                   updated_at = EXCLUDED.updated_at`
+              : "NOTHING"
+          }`,
           [this.tenantId, id, step.id, position, step.capability, now],
         );
       }
@@ -1512,6 +2258,31 @@ export class PostgresStore {
         currentPlanHash: current.plan_hash,
         assessment,
       });
+      if (assessment.plan.sourceTaskId) {
+        const sourceTask = await client.query(
+          `SELECT status, privacy_erased_at FROM tasks
+           WHERE tenant_id = $1 AND id = $2 FOR SHARE`,
+          [this.tenantId, assessment.plan.sourceTaskId],
+        );
+        const source = sourceTask.rows[0];
+        if (
+          !source ||
+          source.privacy_erased_at ||
+          ["cancelled_manual", "cancelled_operator"].includes(source.status)
+        ) {
+          throw new Error("Work plan source task is no longer actionable");
+        }
+      }
+      const capabilityBudgetJson = capabilityBudgetSnapshot(
+        assessment.capabilityBudget,
+      );
+      const capabilityBudget = JSON.parse(capabilityBudgetJson);
+      if (
+        capabilityBudget.projectId !== assessment.plan.projectId ||
+        capabilityBudget.authorizationHash !== assessment.authorizationHash
+      ) {
+        throw new Error("Work plan capability budget is not bound to its authorization");
+      }
       const duplicate = await client.query(
         `SELECT 1 FROM work_plans
          WHERE tenant_id = $1 AND (id = $2 OR plan_hash = $3)`,
@@ -1521,10 +2292,11 @@ export class PostgresStore {
       await client.query(
         `INSERT INTO work_plans(
           id, tenant_id, project_id, requester_key, requester_ciphertext,
-          objective_ciphertext, plan_ciphertext, plan_hash, max_level,
+          objective_ciphertext, plan_ciphertext, plan_hash,
+          authorization_hash, capability_budget_ciphertext, max_level,
           policy_decision, status, supersedes_work_plan_id, revision_actor,
           created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'awaiting_approval',$11,$12,$13,$13)`,
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'awaiting_approval',$13,$14,$15,$15)`,
         [
           revisedId,
           this.tenantId,
@@ -1534,6 +2306,8 @@ export class PostgresStore {
           this.cipher.encrypt(assessment.plan.objective),
           this.cipher.encrypt(JSON.stringify(assessment.plan)),
           assessment.planHash,
+          assessment.authorizationHash,
+          this.cipher.encrypt(capabilityBudgetJson),
           assessment.maxLevel,
           assessment.decision,
           id,
@@ -1662,12 +2436,42 @@ export class PostgresStore {
   async consumeWorkPlanAuthorization(
     id,
     now = new Date(),
-    { owner = null, leaseExpiresAt = null } = {},
+    { owner = null, leaseExpiresAt = null, capabilityBudget = null } = {},
   ) {
     if (owner && !(leaseExpiresAt instanceof Date && leaseExpiresAt > now)) {
       throw new Error("Execution lease expiry must be in the future");
     }
     return this.transaction(async (client) => {
+      const peeked = await client.query(
+        `SELECT * FROM work_plans
+         WHERE tenant_id = $1 AND id = $2`,
+        [this.tenantId, id],
+      );
+      const peekedPlan = peeked.rows[0];
+      if (!peekedPlan) throw new Error("Work plan not found");
+      let sourceTaskId;
+      try {
+        sourceTaskId = JSON.parse(
+          this.cipher.decrypt(peekedPlan.plan_ciphertext),
+        )?.sourceTaskId;
+      } catch {
+        throw new Error("Stored work plan is invalid");
+      }
+      if (sourceTaskId) {
+        const sourceTask = await client.query(
+          `SELECT status, privacy_erased_at FROM tasks
+           WHERE tenant_id = $1 AND id = $2 FOR SHARE`,
+          [this.tenantId, sourceTaskId],
+        );
+        const source = sourceTask.rows[0];
+        if (
+          !source ||
+          source.privacy_erased_at ||
+          ["cancelled_manual", "cancelled_operator"].includes(source.status)
+        ) {
+          throw new Error("Work plan source task is no longer actionable");
+        }
+      }
       const selected = await client.query(
         `SELECT * FROM work_plans
          WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
@@ -1675,7 +2479,89 @@ export class PostgresStore {
       );
       const plan = selected.rows[0];
       if (!plan) throw new Error("Work plan not found");
+      if (plan.privacy_erased_at) {
+        throw new Error("Work plan source task is no longer actionable");
+      }
+      let lockedSourceTaskId;
+      try {
+        lockedSourceTaskId = JSON.parse(
+          this.cipher.decrypt(plan.plan_ciphertext),
+        )?.sourceTaskId;
+      } catch {
+        throw new Error("Stored work plan is invalid");
+      }
+      if (lockedSourceTaskId !== sourceTaskId) {
+        throw new Error("Work plan changed while acquiring authorization");
+      }
+      if (!plan.authorization_hash || !plan.capability_budget_ciphertext) {
+        throw new Error("Work plan capability budget is not bound; register a new plan");
+      }
+      let budget;
+      try {
+        budget = normalizeCapabilityBudget(JSON.parse(
+          this.cipher.decrypt(plan.capability_budget_ciphertext),
+        ));
+      } catch {
+        throw new Error("Stored work plan capability budget is invalid");
+      }
+      if (
+        budget.projectId !== plan.project_id ||
+        budget.authorizationHash !== plan.authorization_hash
+      ) {
+        throw new Error("Stored capability budget does not match work plan authorization");
+      }
+      if (
+        capabilityBudget != null &&
+        capabilityBudgetSnapshot(capabilityBudget) !== capabilityBudgetSnapshot(budget)
+      ) {
+        throw new Error("Capability budget does not match the registered work plan");
+      }
+      const consumeBudget = async () => {
+        const projectKey = this.cipher.fingerprint(budget.projectId);
+        for (const entry of budget.entries) {
+          await client.query(
+            `INSERT INTO capability_budget_usage(
+               tenant_id, project_key, project_id_ciphertext,
+               authorization_hash, capability, limit_count,
+               used_count, created_at, updated_at
+             ) VALUES ($1,$2,$3,$4,$5,$6,0,$7,$7)
+             ON CONFLICT (tenant_id, project_key, authorization_hash, capability)
+             DO NOTHING`,
+            [
+              this.tenantId,
+              projectKey,
+              this.cipher.encrypt(budget.projectId),
+              budget.authorizationHash,
+              entry.capability,
+              entry.limit,
+              now,
+            ],
+          );
+          const consumed = await client.query(
+             `UPDATE capability_budget_usage
+             SET used_count = used_count + $5, updated_at = $6
+             WHERE tenant_id = $1 AND project_key = $2
+               AND authorization_hash = $3 AND capability = $4
+               AND limit_count = $7
+               AND used_count + $5 <= limit_count
+             RETURNING used_count`,
+            [
+              this.tenantId,
+              projectKey,
+              budget.authorizationHash,
+              entry.capability,
+              entry.amount,
+              now,
+              entry.limit,
+            ],
+          );
+          if (consumed.rowCount !== 1) {
+            throw new Error(`Capability authorization budget exhausted: ${entry.capability}`);
+          }
+        }
+      };
       if (plan.status === "ready" && plan.policy_decision === "ALLOW") {
+        await consumeBudget();
         await client.query(
           `UPDATE work_plans SET status = 'executing', execution_owner = $3,
            lease_expires_at = $4, updated_at = $5
@@ -1699,6 +2585,7 @@ export class PostgresStore {
       if (approval.rowCount !== 1) {
         throw new Error("Work plan approval is invalid or expired");
       }
+      await consumeBudget();
       await client.query(
         `UPDATE work_plan_approvals SET consumed = consumed + 1
          WHERE tenant_id = $1 AND id = $2`,
@@ -1716,6 +2603,29 @@ export class PostgresStore {
       });
       return true;
     });
+  }
+
+  async listCapabilityBudgetUsage({ projectId = null } = {}) {
+    const parameters = [this.tenantId];
+    const projectClause = projectId ? "AND project_key = $2" : "";
+    if (projectId) parameters.push(this.cipher.fingerprint(projectId));
+    const result = await this.pool.query(
+      `SELECT project_key, project_id_ciphertext, authorization_hash, capability,
+              limit_count, used_count, updated_at
+       FROM capability_budget_usage
+       WHERE tenant_id = $1 ${projectClause}
+       ORDER BY project_key, capability`,
+      parameters,
+    );
+    return result.rows.map((row) => ({
+      projectId: this.cipher.decrypt(row.project_id_ciphertext) || null,
+      authorizationHash: row.authorization_hash,
+      capability: row.capability,
+      limit: row.limit_count,
+      used: row.used_count,
+      remaining: row.limit_count - row.used_count,
+      updatedAt: row.updated_at,
+    }));
   }
 
   async renewWorkPlanLease(id, owner, leaseExpiresAt, now = new Date()) {
@@ -2421,7 +3331,30 @@ export class PostgresStore {
         [this.tenantId, selector.value],
       );
     }
-    const memoryRows = memoryResult.rows;
+    let memoryRows = memoryResult.rows;
+    if (taskRows.length > 0) {
+      const sourceMemories = await client.query(
+        `SELECT * FROM memory_items
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND source_type = 'dingtalk_message'
+           AND source_version = ANY($2::text[])${suffix}`,
+        [this.tenantId, taskRows.map((row) => row.id)],
+      );
+      memoryRows = [...new Map(
+        [...memoryRows, ...sourceMemories.rows].map((row) => [row.id, row]),
+      ).values()];
+    }
+    let capabilityBudgetResult;
+    if (selector.type === "project") {
+      capabilityBudgetResult = await client.query(
+        `SELECT * FROM capability_budget_usage
+         WHERE tenant_id = $1 AND project_key = $2${suffix}`,
+        [this.tenantId, this.cipher.fingerprint(selector.value)],
+      );
+    } else {
+      capabilityBudgetResult = { rows: [] };
+    }
+    const capabilityBudgetRows = capabilityBudgetResult.rows;
     const taskById = new Map(taskRows.map((row) => [row.id, row]));
     const eligibleTaskIds = new Set(
       taskRows.filter((row) => taskStatus.has(row.status)).map((row) => row.id),
@@ -2536,6 +3469,10 @@ export class PostgresStore {
       messages: eligibleMessages.map((row) => token(row, row.platform_message_id)),
       workPlans: planRows.filter((row) => planStatus.has(row.status)).map(token),
       memories: memoryRows.map(token),
+      capabilityBudgets: capabilityBudgetRows.map((row) => token(
+        row,
+        `${row.project_key}:${row.authorization_hash}:${row.capability}`,
+      )),
       auditEvents: auditRows.map(token),
       identityReferences: [...new Set(identityReferences)],
     };
@@ -2558,6 +3495,11 @@ export class PostgresStore {
         messages: eligibleMessages.map((row) => row.platform_message_id),
         workPlans: planRows.filter((row) => planStatus.has(row.status)).map((row) => row.id),
         memories: memoryRows.map((row) => row.id),
+        capabilityBudgets: capabilityBudgetRows.map((row) => ({
+          projectKey: row.project_key,
+          authorizationHash: row.authorization_hash,
+          capability: row.capability,
+        })),
         auditEvents: auditRows.map((row) => row.id),
         checkpointRewrites,
       },
@@ -2575,7 +3517,7 @@ export class PostgresStore {
       await client.query(
         `LOCK TABLE tasks, messages, privacy_erased_messages, approvals, side_effects, decision_reviews,
            decision_review_events, work_plans, work_plan_approvals,
-           work_plan_steps, memory_items, checkpoints, audit_events
+           work_plan_steps, capability_budget_usage, memory_items, checkpoints, audit_events
          IN SHARE ROW EXCLUSIVE MODE`,
       );
       const candidates = await this._privacyErasureCandidates(selector, now, client, { lock: true });
@@ -2649,7 +3591,8 @@ export class PostgresStore {
         await client.query(
           `UPDATE work_plans SET project_id = 'deleted', requester_key = $3,
              requester_ciphertext = $4, objective_ciphertext = $4,
-             plan_ciphertext = $5, plan_hash = $6, execution_owner = NULL,
+             plan_ciphertext = $5, plan_hash = $6, authorization_hash = NULL,
+             capability_budget_ciphertext = $5, execution_owner = NULL,
              lease_expires_at = NULL, cancel_requested_at = NULL,
              cancel_requested_by = NULL,
              revision_actor = CASE WHEN revision_actor IS NULL THEN NULL ELSE 'deleted' END,
@@ -2674,6 +3617,22 @@ export class PostgresStore {
           `UPDATE work_plan_steps SET evidence_ciphertext = NULL, error_ciphertext = NULL
            WHERE tenant_id = $1 AND work_plan_id = $2`,
           [this.tenantId, id],
+        );
+      }
+      for (const budget of candidates.ids.capabilityBudgets) {
+        await client.query(
+          `UPDATE capability_budget_usage
+           SET project_id_ciphertext = $2, updated_at = $3
+           WHERE tenant_id = $1 AND project_key = $4
+             AND authorization_hash = $5 AND capability = $6`,
+          [
+            this.tenantId,
+            encryptedEmpty,
+            now,
+            budget.projectKey,
+            budget.authorizationHash,
+            budget.capability,
+          ],
         );
       }
       for (const id of candidates.ids.memories) {
@@ -2767,7 +3726,7 @@ export class PostgresStore {
         WHERE tenant_id = $1
           AND status IN (
             'completed', 'no_reply', 'rejected', 'cancelled_manual',
-            'cancelled_operator', 'expired'
+            'cancelled_operator', 'expired', 'continued'
           )
           AND updated_at < $2
         FOR UPDATE SKIP LOCKED

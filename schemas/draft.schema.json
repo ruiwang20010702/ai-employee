@@ -2,7 +2,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["shouldReply", "reply", "confidence", "riskLevel", "reason", "workRequest"],
+  "required": ["shouldReply", "reply", "confidence", "riskLevel", "reason", "needsInformation", "relatedToWaitingTask", "workRequest", "memoryCandidates"],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "workRequest": {
+            "type": "object",
+            "required": ["requested"],
+            "properties": {
+              "requested": { "const": true }
+            }
+          }
+        },
+        "required": ["workRequest"]
+      },
+      "then": {
+        "properties": {
+          "shouldReply": { "const": true }
+        }
+      }
+    }
+  ],
   "properties": {
     "shouldReply": {
       "type": "boolean"
@@ -22,6 +43,12 @@
     "reason": {
       "type": "string"
     },
+    "needsInformation": {
+      "type": "boolean"
+    },
+    "relatedToWaitingTask": {
+      "type": "boolean"
+    },
     "workRequest": {
       "anyOf": [
         {
@@ -36,6 +63,55 @@
         },
         { "type": "null" }
       ]
+    },
+    "memoryCandidates": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "statement", "factKey", "sensitivity", "retentionDays", "confidence", "projectHint", "sourceMessageId"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["person", "project", "principle"]
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "factKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*){1,4}$"
+          },
+          "sensitivity": {
+            "type": "string",
+            "enum": ["public", "internal", "confidential"]
+          },
+          "retentionDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "projectHint": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "sourceMessageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      }
     }
   }
 }

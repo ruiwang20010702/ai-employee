@@ -1,9 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { restoreLaunchAgents } from "../scripts/管理常驻服务.mjs";
+import {
+  restoreLaunchAgents,
+  validateServiceConfig,
+} from "../scripts/管理常驻服务.mjs";
+
+test("常驻服务安装前拒绝内联生产密钥", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-employee-service-config-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "production.json");
+  await writeFile(path, JSON.stringify({
+    DATABASE_URL: "postgresql://inline-secret",
+  }), { mode: 0o600 });
+  await assert.rejects(
+    validateServiceConfig({ path, environment: {} }),
+    /must use an external reference/u,
+  );
+});
 
 test("安装失败回退会恢复原 plist 并删除首次安装产生的 plist", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ai-employee-launchd-"));

@@ -53,7 +53,7 @@ test("默认只预览固定五项密钥且不写入", async () => {
 });
 
 test("应用迁移后逐项回读并原子替换为钥匙串引用", async () => {
-  const { configPath } = await fixture();
+  const { directory, configPath } = await fixture();
   const keychain = memoryKeychain();
   const result = await migrateProductionSecretsToKeychain({
     configPath,
@@ -72,12 +72,17 @@ test("应用迁移后逐项回读并原子替换为钥匙串引用", async () =>
     assert.equal(next[key], `keychain://ai-employee-production/${account}`);
   }
   assert.equal(next.AI_EMPLOYEE_ALLOWED_CAPABILITIES, "draft_reply");
-  assert.deepEqual(
-    JSON.parse(await readFile(result.rollbackSnapshot, "utf8")),
-    sourceValues,
-  );
+  assert.equal(result.rollbackSnapshot, null);
+  assert.equal(result.rollbackSnapshotRemoved, true);
   assert.equal((await stat(configPath)).mode & 0o777, 0o600);
-  assert.equal((await stat(result.rollbackSnapshot)).mode & 0o777, 0o600);
+  await assert.rejects(
+    stat(join(
+      directory,
+      "keychain-migration-backups",
+      "production-2026-08-05T08-00-00-000Z.json",
+    )),
+    { code: "ENOENT" },
+  );
 });
 
 test("任一钥匙串写入或回读失败时保留原配置、不留快照且错误不泄露密钥", async () => {

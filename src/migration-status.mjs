@@ -7,6 +7,46 @@ const defaultMigrationsDirectory = fileURLToPath(
   new URL("../db/migrations/", import.meta.url),
 );
 const compatibilityPolicyFilename = "兼容性策略.json";
+const legacyTaskStatuses = Object.freeze([
+  "queued",
+  "processing",
+  "awaiting_approval",
+  "no_reply",
+  "approved",
+  "rejected",
+  "sending",
+  "completed",
+  "send_unknown",
+  "cancelled_manual",
+  "cancelled_operator",
+  "expired",
+  "dead",
+]);
+
+function removeCompatibleTaskStatusConstraintReplacement(content) {
+  const dropPattern = /ALTER\s+TABLE\s+tasks\s+DROP\s+CONSTRAINT\s+tasks_status_check\s*;/giu;
+  const drops = [...content.matchAll(dropPattern)];
+  if (drops.length === 0) return content;
+  if (drops.length !== 1) return content;
+  const replacement = content.match(
+    /ALTER\s+TABLE\s+tasks\s+ADD\s+CONSTRAINT\s+tasks_status_check\s+CHECK\s*\(([\s\S]*?)\)\s*;/iu,
+  );
+  if (!replacement) return content;
+  const expression = replacement[1].trim();
+  const statusList = expression.match(/^status\s+IN\s*\(([\s\S]*)\)$/iu);
+  if (!statusList) return content;
+  const residue = statusList[1]
+    .replace(/'[^']*'/gu, "")
+    .replace(/[\s,]/gu, "");
+  if (residue !== "") return content;
+  const statuses = new Set(
+    [...statusList[1].matchAll(/'([^']+)'/gu)].map((match) => match[1]),
+  );
+  if (!legacyTaskStatuses.every((status) => statuses.has(status))) {
+    return content;
+  }
+  return content.replace(dropPattern, "");
+}
 
 function checksum(content) {
   return createHash("sha256").update(content).digest("hex");
@@ -31,16 +71,27 @@ export function validateMigrationCompatibility(migrations, policy) {
     const number = migrationNumber(migration.version);
     if (number == null || number < policy.policyStartsAt) continue;
     const entry = policy.migrations[migration.version];
+    const supportedStateGuards = new Set([
+      "waiting_information_states_absent",
+      "capability_budget_target_support_required",
+    ]);
+    const rollbackIsSupported = entry?.rollback === "service_only" ||
+      (
+        entry?.rollback === "service_only_with_state_guard" &&
+        supportedStateGuards.has(entry?.guard)
+      );
     if (
       entry?.backwardCompatible !== true ||
-      entry?.rollback !== "service_only" ||
+      !rollbackIsSupported ||
       !String(entry?.evidence ?? "").trim()
     ) {
       throw new Error(
         `Migration compatibility evidence is missing: ${migration.version}`,
       );
     }
-    const withoutForeignKeyDeleteActions = migration.content.replace(
+    const withoutCompatibleConstraintReplacement =
+      removeCompatibleTaskStatusConstraintReplacement(migration.content);
+    const withoutForeignKeyDeleteActions = withoutCompatibleConstraintReplacement.replace(
       /ON\s+DELETE\s+(?:CASCADE|SET\s+NULL|RESTRICT|NO\s+ACTION)/giu,
       "",
     );

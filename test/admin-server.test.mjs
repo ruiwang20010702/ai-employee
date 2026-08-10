@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { startAdminServer } from "../src/admin-server.mjs";
 import { adminHtml } from "../src/admin-ui.mjs";
@@ -15,6 +16,9 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.match(script, /\/api\/privacy\/preview/u);
   assert.match(script, /AbortSignal\.timeout\(10000\)/u);
   assert.match(script, /请求超时，请确认服务状态后重试/u);
+  assert.match(script, /memoryRows\(\)\)\+'<\/section>'/u);
+  assert.match(script, /conflictIds\.length===0/u);
+  assert.match(script, /candidate\?\.conflict\?\.conflicts\?\.find/u);
   assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
 });
 
@@ -50,6 +54,8 @@ test("判断质量页使用内嵌两步表单连续复核", () => {
   assert.match(script, /aria-busy/u);
   assert.match(adminHtml, /标注只用于评估，不会批准草稿，也不会触发发送/u);
   assert.match(adminHtml, /请到“判断质量”统一标注/u);
+  assert.match(adminHtml, /原消息证据/u);
+  assert.match(adminHtml, /来源不可核对，禁止确认/u);
 });
 
 function fixture({ taskReply = "准备回复" } = {}) {
@@ -107,6 +113,7 @@ function fixture({ taskReply = "准备回复" } = {}) {
           messages: 2,
           workPlans: 0,
           memories: 0,
+          capabilityBudgets: 0,
           auditEvents: 1,
           identityReferences: 1,
         },
@@ -154,6 +161,14 @@ function fixture({ taskReply = "准备回复" } = {}) {
       };
     },
     async requestWorkPlanCancellation(id, actor) { decisions.push({ type: "plan-cancel", id, actor }); return "cancelled"; },
+    async confirmMemory(id, actor, now, options = {}) {
+      decisions.push({ type: "memory-confirm", id, actor, now, ...options });
+      return "confirmed";
+    },
+    async revokeMemory(id, actor) {
+      decisions.push({ type: "memory-revoke", id, actor });
+      return "revoked";
+    },
     async listDecisionReviews({ taskId } = {}) {
       return taskId ? reviews.filter((review) => review.taskId === taskId) : reviews;
     },
@@ -196,7 +211,7 @@ function fixture({ taskReply = "准备回复" } = {}) {
 }
 
 test("管理台强制读取和写入令牌，并返回安全页面", async () => {
-  const { store, config, plan } = fixture();
+  const { store, config, plan, task } = fixture();
   const service = await startAdminServer({ store, config });
   const { port } = service.server.address();
   const base = `http://127.0.0.1:${port}`;
@@ -206,6 +221,8 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-security-policy"), /nonce-/u);
     assert.match(html, /AI 员工管理台/u);
+    assert.match(html, /明确替代这条旧记忆/u);
+    assert.doesNotMatch(html, /conflictIds\[0\]/u);
     assert.doesNotMatch(html, /read-secret|write-secret/u);
 
     assert.equal((await fetch(`${base}/api/overview`)).status, 401);
@@ -218,6 +235,12 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     const capabilityBody = await capabilities.json();
     assert.equal(capabilityBody.catalog.some((item) => item.name === "production_deploy"), true);
     assert.equal(capabilityBody.global.find((item) => item.name === "work_plan_execution").enabled, false);
+    task.payload.messages = [{
+      id: "source-message-1",
+      senderName: "测试人",
+      createTime: "2026-08-04T00:00:00Z",
+      content: "以后请将回复控制在三句话以内。",
+    }];
     store.listMemories = async () => [{
       id: "memory_1",
       type: "project",
@@ -237,6 +260,25 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
       confidence: 0.9,
       expires_at: null,
       updated_at: "2026-08-04T00:00:00Z",
+    }, {
+      id: "memory_2",
+      type: "person",
+      subject: "contact_1",
+      statement: "对方偏好三句话以内的回复。",
+      status: "proposed",
+      sensitivity: "internal",
+      project_id: null,
+      source_type: "dingtalk_message",
+      source_id: "source-message-1",
+      source_version: "task_1",
+      source_access_status: "not_required",
+      source_access_reason: null,
+      source_access_checked_at: null,
+      source_access_expires_at: null,
+      scope: { factKey: "communication.reply_length" },
+      confidence: 0.9,
+      expires_at: "2026-11-04T00:00:00Z",
+      updated_at: "2026-08-04T00:00:00Z",
     }];
     const memories = await fetch(`${base}/api/memories`, { headers: read });
     const memoryBody = await memories.json();
@@ -244,6 +286,13 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     assert.equal(memoryBody.items[0].sourceId, "doc-1");
     assert.equal(memoryBody.items[0].sourceAccessStatus, "not_required");
     assert.deepEqual(memoryBody.items[0].scope, { factKey: "release-rule" });
+    assert.deepEqual(memoryBody.items[1].sourceEvidence, {
+      status: "available",
+      messageId: "source-message-1",
+      senderName: "测试人",
+      occurredAt: "2026-08-04T00:00:00Z",
+      excerpt: "以后请将回复控制在三句话以内。",
+    });
     const operations = await fetch(`${base}/api/operations`, { headers: read });
     assert.equal(operations.status, 200);
     assert.equal((await operations.json()).messageDetection.p95Ms, 1000);
@@ -273,6 +322,183 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     });
     assert.equal(paused.status, 200);
     assert.equal((await paused.json()).paused, true);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("Codex 只读挑战签名一次有效且不能重放", async () => {
+  const { store, config } = fixture();
+  const service = await startAdminServer({ store, config });
+  const { port } = service.server.address();
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const challengeResponse = await fetch(`${base}/api/auth/challenge`, {
+      method: "POST",
+    });
+    assert.equal(challengeResponse.status, 200);
+    const { nonce } = await challengeResponse.json();
+    assert.match(nonce, /^[A-Za-z0-9_-]{43}$/u);
+    const headers = {
+      "x-ai-employee-challenge": nonce,
+      "x-ai-employee-proof": createHmac("sha256", "read-secret")
+        .update(`${nonce}\nGET\n/api/overview`)
+        .digest("hex"),
+    };
+    assert.equal((await fetch(`${base}/api/overview`, { headers })).status, 200);
+    assert.equal((await fetch(`${base}/api/overview`, { headers })).status, 401);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("冲突记忆必须通过明确替代动作并展示旧事实", async () => {
+  const { store, config, decisions } = fixture();
+  const oldMemory = {
+    id: "memory_old",
+    type: "person",
+    subject: "contact_1",
+    subject_key: "subject-key",
+    statement: "对方偏好详细回复。",
+    status: "confirmed",
+    sensitivity: "internal",
+    project_id: null,
+    source_type: "operator",
+    source_id: "manual-old",
+    source_version: null,
+    source_access_status: "not_required",
+    scope: { factKey: "communication.reply_length" },
+    confidence: 1,
+    updated_at: "2026-08-04T00:00:00Z",
+  };
+  const candidate = {
+    ...oldMemory,
+    id: "memory_new",
+    statement: "对方偏好简短回复。",
+    status: "proposed",
+    source_id: "manual-new",
+    updated_at: "2026-08-04T00:01:00Z",
+  };
+  store.listMemories = async () => [candidate, oldMemory];
+  store.memoryConflictMetrics = async () => ({
+    candidates: 1,
+    conflictCandidates: 1,
+    duplicateCandidates: 0,
+    activeConflictGroups: 0,
+    conflictRate: 1,
+    healthy: true,
+    items: [{
+      memoryId: candidate.id,
+      conflictIds: [oldMemory.id],
+      duplicateIds: [],
+      requiresResolution: true,
+    }],
+  });
+  const service = await startAdminServer({ store, config });
+  const { port } = service.server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const headers = {
+    authorization: "Bearer read-secret",
+    "x-ai-employee-write-token": "write-secret",
+    "content-type": "application/json",
+  };
+  try {
+    const listed = await fetch(`${base}/api/memories`, { headers });
+    const body = await listed.json();
+    assert.equal(body.items[0].conflict.conflicts[0].id, oldMemory.id);
+    assert.equal(
+      body.items[0].conflict.conflicts[0].statement,
+      oldMemory.statement,
+    );
+    const endpoint = `${base}/api/memories/${candidate.id}/decision`;
+    const implicitReplacement = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        decision: "confirmed",
+        supersedesId: oldMemory.id,
+      }),
+    });
+    assert.equal(implicitReplacement.status, 400);
+    const missingTarget = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ decision: "replaced" }),
+    });
+    assert.equal(missingTarget.status, 400);
+    const explicitReplacement = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        decision: "replaced",
+        supersedesId: oldMemory.id,
+      }),
+    });
+    assert.equal(explicitReplacement.status, 200);
+    assert.equal(decisions.at(-1).type, "memory-confirm");
+    assert.equal(decisions.at(-1).supersedesId, oldMemory.id);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("记忆冲突旧事实不在当前分页时仍会精确回读", async () => {
+  const { store, config } = fixture();
+  const oldMemory = {
+    id: "memory_old_outside_page",
+    type: "person",
+    subject: "contact_1",
+    statement: "对方偏好详细回复。",
+    status: "confirmed",
+    sensitivity: "internal",
+    source_type: "operator",
+    source_id: "manual-old",
+    scope: { factKey: "communication.reply_length" },
+  };
+  const candidate = {
+    ...oldMemory,
+    id: "memory_new_on_page",
+    statement: "对方偏好简短回复。",
+    status: "proposed",
+    source_id: "manual-new",
+  };
+  store.listMemories = async () => [
+    candidate,
+    ...Array.from({ length: 99 }, (_, index) => ({
+      ...oldMemory,
+      id: `unrelated_${index}`,
+      subject: `unrelated_${index}`,
+      statement: `无关事实 ${index}`,
+      status: "proposed",
+    })),
+  ];
+  store.getMemory = async (id) => id === oldMemory.id ? oldMemory : null;
+  store.memoryConflictMetrics = async () => ({
+    candidates: 1,
+    conflictCandidates: 1,
+    duplicateCandidates: 0,
+    activeConflictGroups: 0,
+    conflictRate: 1,
+    healthy: true,
+    items: [{
+      memoryId: candidate.id,
+      conflictIds: [oldMemory.id],
+      duplicateIds: [],
+      requiresResolution: true,
+    }],
+  });
+  const service = await startAdminServer({ store, config });
+  const { port } = service.server.address();
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/memories?status=proposed`, {
+      headers: { authorization: "Bearer read-secret" },
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.items.length, 100);
+    assert.equal(body.items.every((memory) => memory.status === "proposed"), true);
+    assert.equal(body.items[0].conflict.conflicts[0].id, oldMemory.id);
+    assert.equal(body.items[0].conflict.conflicts[0].statement, oldMemory.statement);
   } finally {
     await service.stop("test");
   }

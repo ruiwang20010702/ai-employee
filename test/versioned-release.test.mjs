@@ -154,3 +154,46 @@ test("拒绝指向越界或权限过宽配置的上一版本", async () => {
     /permissions are too broad/u,
   );
 });
+
+test("激活校验失败时恢复上一版本链接", async () => {
+  const base = await mkdtemp(join(tmpdir(), "ai-employee-release-rollback-"));
+  const root = join(base, "ai-employee-production");
+  const environmentFile = join(base, "github-env");
+  await writeFile(environmentFile, "", { mode: 0o600 });
+  const first = await prepareVersionedRelease({
+    root,
+    sha,
+    runId: "201",
+    attempt: "1",
+    environmentFile,
+  });
+  await releaseFixture(first.releaseDirectory);
+  await activateVersionedRelease({
+    root,
+    releaseDirectory: first.releaseDirectory,
+    runId: "201",
+    attempt: "1",
+  });
+  const second = await prepareVersionedRelease({
+    root,
+    sha: "b".repeat(40),
+    runId: "202",
+    attempt: "1",
+    environmentFile,
+  });
+  await releaseFixture(second.releaseDirectory);
+
+  await assert.rejects(
+    activateVersionedRelease({
+      root,
+      releaseDirectory: second.releaseDirectory,
+      runId: "202",
+      attempt: "1",
+      verifyActivation: async () => {
+        throw new Error("simulated activation verification failure");
+      },
+    }),
+    /simulated activation verification failure/u,
+  );
+  assert.equal(await realpath(join(root, "current")), first.releaseDirectory);
+});

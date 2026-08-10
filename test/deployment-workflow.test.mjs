@@ -15,52 +15,40 @@ const securityWorkflowUrl = new URL(
   import.meta.url,
 );
 
-test("生产发布使用稳定版本目录、外部密钥门禁和失败回退", async () => {
+test("GitHub 生产工作流只做云端门禁且不接触生产", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
 
-  assert.match(workflow, /AI_EMPLOYEE_DEPLOY_ROOT/u);
-  assert.match(workflow, /AI_EMPLOYEE_RELEASE_DIRECTORY/u);
-  assert.match(workflow, /准备版本化发布\.mjs"? prepare/u);
-  assert.match(workflow, /准备版本化发布\.mjs"? activate/u);
   assert.match(workflow, /\.deployment-controller/u);
   assert.match(workflow, /\.release-source/u);
-  assert.match(workflow, /验证发布回退目标\.mjs/u);
-  assert.match(workflow, /archive --format=tar HEAD/u);
   assert.match(workflow, /\.deployment-controller\/deploy\/回退基线\.json/u);
   assert.match(
     workflow,
-    /--github-env "\$GITHUB_ENV"\n\s+- name: 写入目标版本文件/u,
+    /merge-base --is-ancestor "\$AI_EMPLOYEE_TARGET_SHA" refs\/remotes\/origin\/main/u,
   );
-  assert.match(workflow, /merge-base --is-ancestor HEAD refs\/remotes\/origin\/main/u);
-  assert.match(workflow, /AI_EMPLOYEE_DEPLOY_SHA/u);
-  assert.match(workflow, /Remote production config requires|macOS remote deployment requires/u);
-  assert.match(workflow, /发布失败时恢复上一版本服务/u);
-  assert.equal(
-    workflow.match(/清理版本外常驻服务\.mjs/gu)?.length,
-    2,
-  );
-  assert.match(workflow, /AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED/u);
-  assert.equal(
-    workflow.includes("${{ github.workspace }}/.runtime/production.json"),
-    false,
-  );
-  const ordered = [
-    "验证发布回退目标.mjs",
-    "npm run db:backup",
-    "npm run db:migrate",
-    "npm run production:doctor",
-    "npm run production:codex-probe",
-    "AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED=true",
-    "npm run service:install",
-    "npm run production:service-verify",
-  ];
-  let cursor = -1;
-  for (const value of ordered) {
-    const next = workflow.indexOf(value, cursor + 1);
-    assert.notEqual(next, -1, `生产发布缺少步骤：${value}`);
-    assert.ok(next > cursor, `生产发布步骤顺序错误：${value}`);
-    cursor = next;
+  assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/u);
+  assert.match(workflow, /working-directory: \.deployment-controller/u);
+  for (const forbidden of [
+    "environment: production",
+    "secrets.AI_EMPLOYEE_CONFIG_JSON",
+    "self-hosted",
+    "db:migrate",
+    "service:install",
+    "AI_EMPLOYEE_DEPLOY_ROOT",
+  ]) {
+    assert.equal(workflow.includes(forbidden), false, `门禁工作流不得包含：${forbidden}`);
   }
+});
+
+test("生产审批前固定完整 SHA 并要求两项云端检查成功", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+  assert.match(workflow, /sha:\n\s+description: 要发布的完整 40 位小写提交 SHA/u);
+  assert.match(workflow, /\^\[0-9a-f\]\{40\}\$/u);
+  assert.equal(/default:\s*main/u.test(workflow), false);
+  assert.equal(workflow.includes("${{ inputs.ref }}"), false);
+  assert.match(workflow, /actions: read/u);
+  assert.match(workflow, /--release-sha "\$AI_EMPLOYEE_TARGET_SHA"/u);
+  assert.match(workflow, /ref: \$\{\{ steps\.target\.outputs\.deploy_sha \}\}/u);
+  assert.match(workflow, /生产执行仅允许在已登录的 macOS 用户会话/u);
 });
 
 test("持续集成从真实发布包执行隔离复用验收", async () => {

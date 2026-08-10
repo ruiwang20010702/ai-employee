@@ -94,6 +94,10 @@ function taskSummary(task, review = null) {
     draftSha256: draftSha256(draft),
     decisionSha256: decisionSha256(task.result),
     shouldReply: task.result?.shouldReply ?? null,
+    needsInformation: task.result?.needsInformation ?? false,
+    relatedToWaitingTask: task.result?.relatedToWaitingTask ?? false,
+    continuationOfTaskId: task.continuation_of_task_id ?? null,
+    waitingInformationAt: task.waiting_information_at ?? null,
     riskLevel: task.result?.riskLevel ?? null,
     reason: task.result?.reason ?? null,
     expectedShouldReply:
@@ -149,7 +153,28 @@ function planSummary(plan, stepRecords = []) {
   };
 }
 
-function memorySummary(memory) {
+function memorySourceEvidence(memory, sourceTasks) {
+  if (memory.source_type !== "dingtalk_message") return null;
+  const task = sourceTasks.get(memory.source_version);
+  if (!task) {
+    return { status: "unavailable", reason: "source_task_unavailable" };
+  }
+  const message = (task.payload?.messages ?? []).find(
+    (item) => String(item.id) === String(memory.source_id),
+  );
+  if (!message) {
+    return { status: "unavailable", reason: "source_message_unavailable" };
+  }
+  return {
+    status: "available",
+    messageId: String(message.id),
+    senderName: String(message.senderName ?? task.payload?.senderName ?? ""),
+    occurredAt: message.createTime ?? message.occurredAt ?? null,
+    excerpt: String(message.content ?? "").trim().slice(0, 500),
+  };
+}
+
+function memorySummary(memory, sourceEvidence = null) {
   return {
     id: memory.id,
     type: memory.type,
@@ -165,6 +190,7 @@ function memorySummary(memory) {
     sourceAccessReason: memory.source_access_reason,
     sourceAccessCheckedAt: memory.source_access_checked_at,
     sourceAccessExpiresAt: memory.source_access_expires_at,
+    sourceEvidence,
     scope: memory.scope,
     confidence: memory.confidence,
     expiresAt: memory.expires_at,
@@ -177,6 +203,7 @@ const privacyEligibleCountKeys = Object.freeze([
   "messages",
   "workPlans",
   "memories",
+  "capabilityBudgets",
   "auditEvents",
   "identityReferences",
 ]);
@@ -355,13 +382,25 @@ export async function startAdminServer({
     throw new Error("Admin read and write tokens are required");
   }
   store = store ?? (await createProductionStore(config));
-  const readAuthorized = (request) =>
+  const readChallenges = new Map();
+  const bearerAuthorized = (request) =>
     equalToken(
       request.headers.authorization?.replace(/^Bearer\s+/iu, ""),
       config.adminReadToken,
     );
+  const challengeAuthorized = (request, url, now = Date.now()) => {
+    const nonce = String(request.headers["x-ai-employee-challenge"] ?? "");
+    const proof = String(request.headers["x-ai-employee-proof"] ?? "");
+    const expiresAt = readChallenges.get(nonce);
+    if (!expiresAt || expiresAt < now || request.method !== "GET") return false;
+    readChallenges.delete(nonce);
+    const expected = createHmac("sha256", config.adminReadToken)
+      .update(`${nonce}\nGET\n${url.pathname}${url.search}`)
+      .digest("hex");
+    return equalToken(proof, expected);
+  };
   const writeAuthorized = (request) =>
-    readAuthorized(request) &&
+    bearerAuthorized(request) &&
     equalToken(
       request.headers["x-ai-employee-write-token"],
       config.adminWriteToken,
@@ -383,7 +422,21 @@ export async function startAdminServer({
       json(response, 404, { error: "not_found" });
       return;
     }
-    if (!readAuthorized(request)) {
+    if (request.method === "POST" && url.pathname === "/api/auth/challenge") {
+      const now = Date.now();
+      for (const [nonce, expiresAt] of readChallenges) {
+        if (expiresAt < now) readChallenges.delete(nonce);
+      }
+      if (readChallenges.size >= 1_000) {
+        json(response, 429, { error: "too_many_auth_challenges" });
+        return;
+      }
+      const nonce = randomBytes(32).toString("base64url");
+      readChallenges.set(nonce, now + 30_000);
+      json(response, 200, { nonce, expiresAt: new Date(now + 30_000).toISOString() });
+      return;
+    }
+    if (!bearerAuthorized(request) && !challengeAuthorized(request, url)) {
       json(response, 401, { error: "unauthorized" });
       return;
     }
@@ -487,15 +540,60 @@ export async function startAdminServer({
       if (request.method === "GET" && url.pathname === "/api/memories") {
         const status = url.searchParams.get("status") || undefined;
         const items = await store.listMemories({ status, limit: 100 });
+        const sourceTaskIds = [...new Set(items
+          .filter((memory) =>
+            memory.source_type === "dingtalk_message" && memory.source_version)
+          .map((memory) => memory.source_version))];
+        const sourceTasks = new Map(await Promise.all(sourceTaskIds.map(async (id) => {
+          try {
+            return [id, await store.getTask(id)];
+          } catch {
+            return [id, null];
+          }
+        })));
         const conflictReport = await store.memoryConflictMetrics();
         const conflicts = new Map(
           conflictReport.items.map((item) => [item.memoryId, item]),
         );
+        const memoriesById = new Map(items.map((memory) => [memory.id, memory]));
+        const referencedMemoryIds = [...new Set(items.flatMap((memory) => {
+          const conflict = conflicts.get(memory.id);
+          return conflict
+            ? [...conflict.conflictIds, ...conflict.duplicateIds]
+            : [];
+        }))].filter((id) => !memoriesById.has(id));
+        const referencedMemories = [];
+        if (typeof store.getMemory === "function") {
+          referencedMemories.push(...await Promise.all(
+            referencedMemoryIds.map((id) => store.getMemory(id)),
+          ));
+          for (const memory of referencedMemories) {
+            if (memory) memoriesById.set(memory.id, memory);
+          }
+        }
         json(response, 200, {
-          items: items.map((memory) => ({
-            ...memorySummary(memory),
-            conflict: conflicts.get(memory.id) ?? null,
-          })),
+          items: items.map((memory) => {
+            const conflict = conflicts.get(memory.id) ?? null;
+            return {
+              ...memorySummary(
+              memory,
+              memorySourceEvidence(memory, sourceTasks),
+              ),
+              conflict: conflict
+                ? {
+                    ...conflict,
+                    conflicts: conflict.conflictIds.flatMap((id) => {
+                      const existing = memoriesById.get(id);
+                      return existing ? [memorySummary(existing)] : [];
+                    }),
+                    duplicates: conflict.duplicateIds.flatMap((id) => {
+                      const existing = memoriesById.get(id);
+                      return existing ? [memorySummary(existing)] : [];
+                    }),
+                  }
+                : null,
+            };
+          }),
           conflictReport: {
             candidates: conflictReport.candidates,
             conflictCandidates: conflictReport.conflictCandidates,
@@ -802,10 +900,22 @@ export async function startAdminServer({
       if (request.method === "POST" && memoryDecision) {
         const body = await readJson(request);
         const id = decodeURIComponent(memoryDecision[1]);
+        if (body.decision === "confirmed" && body.supersedesId) {
+          throw Object.assign(new Error("memory_replacement_requires_explicit_action"), {
+            status: 400,
+          });
+        }
+        if (body.decision === "replaced" && !body.supersedesId) {
+          throw Object.assign(new Error("memory_replacement_target_required"), {
+            status: 400,
+          });
+        }
         const status = body.decision === "confirmed"
-          ? await store.confirmMemory(id, "admin-ui", new Date(), {
-              supersedesId: body.supersedesId ?? null,
-            })
+          ? await store.confirmMemory(id, "admin-ui", new Date())
+          : body.decision === "replaced"
+            ? await store.confirmMemory(id, "admin-ui", new Date(), {
+                supersedesId: body.supersedesId,
+              })
           : body.decision === "revoked"
             ? await store.revokeMemory(id, "admin-ui")
             : null;

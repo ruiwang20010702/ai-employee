@@ -5,6 +5,7 @@ import { basename, resolve } from "node:path";
 import { createDecipheriv } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { applyProductionConfigFile } from "../src/production-config-file.mjs";
+import { safeCodexEnvironment } from "../src/codex-environment.mjs";
 
 if (process.env.AI_EMPLOYEE_CONFIG_FILE) {
   await applyProductionConfigFile();
@@ -16,16 +17,32 @@ function required(name) {
   return value;
 }
 
-function databaseEnvironment(databaseUrl) {
+const allowedPostgresEnvironmentNames = [
+  "PGCHANNELBINDING",
+  "PGCONNECT_TIMEOUT",
+  "PGSSLCERT",
+  "PGSSLCRL",
+  "PGSSLCRLDIR",
+  "PGSSLKEY",
+  "PGSSLMAXPROTOCOLVERSION",
+  "PGSSLMINPROTOCOLVERSION",
+  "PGSSLROOTCERT",
+];
+
+function databaseEnvironment(databaseUrl, executable, source = process.env) {
   const parsed = new URL(databaseUrl);
+  const environment = safeCodexEnvironment(executable, source);
+  for (const name of allowedPostgresEnvironmentNames) {
+    if (typeof source[name] === "string") environment[name] = source[name];
+  }
   return {
-    ...process.env,
+    ...environment,
     PGHOST: parsed.hostname,
     PGPORT: parsed.port || "5432",
     PGDATABASE: parsed.pathname.slice(1),
     PGUSER: decodeURIComponent(parsed.username),
     PGPASSWORD: decodeURIComponent(parsed.password),
-    PGSSLMODE: process.env.DATABASE_SSL === "true" ? "verify-full" : "disable",
+    PGSSLMODE: source.DATABASE_SSL === "true" ? "verify-full" : "disable",
   };
 }
 
@@ -64,9 +81,13 @@ const decipher = createDecipheriv(
   iv,
 );
 decipher.setAuthTag(authTag);
-const restoreEnvironment = databaseEnvironment(required("DATABASE_URL"));
+const pgRestorePath = process.env.PG_RESTORE_PATH ?? "pg_restore";
+const restoreEnvironment = databaseEnvironment(
+  required("DATABASE_URL"),
+  pgRestorePath,
+);
 const restore = spawn(
-  process.env.PG_RESTORE_PATH ?? "pg_restore",
+  pgRestorePath,
   [
     "--dbname",
     restoreEnvironment.PGDATABASE,

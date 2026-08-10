@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 
 const execFileAsync = promisify(execFile);
-export const pluginVersion = "0.2.0";
+export const pluginVersion = "0.3.0";
 const statusResourceUri = "ui://ai-employee/status.html";
 const allowedAdminPaths = new Set([
   "/api/overview",
@@ -23,15 +24,15 @@ const statusPanelHtml = String.raw`<!doctype html>
     :root{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;color:#17211b;background:transparent}
     body{margin:0;padding:8px}.card{border:1px solid #dce5df;border-radius:16px;padding:16px;background:#fbfdfb}
     .head{display:flex;align-items:center;gap:10px}.dot{width:10px;height:10px;border-radius:50%;background:#d04a3a}.dot.ok{background:#238b57}
-    h2{font-size:16px;margin:0}.sub{margin:6px 0 14px;color:#66736b;font-size:13px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+    h2{font-size:16px;margin:0}.sub{margin:6px 0 14px;color:#66736b;font-size:13px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
     .metric{border-radius:12px;background:#eef4f0;padding:10px;font-size:12px;color:#66736b}.metric strong{display:block;margin-top:4px;font-size:20px;color:#17211b}
     a{display:inline-block;margin-top:14px;color:#176b46;text-decoration:none;font-weight:600}@media(max-width:420px){.grid{grid-template-columns:1fr}}
   </style>
 </head>
-<body><main class="card"><div class="head"><span id="dot" class="dot"></span><h2 id="title">AI 员工状态</h2></div><p id="sub" class="sub">正在读取…</p><div class="grid"><div class="metric">待审批草稿<strong id="drafts">—</strong></div><div class="metric">异常任务<strong id="errors">—</strong></div><div class="metric">授权项目<strong id="projects">—</strong></div></div><a href="http://127.0.0.1:9465" target="_blank" rel="noreferrer">打开完整管理台</a></main>
+<body><main class="card"><div class="head"><span id="dot" class="dot"></span><h2 id="title">AI 员工状态</h2></div><p id="sub" class="sub">正在读取…</p><div class="grid"><div class="metric">待审批草稿<strong id="drafts">—</strong></div><div class="metric">等待补充信息<strong id="waiting">—</strong></div><div class="metric">异常任务<strong id="errors">—</strong></div><div class="metric">授权项目<strong id="projects">—</strong></div></div><a href="http://127.0.0.1:9465" target="_blank" rel="noreferrer">打开完整管理台</a></main>
 <script>
   let rpcId=0;const pending=new Map();function request(method,params){return new Promise((resolve,reject)=>{const id=++rpcId;pending.set(id,{resolve,reject});window.parent.postMessage({jsonrpc:'2.0',id,method,params},'*')})}function notify(method,params){window.parent.postMessage({jsonrpc:'2.0',method,params},'*')}
-  function render(value){if(!value)return;document.getElementById('dot').classList.toggle('ok',Boolean(value.ready));document.getElementById('title').textContent=value.ready?'AI 员工运行正常':'AI 员工需要处理';document.getElementById('sub').textContent=(value.paused?'系统已暂停':'系统运行中')+' · '+(value.sendMode||'发送状态未知');document.getElementById('drafts').textContent=Number(value.taskCounts?.awaiting_approval||0);document.getElementById('errors').textContent=Number(value.taskCounts?.dead||0)+Number(value.taskCounts?.send_unknown||0);document.getElementById('projects').textContent=Number(value.projectCount||0)}
+  function render(value){if(!value)return;document.getElementById('dot').classList.toggle('ok',Boolean(value.ready));document.getElementById('title').textContent=value.ready?'AI 员工运行正常':'AI 员工需要处理';document.getElementById('sub').textContent=(value.paused?'系统已暂停':'系统运行中')+' · '+(value.sendMode||'发送状态未知');document.getElementById('drafts').textContent=Number(value.taskCounts?.awaiting_approval||0);document.getElementById('waiting').textContent=Number(value.taskCounts?.waiting_information||0);document.getElementById('errors').textContent=Number(value.taskCounts?.dead||0)+Number(value.taskCounts?.send_unknown||0);document.getElementById('projects').textContent=Number(value.projectCount||0)}
   window.addEventListener('message',event=>{if(event.source!==window.parent)return;const message=event.data;if(message?.id!=null&&pending.has(message.id)){const item=pending.get(message.id);pending.delete(message.id);message.error?item.reject(message.error):item.resolve(message.result);return}if(message?.method==='ui/notifications/tool-result')render(message.params?.structuredContent)});
   request('ui/initialize',{appInfo:{name:'ai-employee-status',version:'${pluginVersion}'},appCapabilities:{},protocolVersion:'2026-01-26'}).then(()=>notify('ui/notifications/initialized',{})).catch(()=>{document.getElementById('sub').textContent='宿主暂不支持状态卡片，请查看对话中的结构化结果'});
 </script></body></html>`;
@@ -92,13 +93,41 @@ export function createAdminReader({
       throw stableError("Unsupported AI employee admin path");
     }
     const token = await tokenReader();
-    const signal = AbortSignal.timeout(5_000);
+    let challengeResponse;
+    try {
+      challengeResponse = await request(`${baseUrl}/api/auth/challenge`, {
+        method: "POST",
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch {
+      throw stableError("AI employee admin service is unavailable");
+    }
+    if (!challengeResponse.ok) {
+      throw stableError("AI employee admin authentication challenge failed");
+    }
+    let nonce;
+    try {
+      ({ nonce } = await challengeResponse.json());
+    } catch {
+      throw stableError("AI employee admin returned invalid authentication data");
+    }
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(nonce ?? "")) {
+      throw stableError("AI employee admin returned invalid authentication data");
+    }
+    const proof = createHmac("sha256", token)
+      .update(`${nonce}\nGET\n${path}`)
+      .digest("hex");
     let response;
     try {
       response = await request(`${baseUrl}${path}`, {
         method: "GET",
-        headers: { authorization: `Bearer ${token}`, accept: "application/json" },
-        signal,
+        headers: {
+          accept: "application/json",
+          "x-ai-employee-challenge": nonce,
+          "x-ai-employee-proof": proof,
+        },
+        signal: AbortSignal.timeout(5_000),
       });
     } catch {
       throw stableError("AI employee admin service is unavailable");

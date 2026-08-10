@@ -227,9 +227,9 @@ export async function inspectReuseReadiness({
   if (!supportedPlatform) nextActions.push("使用 macOS 主机运行生产服务");
   if (!supportedNode) nextActions.push("安装 Node.js 22.5 或更高版本");
   if (missingCommands.length > 0) nextActions.push(`安装或配置：${missingCommands.join("、")}`);
-  if (!config.exists) nextActions.push("运行 ai-employee init 创建受保护配置");
+  if (!config.exists) nextActions.push("运行 ai-employee init --apply 创建受保护配置");
   else nextActions.push(...config.requiredEdits);
-  if (readyForPreflight) nextActions.push("运行 production:preflight 进行联网只读预检");
+  if (readyForPreflight) nextActions.push("运行 ai-employee preflight 进行联网只读预检");
 
   return {
     schema: "ai-employee-reuse/v1",

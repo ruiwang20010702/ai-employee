@@ -11,6 +11,18 @@
       "backwardCompatible": true,
       "rollback": "service_only",
       "evidence": "只增加可空字段、新表和条件索引；旧服务仍可使用原有字段"
+    },
+    "017_等待信息任务链.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only_with_state_guard",
+      "guard": "waiting_information_states_absent",
+      "evidence": "结构保留全部旧字段和状态；旧服务回退前必须确认等待信息状态及关联子任务为零，否则安全阻止回退"
+    },
+    "018_能力次数预算.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only_with_state_guard",
+      "guard": "capability_budget_target_support_required",
+      "evidence": "增加两个可空计划字段、独立预算账本和索引；数据库约束拒绝无预算绑定的计划进入可执行状态，已应用迁移时仅允许回退到同样支持第018号持久预算门禁的服务"
     }
   }
 }

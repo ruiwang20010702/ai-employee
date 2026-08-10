@@ -7,6 +7,7 @@ export const erasableTaskStatuses = Object.freeze([
   "cancelled_manual",
   "cancelled_operator",
   "expired",
+  "continued",
 ]);
 
 export const erasableWorkPlanStatuses = Object.freeze([
