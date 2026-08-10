@@ -26,7 +26,7 @@ const configPath =
 const launchAgentsDirectory = join(homedir(), "Library", "LaunchAgents");
 const domain = `gui/${process.getuid()}`;
 
-const services = [
+export const serviceDefinitions = [
   { component: "listener", label: "com.ai-employee.listener" },
   { component: "worker", label: "com.ai-employee.worker" },
   { component: "executor", label: "com.ai-employee.executor" },
@@ -50,6 +50,19 @@ const services = [
   },
 ];
 
+export function serviceScriptPath(service, root = projectRoot) {
+  if (service.component === "backup") {
+    return join(root, "scripts", "备份数据库.mjs");
+  }
+  if (service.component === "reconciliation") {
+    return join(root, "scripts", "消息覆盖对账.mjs");
+  }
+  if (service.component === "memory-source") {
+    return join(root, "scripts", "校验记忆来源.mjs");
+  }
+  return join(root, "src", "service-launcher.mjs");
+}
+
 function escapeXml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -59,14 +72,7 @@ function escapeXml(value) {
 }
 
 function plist({ component, label, intervalSeconds }) {
-  const script =
-    component === "backup"
-      ? join(projectRoot, "scripts", "备份数据库.mjs")
-      : component === "reconciliation"
-        ? join(projectRoot, "scripts", "消息覆盖对账.mjs")
-        : component === "memory-source"
-          ? join(projectRoot, "scripts", "校验记忆来源.mjs")
-      : join(projectRoot, "src", "service-launcher.mjs");
+  const script = serviceScriptPath({ component });
   const componentArgument =
     component === "backup" || component === "reconciliation" || component === "memory-source"
       ? ""
@@ -159,7 +165,7 @@ async function generate() {
       .filter((entry) => entry.isFile() && entry.name.endsWith(".log"))
       .map((entry) => chmod(join(logsDirectory, entry.name), 0o600)),
   );
-  for (const service of services) {
+  for (const service of serviceDefinitions) {
     const destination = join(generatedDirectory, `${service.label}.plist`);
     await writeFile(destination, plist(service), { mode: 0o600 });
   }
@@ -167,20 +173,20 @@ async function generate() {
     JSON.stringify({
       generatedDirectory,
       configPath,
-      services: services.map((service) => service.label),
+      services: serviceDefinitions.map((service) => service.label),
     }),
   );
 }
 
 export async function restoreLaunchAgents({
-  serviceDefinitions = services,
+  serviceDefinitions: definitions = serviceDefinitions,
   destinationDirectory = launchAgentsDirectory,
   previous = new Map(),
   runLaunchctl = execFileAsync,
   launchDomain = domain,
 } = {}) {
   const failedLabels = [];
-  for (const service of [...serviceDefinitions].reverse()) {
+  for (const service of [...definitions].reverse()) {
     const filename = `${service.label}.plist`;
     const destination = join(destinationDirectory, filename);
     await runLaunchctl("/bin/launchctl", [
@@ -234,7 +240,7 @@ async function install() {
   );
   await mkdir(backupDirectory, { recursive: true, mode: 0o700 });
   const previous = new Map();
-  for (const service of services) {
+  for (const service of serviceDefinitions) {
     const filename = `${service.label}.plist`;
     const destination = join(launchAgentsDirectory, filename);
     const exists = await stat(destination).then(() => true).catch(() => false);
@@ -246,7 +252,7 @@ async function install() {
   }
 
   try {
-    for (const service of services) {
+    for (const service of serviceDefinitions) {
       const filename = `${service.label}.plist`;
       const source = join(generatedDirectory, filename);
       const destination = join(launchAgentsDirectory, filename);
@@ -282,7 +288,7 @@ async function install() {
 }
 
 async function uninstall() {
-  for (const service of services) {
+  for (const service of serviceDefinitions) {
     const destination = join(
       launchAgentsDirectory,
       `${service.label}.plist`,
@@ -295,7 +301,7 @@ async function uninstall() {
   }
   console.log(
     JSON.stringify({
-      unloaded: services.map((service) => service.label),
+      unloaded: serviceDefinitions.map((service) => service.label),
       note: "plist files were retained for recoverability",
     }),
   );

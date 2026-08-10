@@ -7,6 +7,7 @@ import {
   readdir,
   rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -70,12 +71,15 @@ function packageFileGate(files) {
     "package.json",
     "README.md",
     "docs/产品需求文档.md",
+    "docs/完成度矩阵.md",
     "scripts/初始化生产配置.mjs",
     "scripts/创建项目配置.mjs",
     "scripts/校验项目能力.mjs",
+    "scripts/运行完整测试.mjs",
     "scripts/验证复用安装.mjs",
     "db/migrations/016_隐私擦除墓碑.sql",
     "src/capability-policy.mjs",
+    "src/control-access.mjs",
     "src/privacy-erasure.mjs",
     "src/production-config-file.mjs",
     "plugins/ai-employee/.codex-plugin/plugin.json",
@@ -98,7 +102,25 @@ function packageFileGate(files) {
     /(?:^|\/)node_modules(?:\/|$)/u.test(path)
   ));
   assert(forbidden.length === 0, "Release package contains runtime or test data");
-  return paths.length;
+  return paths;
+}
+
+async function verifyPortableContent(packageDirectory, paths) {
+  const textExtensions = new Set([
+    ".js", ".json", ".md", ".mjs", ".sql", ".yaml", ".yml",
+  ]);
+  const candidates = paths.filter((path) =>
+    textExtensions.has(path.slice(path.lastIndexOf("."))),
+  );
+  for (const path of candidates) {
+    const content = await readFile(join(packageDirectory, path), "utf8");
+    assert(
+      !/\/Users\/[^/\s"']+\//u.test(content) &&
+      !/[A-Za-z]:\\Users\\[^\\\s"']+\\/u.test(content),
+      `Release package contains a user-specific home path: ${path}`,
+    );
+  }
+  return candidates.length;
 }
 
 async function verifyInstalledSources(packageDirectory) {
@@ -144,7 +166,10 @@ async function verifyInstalledPlugin(packageDirectory) {
     skill.includes("本插件只读") && skill.includes("不批准、拒绝、发送、执行"),
     "Installed Codex plugin lost its read-only boundary",
   );
-  return packageValidation.checkedDistributionFiles;
+  return {
+    checkedFiles: packageValidation.checkedDistributionFiles,
+    version: manifest.version,
+  };
 }
 
 export async function verifyReusableInstallation({
@@ -176,7 +201,8 @@ export async function verifyReusableInstallation({
       basename(packResult[0].filename) === packResult[0].filename,
       "npm pack returned invalid package metadata",
     );
-    const fileCount = packageFileGate(packResult[0].files ?? []);
+    const packageFiles = packageFileGate(packResult[0].files ?? []);
+    const fileCount = packageFiles.length;
     const tarball = join(packDirectory, packResult[0].filename);
     await access(tarball);
 
@@ -201,10 +227,15 @@ export async function verifyReusableInstallation({
     );
     assert(installedMetadata.name === packageName, "Installed package identity changed");
     assert(installedMetadata.version === packResult[0].version, "Installed package version changed");
-    const [sourceCount, pluginFileCount] = await Promise.all([
+    const [sourceCount, pluginValidation, portableContentFiles] = await Promise.all([
       verifyInstalledSources(packageDirectory),
       verifyInstalledPlugin(packageDirectory),
+      verifyPortableContent(packageDirectory, packageFiles),
     ]);
+    assert(
+      installedMetadata.version === pluginValidation.version,
+      "Installed package and Codex plugin versions are inconsistent",
+    );
 
     const configPath = join(runtimeDirectory, "production.json");
     const initializeScript = join(packageDirectory, "scripts", "初始化生产配置.mjs");
@@ -222,6 +253,15 @@ export async function verifyReusableInstallation({
       "Generated admin tokens are invalid or not independent",
     );
     assert(config.GBRAIN_PATH === "gbrain", "Generated production config is missing gbrain runtime path");
+    for (const key of [
+      "AI_EMPLOYEE_TENANT_ID",
+      "AI_EMPLOYEE_APPROVER",
+      "DINGTALK_TARGET_USER_IDS",
+      "DINGTALK_TARGET_GROUP_IDS",
+      "DINGTALK_SELF_USER_ID",
+    ]) {
+      assert(config[key] === "", `Generated production config is unsafe by default: ${key}`);
+    }
     let refusedOverwrite = false;
     try {
       await run(process.execPath, [initializeScript, "--output", configPath]);
@@ -229,6 +269,17 @@ export async function verifyReusableInstallation({
       refusedOverwrite = true;
     }
     assert(refusedOverwrite, "Production config initializer overwrote an existing file");
+
+    Object.assign(config, {
+      AI_EMPLOYEE_TENANT_ID: "reuse-tenant",
+      AI_EMPLOYEE_APPROVER: "reuse-operator",
+      DINGTALK_TARGET_USER_IDS: "reuse-target-user",
+      DINGTALK_TARGET_GROUP_IDS: "",
+      DINGTALK_SELF_USER_ID: "reuse-self-user",
+    });
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, {
+      mode: 0o600,
+    });
 
     await run("/usr/bin/git", ["-C", projectDirectory, "init"]);
     const projectScript = join(packageDirectory, "scripts", "创建项目配置.mjs");
@@ -272,7 +323,9 @@ export async function verifyReusableInstallation({
       package: `${packageName}@${installedMetadata.version}`,
       packageFiles: fileCount,
       checkedSourceModules: sourceCount,
-      checkedPluginFiles: pluginFileCount,
+      checkedPluginFiles: pluginValidation.checkedFiles,
+      checkedPortableContentFiles: portableContentFiles,
+      versionAligned: true,
       configMode: "600",
       projectMode: "600",
       overwriteProtection: true,

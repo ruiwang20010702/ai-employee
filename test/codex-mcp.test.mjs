@@ -10,6 +10,7 @@ import {
   adminBaseUrl,
   createAdminReader,
   createMcpHandler,
+  pluginVersion,
   runStdioServer,
 } from "../plugins/ai-employee/scripts/mcp-server.mjs";
 
@@ -165,6 +166,7 @@ test("stdio 传输完成初始化、工具枚举并稳定返回协议错误", as
   await running;
   const messages = text.trim().split("\n").map(JSON.parse);
   assert.equal(messages[0].result.serverInfo.name, "ai-employee");
+  assert.equal(messages[0].result.serverInfo.version, pluginVersion);
   assert.equal(messages[1].result.tools.length, 7);
   assert.equal(messages[2].error.code, -32601);
 });

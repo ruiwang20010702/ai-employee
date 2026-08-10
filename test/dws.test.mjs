@@ -165,7 +165,7 @@ test("群聊监听只保留白名单群中的 @我 消息", async () => {
                 createTime: "2026-07-31 10:00:00",
                 sender: "测试用户",
                 senderOpenDingTalkId: "open-user-1",
-                content: "@王睿 帮忙看下",
+                content: "@负责人 帮忙看下",
               },
             ],
           },

@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 
 const execFileAsync = promisify(execFile);
+export const pluginVersion = "0.2.0";
 const statusResourceUri = "ui://ai-employee/status.html";
 const allowedAdminPaths = new Set([
   "/api/overview",
@@ -32,7 +33,7 @@ const statusPanelHtml = String.raw`<!doctype html>
   let rpcId=0;const pending=new Map();function request(method,params){return new Promise((resolve,reject)=>{const id=++rpcId;pending.set(id,{resolve,reject});window.parent.postMessage({jsonrpc:'2.0',id,method,params},'*')})}function notify(method,params){window.parent.postMessage({jsonrpc:'2.0',method,params},'*')}
   function render(value){if(!value)return;document.getElementById('dot').classList.toggle('ok',Boolean(value.ready));document.getElementById('title').textContent=value.ready?'AI 员工运行正常':'AI 员工需要处理';document.getElementById('sub').textContent=(value.paused?'系统已暂停':'系统运行中')+' · '+(value.sendMode||'发送状态未知');document.getElementById('drafts').textContent=Number(value.taskCounts?.awaiting_approval||0);document.getElementById('errors').textContent=Number(value.taskCounts?.dead||0)+Number(value.taskCounts?.send_unknown||0);document.getElementById('projects').textContent=Number(value.projectCount||0)}
   window.addEventListener('message',event=>{if(event.source!==window.parent)return;const message=event.data;if(message?.id!=null&&pending.has(message.id)){const item=pending.get(message.id);pending.delete(message.id);message.error?item.reject(message.error):item.resolve(message.result);return}if(message?.method==='ui/notifications/tool-result')render(message.params?.structuredContent)});
-  request('ui/initialize',{appInfo:{name:'ai-employee-status',version:'0.1.0'},appCapabilities:{},protocolVersion:'2026-01-26'}).then(()=>notify('ui/notifications/initialized',{})).catch(()=>{document.getElementById('sub').textContent='宿主暂不支持状态卡片，请查看对话中的结构化结果'});
+  request('ui/initialize',{appInfo:{name:'ai-employee-status',version:'${pluginVersion}'},appCapabilities:{},protocolVersion:'2026-01-26'}).then(()=>notify('ui/notifications/initialized',{})).catch(()=>{document.getElementById('sub').textContent='宿主暂不支持状态卡片，请查看对话中的结构化结果'});
 </script></body></html>`;
 
 function stableError(message) {
@@ -255,7 +256,7 @@ export function createMcpHandler({ readAdmin = createAdminReader() } = {}) {
       return {
         protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
-        serverInfo: { name: "ai-employee", version: "0.1.0" },
+        serverInfo: { name: "ai-employee", version: pluginVersion },
         instructions: "只读查看本机 AI 员工。审批、发送、执行和权限变更必须进入管理台并遵守原有门禁。",
       };
     }

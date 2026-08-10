@@ -14,12 +14,18 @@ import { loadProjectManifests } from "./project-manifests.mjs";
 import {
   buildDecisionReviewQueue,
   decisionSha256,
+  draftSha256,
   evaluateDecisionQuality,
   evaluateDecisionQualityBreakdown,
+  createStructuredDecisionReviewNote,
+  isDecisionResponseReviewUsable,
+  isDraftAssessmentCurrent,
+  summarizeDecisionDisagreementReasons,
   evaluateDecisionReviewCoverage,
 } from "./decision-quality.mjs";
 import { safeCommandEnvironment } from "./controlled-command-runner.mjs";
 import { isMainModule } from "./main-module.mjs";
+import { safeErrorCode } from "./logging.mjs";
 import { buildPlanTakeover } from "./plan-takeover.mjs";
 import { validatePrivacySelector } from "./privacy-erasure.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
@@ -78,21 +84,25 @@ async function readJson(request, maxBytes = 65_536) {
 
 function taskSummary(task, review = null) {
   const draft = String(task.result?.reply ?? "");
+  const responseReviewUsable = isDecisionResponseReviewUsable(review);
   return {
     id: task.id,
     status: task.status,
     senderName: task.payload?.senderName ?? null,
     contentPreview: String(task.payload?.content ?? "").slice(0, 180),
     draft,
-    draftSha256: createHash("sha256").update(draft).digest("hex"),
+    draftSha256: draftSha256(draft),
     decisionSha256: decisionSha256(task.result),
     shouldReply: task.result?.shouldReply ?? null,
     riskLevel: task.result?.riskLevel ?? null,
     reason: task.result?.reason ?? null,
     expectedShouldReply:
-      review?.decisionCurrent === false ? null : review?.expectedShouldReply ?? null,
+      responseReviewUsable ? review.expectedShouldReply : null,
+    responseReviewUsable,
+    draftReviewCurrent: isDraftAssessmentCurrent(review),
     reviewedAt: review?.updatedAt ?? null,
     attempts: task.attempts,
+    failureCode: task.last_error ? safeErrorCode(task.last_error) : null,
     createdAt: task.created_at,
     updatedAt: task.updated_at,
   };
@@ -516,7 +526,10 @@ export async function startAdminServer({
         ]);
         const report = evaluateDecisionQuality(reviews, {
           minimumSamples: config.shadowMinimumSamples,
+          minimumReplyAccuracy: config.shadowMinimumReplyAccuracy,
           minimumNoReplyAccuracy: config.shadowMinimumNoReplyAccuracy,
+          minimumDraftSamples: config.shadowMinimumDraftSamples,
+          minimumDraftUsability: config.shadowMinimumDraftUsability,
         });
         const coverage = evaluateDecisionReviewCoverage(tasks, reviews, {
           targetGroupIds: config.targetGroupIds,
@@ -534,8 +547,9 @@ export async function startAdminServer({
           breakdown: evaluateDecisionQualityBreakdown(reviews, {
             targetGroupIds: config.targetGroupIds,
           }),
-          queue: queue.map(({ task, priority, priorityReasons, selectionKind }) => ({
-            ...taskSummary(task),
+          disagreementReasons: summarizeDecisionDisagreementReasons(reviews),
+          queue: queue.map(({ task, existingReview, priority, priorityReasons, selectionKind }) => ({
+            ...taskSummary(task, existingReview),
             reviewContent: String(task.payload?.content ?? "").slice(0, 4_000),
             priority,
             priorityReasons,
@@ -677,9 +691,29 @@ export async function startAdminServer({
         if (!equalToken(body.decisionSha256, currentSummary.decisionSha256)) {
           throw Object.assign(new Error("decision_changed_review_again"), { status: 409 });
         }
-        const note = String(body.note ?? "").trim();
-        if (body.expectedShouldReply !== current.result?.shouldReply && !note) {
-          throw Object.assign(new Error("note_required_for_disagreement"), { status: 400 });
+        const draftApplicable =
+          current.result?.shouldReply === true &&
+          body.expectedShouldReply === true &&
+          String(current.result?.reply ?? "").trim().length > 0;
+        if (
+          draftApplicable &&
+          !equalToken(body.draftSha256, currentSummary.draftSha256)
+        ) {
+          throw Object.assign(new Error("draft_changed_review_again"), { status: 409 });
+        }
+        let note;
+        try {
+          note = createStructuredDecisionReviewNote({
+            predictedShouldReply: current.result?.shouldReply,
+            expectedShouldReply: body.expectedShouldReply,
+            draft: current.result?.reply ?? "",
+            responseReasonCode: body.responseReasonCode ?? null,
+            draftAssessment: body.draftAssessment ?? null,
+            draftReasonCode: body.draftReasonCode ?? null,
+            detail: body.detail ?? "",
+          });
+        } catch {
+          throw Object.assign(new Error("invalid_review_metadata"), { status: 400 });
         }
         const review = await store.upsertDecisionReview(taskId, {
           expectedShouldReply: body.expectedShouldReply,

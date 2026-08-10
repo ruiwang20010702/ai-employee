@@ -49,6 +49,16 @@ function commaSeparated(name, fallback = "") {
     .filter(Boolean);
 }
 
+function assertConfiguredIdentifier(name, value, { required = true } = {}) {
+  if (!value) {
+    if (required) throw new Error(`${name} is required in production mode`);
+    return;
+  }
+  if (/^(?:replace_with|change_me)(?:_|$)/iu.test(value)) {
+    throw new Error(`${name} still contains a placeholder`);
+  }
+}
+
 export function loadConfig({
   requireTargets = true,
   production = false,
@@ -73,6 +83,7 @@ export function loadConfig({
   const dataKey = process.env.AI_EMPLOYEE_DATA_KEY?.trim() || null;
   const tenantId = process.env.AI_EMPLOYEE_TENANT_ID?.trim() || null;
   const selfUserId = process.env.DINGTALK_SELF_USER_ID?.trim() || null;
+  const approver = process.env.AI_EMPLOYEE_APPROVER?.trim() || null;
   if (production && !databaseUrl) {
     throw new Error("DATABASE_URL is required in production mode");
   }
@@ -81,6 +92,19 @@ export function loadConfig({
   }
   if (production && !tenantId) {
     throw new Error("AI_EMPLOYEE_TENANT_ID is required in production mode");
+  }
+  if (production) {
+    assertConfiguredIdentifier("AI_EMPLOYEE_TENANT_ID", tenantId);
+    assertConfiguredIdentifier("AI_EMPLOYEE_APPROVER", approver);
+    assertConfiguredIdentifier("DINGTALK_SELF_USER_ID", selfUserId, {
+      required: requireTargets,
+    });
+    for (const value of targetUserIds) {
+      assertConfiguredIdentifier("DINGTALK_TARGET_USER_IDS", value);
+    }
+    for (const value of targetGroupIds) {
+      assertConfiguredIdentifier("DINGTALK_TARGET_GROUP_IDS", value);
+    }
   }
   if (production && requireTargets && !selfUserId) {
     throw new Error(
@@ -188,7 +212,7 @@ export function loadConfig({
   return {
     targetUserIds,
     targetGroupIds,
-    approver: process.env.AI_EMPLOYEE_APPROVER?.trim() || "local-user",
+    approver: approver ?? "local-user",
     selfUserId,
     dwsPath: process.env.DWS_PATH ?? join(homedir(), ".local/bin/dws"),
     dwsMock: process.env.DWS_MOCK === "true",
@@ -284,9 +308,21 @@ export function loadConfig({
       "AI_EMPLOYEE_SHADOW_MIN_SAMPLES",
       100,
     ),
+    shadowMinimumReplyAccuracy: fraction(
+      "AI_EMPLOYEE_SHADOW_MIN_REPLY_ACCURACY",
+      0.95,
+    ),
     shadowMinimumNoReplyAccuracy: fraction(
       "AI_EMPLOYEE_SHADOW_MIN_NO_REPLY_ACCURACY",
       0.95,
+    ),
+    shadowMinimumDraftSamples: positiveInteger(
+      "AI_EMPLOYEE_SHADOW_MIN_DRAFT_SAMPLES",
+      30,
+    ),
+    shadowMinimumDraftUsability: fraction(
+      "AI_EMPLOYEE_SHADOW_MIN_DRAFT_USABILITY",
+      0.9,
     ),
     capabilities,
     debugContent: process.env.AI_EMPLOYEE_DEBUG_CONTENT === "true",

@@ -12,7 +12,12 @@ import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
 import { buildPlanResultDraft } from "./plan-result-notification.mjs";
 import { buildOperationalMetrics } from "./operational-metrics.mjs";
 import { messageCoverageCheckpointKey } from "./message-reconciliation.mjs";
-import { decisionSha256 } from "./decision-quality.mjs";
+import {
+  decisionSha256,
+  draftSha256,
+  parseDraftAssessment,
+  parseDraftSha256,
+} from "./decision-quality.mjs";
 import {
   availabilityBucket,
   buildAvailabilityMetrics,
@@ -1862,6 +1867,10 @@ export class Store {
       const payload = row.payload_json
         ? JSON.parse(this.cipher.decrypt(row.payload_json))
         : {};
+      const note = this.cipher.decrypt(row.note_ciphertext);
+      const currentDraft = String(result.reply ?? "");
+      const currentDraftSha256 = draftSha256(currentDraft);
+      const reviewedDraftSha256 = parseDraftSha256(note);
       return {
         id: row.id,
         taskId: row.task_id,
@@ -1874,11 +1883,17 @@ export class Store {
         decisionCurrent:
           row.decision_sha256 != null &&
           row.decision_sha256 === decisionSha256(result),
+        draftPresent: currentDraft.trim().length > 0,
+        currentDraftSha256,
+        draftCurrent: parseDraftAssessment(note) == null
+          ? null
+          : reviewedDraftSha256 != null &&
+            reviewedDraftSha256 === currentDraftSha256,
         senderName: payload.senderName ?? null,
         senderUserId: row.sender_user_id,
         conversationId: row.conversation_id,
         reviewer: row.reviewer,
-        note: this.cipher.decrypt(row.note_ciphertext),
+        note,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };

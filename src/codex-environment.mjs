@@ -43,5 +43,8 @@ export function safeCodexEnvironment(executable, source = process.env) {
     ].filter(Boolean).join(":"),
     CI: "1",
     NO_COLOR: "1",
+    TERM: source.TERM && source.TERM !== "dumb"
+      ? source.TERM
+      : "xterm-256color",
   };
 }

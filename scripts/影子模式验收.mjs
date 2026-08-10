@@ -32,7 +32,10 @@ try {
   ]);
   const quality = evaluateDecisionQuality(reviews, {
     minimumSamples: config.shadowMinimumSamples,
+    minimumReplyAccuracy: config.shadowMinimumReplyAccuracy,
     minimumNoReplyAccuracy: config.shadowMinimumNoReplyAccuracy,
+    minimumDraftSamples: config.shadowMinimumDraftSamples,
+    minimumDraftUsability: config.shadowMinimumDraftUsability,
   });
   quality.coverage = evaluateDecisionReviewCoverage(tasks, reviews, {
     targetGroupIds: config.targetGroupIds,

@@ -88,6 +88,7 @@ test("研究适配器使用只读 Codex 并删除临时明文", async (t) => {
   const argumentsText = await readFile(fake.argumentsRecord, "utf8");
   assert.match(argumentsText, /--sandbox read-only/u);
   assert.match(argumentsText, /--ask-for-approval never/u);
+  assert.match(argumentsText, /exec --skip-git-repo-check --ephemeral/u);
   assert.doesNotMatch(argumentsText, /完成任务|执行当前步骤/u);
   const temporaryOutput = await readFile(fake.outputPathRecord, "utf8");
   await assert.rejects(access(temporaryOutput), { code: "ENOENT" });

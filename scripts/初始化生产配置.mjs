@@ -36,7 +36,11 @@ export async function initializeProductionConfig({
   values.DWS_PATH = "dws";
   values.CODEX_PATH = "codex";
   values.GBRAIN_PATH = "gbrain";
-  values.AI_EMPLOYEE_APPROVER = "replace_with_operator_id";
+  values.AI_EMPLOYEE_TENANT_ID = "";
+  values.AI_EMPLOYEE_APPROVER = "";
+  values.DINGTALK_TARGET_USER_IDS = "";
+  values.DINGTALK_TARGET_GROUP_IDS = "";
+  values.DINGTALK_SELF_USER_ID = "";
 
   await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
   await writeFile(destination, `${JSON.stringify(values, null, 2)}\n`, {

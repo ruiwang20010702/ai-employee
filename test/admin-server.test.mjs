@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { startAdminServer } from "../src/admin-server.mjs";
 import { adminHtml } from "../src/admin-ui.mjs";
+import { draftSha256 } from "../src/decision-quality.mjs";
 
 test("管理台内嵌脚本可以被浏览器解析", () => {
   const script = adminHtml.match(
@@ -15,26 +16,46 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
 });
 
-test("判断质量页支持连续复核并保留分歧说明门槛", () => {
+test("判断质量页使用内嵌两步表单连续复核", () => {
   const script = adminHtml.match(
     /<script nonce="__NONCE__">([\s\S]*?)<\/script>/u,
   )?.[1];
   assert.ok(script);
   assert.match(adminHtml, /连续人工复核/u);
-  assert.match(adminHtml, /与 AI 一致时直接保存并进入下一条/u);
-  assert.match(script, /expected!==task\.shouldReply/u);
-  assert.match(script, /state\.view!==['"]quality['"]&&!confirm/u);
-  assert.match(script, /state\.qualitySession\.completed\+=1/u);
+  assert.match(adminHtml, /closed_loop/u);
+  assert.match(adminHtml, /responseReasonCode/u);
+  assert.match(adminHtml, /draftAssessment/u);
+  assert.match(adminHtml, /回应必要性/u);
+  assert.match(adminHtml, /草稿质量/u);
+  assert.match(adminHtml, /quality-response-reason/u);
+  assert.match(adminHtml, /quality-draft-reason/u);
+  assert.match(adminHtml, /quality-submit/u);
+  assert.match(adminHtml, /quality-detail/u);
+  assert.match(adminHtml, /aria-pressed/u);
+  assert.match(adminHtml, /建议回复准确率/u);
+  assert.match(adminHtml, /分歧原因/u);
+  assert.doesNotMatch(script, /MutationObserver/u);
+  assert.doesNotMatch(script, /function chooseReason/u);
+  assert.doesNotMatch(script, /prompt\('第 2 步/u);
+  assert.doesNotMatch(script, /review-reply|review-no-reply/u);
+  assert.match(script, /f\.expectedShouldReply=value===['"]reply['"]/u);
+  assert.match(script, /f\.completed\+=1/u);
+  assert.match(script, /body\.draftSha256=current\.draftSha256/u);
+  assert.match(script, /String\(current\.draft\|\|['"]['"]\)\.trim\(\)\.length>0/u);
+  assert.match(script, /current\.responseReviewUsable===true/u);
+  assert.match(script, /resumeDraft\?['"]draft['"]:['"]response['"]/u);
   assert.match(script, /state\.quality=await api\(['"]\/api\/quality['"]\)/u);
   assert.match(script, /aria-busy/u);
+  assert.match(adminHtml, /标注只用于评估，不会批准草稿，也不会触发发送/u);
+  assert.match(adminHtml, /请到“判断质量”统一标注/u);
 });
 
-function fixture() {
+function fixture({ taskReply = "准备回复" } = {}) {
   let paused = false;
   const scopedPauses = [];
   const decisions = [];
   const reviews = [];
-  const task = { id: "task_1", status: "awaiting_approval", payload: { senderName: "测试人", content: "需要回复" }, result: { shouldReply: true, reply: "准备回复", riskLevel: "medium", reason: "需要确认", decisionSource: "model", decisionKind: "reply" }, created_at: "2026-08-04T00:00:00Z", updated_at: "2026-08-04T00:00:00Z" };
+  const task = { id: "task_1", status: "awaiting_approval", payload: { senderName: "测试人", content: "需要回复" }, result: { shouldReply: true, reply: taskReply, riskLevel: "medium", reason: "需要确认", decisionSource: "model", decisionKind: "reply" }, created_at: "2026-08-04T00:00:00Z", updated_at: "2026-08-04T00:00:00Z" };
   const plan = { id: "plan_1", project_id: "project_1", objective: "发布修复", max_level: "L4", status: "awaiting_approval", policy_decision: "REQUIRE_APPROVAL", plan_hash: "0123456789abcdef", plan: { steps: [{ id: "step_1", capability: "production_deploy", description: "部署已审核版本", workingDirectory: "/tmp/project", inputs: { commandId: "deploy" }, expectedEvidence: "健康检查通过", rollback: "执行回滚命令" }] }, updated_at: "2026-08-04T00:00:00Z" };
   const store = {
     async health() {
@@ -142,6 +163,9 @@ function fixture() {
         predictedShouldReply: task.result.shouldReply,
         riskLevel: task.result.riskLevel,
         decisionSource: task.result.decisionSource,
+        decisionCurrent: true,
+        draftPresent: String(task.result.reply ?? "").trim().length > 0,
+        currentDraftSha256: draftSha256(task.result.reply ?? ""),
         senderName: task.payload.senderName,
         senderUserId: "contact_1",
         conversationId: "direct_1",
@@ -457,6 +481,7 @@ test("任务审批绑定当前草稿哈希", async () => {
 test("管理台可以审计关闭死亡任务而不触发重试", async () => {
   const { store, config, decisions, task } = fixture();
   task.status = "dead";
+  task.last_error = "Codex draft execution failed [exit=1 private=不能返回]";
   const service = await startAdminServer({ store, config });
   const { port } = service.server.address();
   const headers = {
@@ -465,6 +490,13 @@ test("管理台可以审计关闭死亡任务而不触发重试", async () => {
     "content-type": "application/json",
   };
   try {
+    const tasksResponse = await fetch(
+      `http://127.0.0.1:${port}/api/tasks`,
+      { headers },
+    );
+    const tasksBody = await tasksResponse.json();
+    assert.equal(tasksBody.items[0].failureCode, "codex_execution_failed");
+    assert.equal(JSON.stringify(tasksBody).includes("不能返回"), false);
     const response = await fetch(
       `http://127.0.0.1:${port}/api/tasks/task_1/dismiss`,
       { method: "POST", headers, body: JSON.stringify({ reason: "确认不再重试" }) },
@@ -605,11 +637,70 @@ test("人工判断标注绑定当前决策哈希", async () => {
     assert.deepEqual(pendingReport.queue[0].priorityReasons, ["模型判断"]);
     const taskResponse = await fetch(`${base}/api/tasks`, { headers });
     const task = (await taskResponse.json()).items[0];
+    const incompleteDraftReview = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedShouldReply: true,
+        decisionSha256: task.decisionSha256,
+        draftSha256: task.draftSha256,
+        draftAssessment: "needs_revision",
+      }),
+    });
+    assert.equal(incompleteDraftReview.status, 400);
+    const legacyDraftBypass = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedShouldReply: true,
+        decisionSha256: task.decisionSha256,
+        draftSha256: task.draftSha256,
+        note: "旧版自由文本不能代替草稿质量评价",
+      }),
+    });
+    assert.equal(legacyDraftBypass.status, 400);
+    const staleDraft = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedShouldReply: true,
+        decisionSha256: task.decisionSha256,
+        draftSha256: "stale",
+        draftAssessment: "usable",
+      }),
+    });
+    assert.equal(staleDraft.status, 409);
+    const usableDraftReview = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedShouldReply: true,
+        decisionSha256: task.decisionSha256,
+        draftSha256: task.draftSha256,
+        draftAssessment: "usable",
+      }),
+    });
+    assert.equal(usableDraftReview.status, 200);
+    const draftQuality = await fetch(`${base}/api/quality`, { headers }).then(
+      (response) => response.json(),
+    );
+    assert.equal(draftQuality.draftQuality.reviewed, 1);
+    assert.equal(draftQuality.draftQuality.usabilityRate, 1);
     const stale = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ expectedShouldReply: false, decisionSha256: "stale" }) });
     assert.equal(stale.status, 409);
     const missingNote = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ expectedShouldReply: false, decisionSha256: task.decisionSha256 }) });
     assert.equal(missingNote.status, 400);
-    const reviewed = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ expectedShouldReply: false, decisionSha256: task.decisionSha256, note: "这条消息已经闭环" }) });
+    const legacyDisagreementBypass = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedShouldReply: false,
+        decisionSha256: task.decisionSha256,
+        note: "旧版自由文本不能代替回应分歧原因",
+      }),
+    });
+    assert.equal(legacyDisagreementBypass.status, 400);
+    const reviewed = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ expectedShouldReply: false, decisionSha256: task.decisionSha256, responseReasonCode: "closed_loop", detail: "这条消息已经闭环" }) });
     assert.equal(reviewed.status, 200);
     assert.equal(decisions.at(-1).type, "review");
     const quality = await fetch(`${base}/api/quality`, { headers });
@@ -619,12 +710,49 @@ test("人工判断标注绑定当前决策哈希", async () => {
     assert.equal(report.reviewed, 1);
     assert.equal(report.gates.coverage, true);
     assert.equal(report.queue.length, 0);
+    assert.equal(report.breakdown[0].replyAccuracy, 0);
+    assert.deepEqual(report.disagreementReasons, [
+      { code: "closed_loop", label: "闭环消息误触发", count: 1 },
+    ]);
     assert.equal(
       report.breakdown.some(
         (row) => row.dimension === "判断来源" && row.label === "model",
       ),
       true,
     );
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("AI 判断应回复但没有生成草稿时不强迫虚构草稿评价", async () => {
+  const { store, config } = fixture({ taskReply: "" });
+  const service = await startAdminServer({ store, config });
+  const { port } = service.server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const headers = {
+    authorization: "Bearer read-secret",
+    "x-ai-employee-write-token": "write-secret",
+    "content-type": "application/json",
+  };
+  try {
+    const task = await fetch(`${base}/api/tasks`, { headers })
+      .then((response) => response.json())
+      .then((body) => body.items[0]);
+    const reviewed = await fetch(`${base}/api/tasks/task_1/review`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        expectedShouldReply: true,
+        decisionSha256: task.decisionSha256,
+      }),
+    });
+    assert.equal(reviewed.status, 200);
+    const quality = await fetch(`${base}/api/quality`, { headers })
+      .then((response) => response.json());
+    assert.equal(quality.reviewed, 1);
+    assert.equal(quality.draftQuality.reviewed, 0);
+    assert.equal(quality.queue.length, 0);
   } finally {
     await service.stop("test");
   }

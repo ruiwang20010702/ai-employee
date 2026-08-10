@@ -117,6 +117,12 @@ jobs:
           export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
           npm run db:backup
           npm run db:migrate
+      - name: 迁移后严格诊断与合成草稿探针
+        run: |
+          cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
+          export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
+          npm run production:doctor
+          npm run production:codex-probe
       - name: 标记即将切换常驻服务
         run: echo "AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED=true" >> "$GITHUB_ENV"
       - name: 安装并重启常驻服务
@@ -130,7 +136,7 @@ jobs:
         run: |
           cd "$AI_EMPLOYEE_RELEASE_DIRECTORY"
           export AI_EMPLOYEE_CONFIG_FILE="$AI_EMPLOYEE_RELEASE_DIRECTORY/.runtime/production.json"
-          npm run production:verify
+          npm run production:service-verify
       - name: 固定当前成功版本
         run: |
           node "$GITHUB_WORKSPACE/.deployment-controller/scripts/准备版本化发布.mjs" activate \
@@ -148,7 +154,7 @@ jobs:
             npm run service:install
             node "$GITHUB_WORKSPACE/.deployment-controller/scripts/清理版本外常驻服务.mjs" \
               --release "$AI_EMPLOYEE_PREVIOUS_RELEASE"
-            npm run production:verify
+            npm run production:service-verify
           else
             echo "常驻服务尚未切换，或没有可验证的上一版本；无需执行服务回退。"
           fi

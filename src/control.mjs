@@ -1,5 +1,6 @@
 import { loadConfig } from "./config.mjs";
 import { createProductionStore } from "./production-store.mjs";
+import { controlStoreOptions } from "./control-access.mjs";
 import { applyProductionConfigFile } from "./production-config-file.mjs";
 import { readStdin } from "./stdin.mjs";
 import { readFile, unlink } from "node:fs/promises";
@@ -9,8 +10,11 @@ import { assessWorkPlan } from "./work-plan.mjs";
 import { createControlledWorkAdapters } from "./work-adapters.mjs";
 import { executeWorkPlan } from "./work-executor.mjs";
 import {
+  createStructuredDecisionReviewNote,
   evaluateDecisionQuality,
+  evaluateDecisionQualityDiagnostics,
   evaluateDecisionReviewCoverage,
+  summarizeDecisionDisagreementReasons,
 } from "./decision-quality.mjs";
 import {
   createMemoryExport,
@@ -29,10 +33,30 @@ if (process.env.AI_EMPLOYEE_CONFIG_FILE) {
   await applyProductionConfigFile();
 }
 const config = loadConfig({ requireTargets: false, production: true });
-const store = await createProductionStore(config);
+const store = await createProductionStore(config, controlStoreOptions(command));
 
 function print(value) {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function parseReviewOptions(tokens) {
+  const names = new Map([
+    ["--response-reason", "responseReasonCode"],
+    ["--draft", "draftAssessment"],
+    ["--draft-reason", "draftReasonCode"],
+    ["--detail", "detail"],
+  ]);
+  const options = {};
+  for (let index = 0; index < tokens.length; index += 2) {
+    const field = names.get(tokens[index]);
+    const value = tokens[index + 1];
+    if (!field || value == null || String(value).startsWith("--")) {
+      throw new Error("Invalid review-label options");
+    }
+    if (Object.hasOwn(options, field)) throw new Error("Duplicate review-label option");
+    options[field] = value;
+  }
+  return options;
 }
 
 async function refreshMemorySource(memory) {
@@ -396,12 +420,23 @@ try {
   } else if (command === "review-label") {
     const label = rest[0];
     if (!argument || !["reply", "no-reply"].includes(label)) {
-      throw new Error("Usage: control review-label <taskId> reply|no-reply [note]");
+      throw new Error("Usage: control review-label <taskId> reply|no-reply [--response-reason code] [--draft usable|needs_revision|unsafe] [--draft-reason code] [--detail text]");
     }
+    const task = await store.getTask(argument);
+    if (!task || typeof task.result?.shouldReply !== "boolean") {
+      throw new Error("Task has no completed reply decision");
+    }
+    const expectedShouldReply = label === "reply";
+    const note = createStructuredDecisionReviewNote({
+      predictedShouldReply: task.result.shouldReply,
+      expectedShouldReply,
+      draft: task.result.reply ?? "",
+      ...parseReviewOptions(rest.slice(1)),
+    });
     print(await store.upsertDecisionReview(argument, {
-      expectedShouldReply: label === "reply",
+      expectedShouldReply,
       reviewer: config.approver,
-      note: rest.slice(1).join(" "),
+      note,
     }));
   } else if (command === "review-report") {
     const [reviews, tasks] = await Promise.all([
@@ -410,12 +445,19 @@ try {
     ]);
     const quality = evaluateDecisionQuality(reviews, {
       minimumSamples: config.shadowMinimumSamples,
+      minimumReplyAccuracy: config.shadowMinimumReplyAccuracy,
       minimumNoReplyAccuracy: config.shadowMinimumNoReplyAccuracy,
+      minimumDraftSamples: config.shadowMinimumDraftSamples,
+      minimumDraftUsability: config.shadowMinimumDraftUsability,
     });
     quality.coverage = evaluateDecisionReviewCoverage(tasks, reviews, {
       targetGroupIds: config.targetGroupIds,
       minimumSamples: config.shadowMinimumSamples,
     });
+    quality.diagnostics = evaluateDecisionQualityDiagnostics(reviews, {
+      targetGroupIds: config.targetGroupIds,
+    });
+    quality.disagreementReasons = summarizeDecisionDisagreementReasons(reviews);
     quality.gates.coverage = quality.coverage.accepted;
     quality.accepted = Object.values(quality.gates).every(Boolean);
     print(quality);

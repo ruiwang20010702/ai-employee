@@ -100,6 +100,7 @@ export async function runCodexArtifact({
         "--ask-for-approval",
         "never",
         "exec",
+        "--skip-git-repo-check",
         "--ephemeral",
         "--sandbox",
         "read-only",

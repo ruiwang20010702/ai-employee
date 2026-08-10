@@ -74,10 +74,16 @@ export async function validateCodexPluginPackage({ root }) {
   const frontmatter = skill.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/u)?.[1];
   assert(frontmatter && /(?:^|\n)name:\s*ai-employee\s*(?:\n|$)/u.test(frontmatter), "Codex plugin skill metadata is invalid");
   assert(skill.includes("本插件只读") && skill.includes("不批准、拒绝、发送、执行"), "Codex plugin lost its read-only skill boundary");
-  await Promise.all([
-    access(join(pluginPath, "scripts", "mcp-server.mjs")),
+  const serverScriptPath = join(pluginPath, "scripts", "mcp-server.mjs");
+  const [, serverScript] = await Promise.all([
+    access(serverScriptPath),
+    readFile(serverScriptPath, "utf8"),
     access(join(pluginPath, "说明.md")),
   ]);
+  assert(
+    serverScript.includes(`export const pluginVersion = ${JSON.stringify(manifest.version)};`),
+    "Codex plugin runtime version does not match its manifest",
+  );
 
   return {
     valid: true,

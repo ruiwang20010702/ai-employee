@@ -24,6 +24,18 @@ test("production config initializer writes protected unique secrets and refuses 
   assert.equal(config.DWS_PATH, "dws");
   assert.equal(config.CODEX_PATH, "codex");
   assert.equal(config.GBRAIN_PATH, "gbrain");
+  assert.equal(config.AI_EMPLOYEE_TENANT_ID, "");
+  assert.equal(config.AI_EMPLOYEE_APPROVER, "");
+  assert.equal(config.DINGTALK_TARGET_USER_IDS, "");
+  assert.equal(config.DINGTALK_TARGET_GROUP_IDS, "");
+  assert.equal(config.DINGTALK_SELF_USER_ID, "");
+  assert.deepEqual(result.requiredEdits, [
+    "DATABASE_URL",
+    "AI_EMPLOYEE_TENANT_ID",
+    "DINGTALK_TARGET_USER_IDS or DINGTALK_TARGET_GROUP_IDS",
+    "DINGTALK_SELF_USER_ID",
+    "AI_EMPLOYEE_APPROVER",
+  ]);
 
   await assert.rejects(
     () => initializeProductionConfig({ outputPath: destination }),

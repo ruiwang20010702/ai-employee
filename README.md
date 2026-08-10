@@ -14,7 +14,7 @@
 | 连续消息合并 | 可用 | 默认安静 3 秒；相隔超过 2 分钟或超过 20 条会拆分任务 |
 | 判断是否回复 | 可用 | 明确闭环走硬规则，其余由 Codex 结合上下文复核 |
 | 基于授权的能力自述 | 可用 | 被问“能做什么”时不调用模型；只按当前开关和请求人的有效项目授权回答，群聊隐藏项目名称 |
-| 影子质量评估 | 可用 | 逐任务人工标注与不可变历史；至少 100 条、分层覆盖达标、“不回复准确率”达到 95% 且高风险错误回复建议为 0 才通过 |
+| 影子质量评估 | 可用 | 回应必要性与草稿质量分开标注并保留不可变历史；至少 100 条有效回应判断、30 条草稿评价、分层覆盖和双向准确率达标，且高风险错误回复建议为 0 才通过 |
 | 草稿生成 | 可用 | 独立 Worker、只读 Codex 沙箱 |
 | 人工审批与发送 | 可用、默认关闭 | 每条消息单次批准；未知结果不自动重发 |
 | 健康与指标 | 可用 | 进程心跳、真实 DWS 读取检查点、24 小时 SLO、管理台运营视图和 Prometheus 指标 |
@@ -47,7 +47,7 @@
 
 计划执行还受独立的全局开关 `work_plan_execution` 控制。项目清单授权、计划审批和全局执行开关三者缺一不可。影子模式强制要求该开关关闭。
 
-项目复用与正式记忆的简明说明见[能力清单与正式记忆](./docs/能力清单与正式记忆.md)。
+项目复用与正式记忆的简明说明见[能力清单与正式记忆](./docs/能力清单与正式记忆.md)；当前“已完成、未完成、还差什么”统一查看[完成度矩阵](./docs/完成度矩阵.md)。
 
 仓库同时提供[AI 员工 Codex 插件](./plugins/ai-employee/说明.md)和仓库级插件市场。安装后可以在 Codex 中查看实时健康、待审批草稿、工作计划、人工接管状态和授权能力，并可打开本机完整管理台。插件以 MCP stdio 运行，默认从 macOS 钥匙串读取管理只读令牌，只允许 5 个固定 GET 端点；没有审批、发送、执行、部署或扩权工具。状态卡片遵循 MCP Apps 标准，宿主不渲染组件时仍返回同一份结构化结果。`npm run codex:verify` 会在安装前验证市场路径、插件身份、MCP 配置和只读边界，不写个人 Codex 配置；安装和启用仍需单独确认。
 
@@ -126,25 +126,35 @@ AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run config:migrate-keychain -- --apply
 ```
 
-4. 先运行只读生产诊断。它检查配置、密钥、远程数据库 TLS、所需工具、Codex 登录与网络运行状态、项目能力清单、数据库连接和全部迁移版本及校验和，但不修改数据库。只要存在待迁移项或已应用迁移文件发生漂移，诊断就会在查询业务表前停止，并只返回稳定错误码和迁移文件名：
+4. 先运行迁移前只读预检。它检查配置、密钥、远程数据库 TLS、所需工具、Codex 登录与网络运行状态、项目能力清单、数据库连接和全部迁移版本及校验和，但允许把待迁移项作为明确计划列出：
+
+```bash
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run production:preflight
+```
+
+预检通过后先创建加密备份，再显式迁移数据库：
+
+```bash
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run db:backup
+
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run db:migrate
+```
+
+迁移后运行严格只读诊断；此时任何待迁移项或校验和漂移都会在查询业务表前停止：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run production:doctor
 ```
 
-`production:preflight` 是发布迁移前的只读预检入口：它同样核对迁移校验和，但允许把尚未应用的迁移作为明确计划列出，供后续备份和独立 `db:migrate` 步骤处理。运行时、`production:doctor` 和 `shadow:verify` 不允许待迁移状态。从迁移 015 起还必须在 `db/migrations/兼容性策略.json` 登记服务回退证据；声明仅回退服务版本的迁移如果包含删除、重命名、改变既有结构或新增无默认值必填列，会在数据库写入前失败。首次部署或升级草稿 Schema 后，迁移与诊断通过还应人工运行一次合成草稿探针。它会调用一次 Codex，只使用固定测试消息，不读取钉钉或数据库，也不展示和保存回复内容：
+`production:preflight` 允许列出待迁移项；运行时、`production:doctor` 和 `shadow:verify` 不允许待迁移状态。从迁移 015 起还必须在 `db/migrations/兼容性策略.json` 登记服务回退证据；声明仅回退服务版本的迁移如果包含删除、重命名、改变既有结构或新增无默认值必填列，会在数据库写入前失败。首次部署或升级草稿 Schema 后，迁移与诊断通过还应人工运行一次合成草稿探针。它会调用一次 Codex，只使用固定测试消息，不读取钉钉或数据库，也不展示和保存回复内容：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run production:codex-probe
-```
-
-探针通过后，再显式执行数据库迁移：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run db:migrate
 ```
 
 5. 安装并启动监听、Worker、默认休眠的计划执行器、健康检查、本机管理台、异常监测和每日备份：
@@ -154,7 +164,14 @@ AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run service:install
 ```
 
-6. 验证所有依赖和组件心跳：
+6. 先验证新版服务已经部署成功。这个检查会逐一核对 9 个 LaunchAgent 实际加载的脚本、工作目录和生产配置都精确属于目标不可变版本，同时要求健康进程、管理台、数据库、DWS、Codex、组件心跳、外部检查和消息覆盖均可用，并继续拒绝未知发送和过期执行租约；既有死亡任务会被如实报告，但不会把服务升级误判为失败：
+
+```bash
+AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
+  npm run production:service-verify
+```
+
+随后单独运行严格业务就绪检查。死亡任务、人工暂停或其他业务阻塞仍会让它失败，不能用服务部署成功代替：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
@@ -168,15 +185,17 @@ AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
 npm run shadow:verify
 ```
 
-在管理台“判断质量”中可以连续处理优先人工复核队列，并按私聊/群聊、联系人或群、判断来源查看误判；“消息草稿”仍支持逐条标注。与 AI 一致时直接保存并切换下一条，不一致时必须填写原因；提交期间两个选择会同时禁用，避免重复标注。页面只刷新质量数据，不触发整页闪烁。优先队列用于先发现高风险问题，不能替代覆盖性抽样。也可以使用命令行：
+在管理台“判断质量”中可以连续处理优先人工复核队列，并按私聊/群聊、联系人或群、判断来源查看误判。所有标注选项都在页面内完成，不再依赖系统弹窗；“消息草稿”只展示已有标签，避免出现第二套标注入口。第一步只判断对方是否需要得到回应；如果需要回应且 AI 已生成非空草稿，页面进入第二步，再评价草稿能否直接使用。回应分歧和草稿问题分别选择原因，保存期间控件会禁用以防重复提交。回应标签绑定判断哈希，草稿评价另行绑定实际草稿哈希：草稿变化只会要求重新评价草稿，不会抹掉仍然有效的回应判断；没有实际草稿时不会要求虚构草稿评价。服务端拒绝旧页面或直接接口用自由文本 `note` 绕过结构化原因和草稿评价。历史自由文本分歧会重新进入队列，不参与准确率；未绑定草稿哈希的旧草稿评价也不会进入草稿质量门槛。优先队列用于先发现高风险问题，不能替代覆盖性抽样。也可以使用命令行：
+
+首次参与标注时先阅读[人工判断标注操作手册](./docs/人工判断标注操作手册.md)，统一“是否需要回应”和“草稿质量”的口径。命令行示例分别表示“AI 建议回应且草稿可直接使用”和“AI 建议回应但人工认为无需回应”；实际参数必须与当前 AI 判断匹配，日常标注优先使用管理台。
 
 ```bash
-npm run control -- review-label <任务编号> reply
-npm run control -- review-label <任务编号> no-reply
+npm run control -- review-label <任务编号> reply --draft usable
+npm run control -- review-label <任务编号> no-reply --response-reason closed_loop
 npm run quality:report
 ```
 
-没有足够人工标注、分层覆盖不足或标签已因判断变化而失效时，影子验收会明确失败，不能用进程健康、单一类型样本或 AI 自评代替人工判断质量。
+没有足够回应判断或草稿评价、分层覆盖不足、草稿可用率未达标，或标签已因判断/草稿变化而失效时，影子验收会明确失败。`quality:report` 使用数据库强制只读会话；不能用进程健康、单一类型样本或 AI 自评代替人工质量判断。
 
 恢复演练使用随机命名的隔离数据库，验证后自动删除隔离库，不覆盖生产库：
 
@@ -387,12 +406,13 @@ Worker 每分钟复查待审批草稿：如果检测到当前账号已在同一�
 
 ```bash
 npm run check
+npm run check:full
 npm run check:security
 npm pack --dry-run
 npm run reuse:verify
 ```
 
-`reuse:verify` 会真实生成 tarball、安装到空目录、解析安装后的全部源码、初始化受保护配置、验证不可覆盖，再创建并校验一个默认无外部权限的项目清单；它不会连接生产数据库、钉钉或 Codex。GitHub 检查会在 Node.js 22 和 24 上启动真实 PostgreSQL 16，执行迁移、并发租约、审批、幂等和加密集成测试，并在当前 16 个迁移应用后运行 14 个迁移的旧版本集成测试，证明服务版本回退不要求反向修改数据库。
+`check:full` 会在本机创建仅监听回环地址的随机 PostgreSQL 临时实例，清除子进程中的生产连接和业务密钥，只把临时测试库注入测试进程，结束后停止实例并清理专用临时目录。默认通过 `pg_config` 或 Homebrew 查找 PostgreSQL；需要指定版本时使用 `PG_TEST_BIN=/绝对路径/bin npm run check:full`。`reuse:verify` 会真实生成 tarball、安装到空目录、解析安装后的全部源码、初始化受保护配置、验证不可覆盖，再创建并校验一个默认无外部权限的项目清单；它不会连接生产数据库、钉钉或 Codex。GitHub 检查会在 Node.js 22 和 24 上启动真实 PostgreSQL 16，执行迁移、并发租约、审批、幂等和加密集成测试，并在当前 16 个迁移应用后运行 14 个迁移的旧版本集成测试，证明服务版本回退不要求反向修改数据库。
 
 `npm run rollback:verify` 只接受本机且名称带 `ai_employee_test` 边界的 PostgreSQL 测试库，拒绝生产地址；日常无需手工运行，云端检查会自动执行。
 

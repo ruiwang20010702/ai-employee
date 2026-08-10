@@ -20,6 +20,7 @@ test("Codex child receives runtime essentials but no business secrets", () => {
   assert.equal(environment.HTTPS_PROXY, "https://proxy.example");
   assert.match(environment.PATH, /^\/opt\/tools:/);
   assert.equal(environment.CI, "1");
+  assert.equal(environment.TERM, "xterm-256color");
   for (const forbidden of [
     "DATABASE_URL",
     "AI_EMPLOYEE_DATA_KEY",
@@ -29,4 +30,15 @@ test("Codex child receives runtime essentials but no business secrets", () => {
   ]) {
     assert.equal(environment[forbidden], undefined);
   }
+});
+
+test("Codex child preserves a usable terminal type", () => {
+  assert.equal(
+    safeCodexEnvironment("codex", { TERM: "screen-256color" }).TERM,
+    "screen-256color",
+  );
+  assert.equal(
+    safeCodexEnvironment("codex", { TERM: "dumb" }).TERM,
+    "xterm-256color",
+  );
 });

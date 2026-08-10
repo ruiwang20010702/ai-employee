@@ -1,6 +1,6 @@
 {
   "name": "ai-employee-dingtalk-listener",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -49,6 +49,7 @@
     "production:doctor": "node scripts/只读生产诊断.mjs",
     "production:codex-probe": "node scripts/验证草稿生成.mjs",
     "production:preflight": "node scripts/生产预检.mjs",
+    "production:service-verify": "node scripts/验证服务部署.mjs",
     "production:verify": "node scripts/验证生产服务.mjs",
     "shadow:verify": "node scripts/影子模式验收.mjs",
     "quality:report": "node src/control.mjs review-report",
@@ -59,6 +60,7 @@
     "db:restore:drill": "node scripts/隔离恢复演练.mjs",
     "db:migrate": "node src/migrate.mjs",
     "check": "node --check src/*.mjs && node --test --test-concurrency=4 test/*.test.mjs",
+    "check:full": "node scripts/运行完整测试.mjs",
     "check:security": "npm audit --audit-level=high",
     "check:dws": "node src/listener.mjs --once"
   },

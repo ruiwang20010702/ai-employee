@@ -110,6 +110,61 @@ test("生产配置只对密钥字段解析外部引用且返回值不泄露密�
   assert.deepEqual(unchanged, { EXISTING: "kept" });
 });
 
+test("生产模式拒绝未填写的租户、审批人和钉钉标识占位值", () => {
+  const names = [
+    "DATABASE_URL",
+    "AI_EMPLOYEE_DATA_KEY",
+    "AI_EMPLOYEE_TENANT_ID",
+    "AI_EMPLOYEE_APPROVER",
+    "DINGTALK_TARGET_USER_IDS",
+    "DINGTALK_TARGET_USER_ID",
+    "DINGTALK_TARGET_GROUP_IDS",
+    "DINGTALK_SELF_USER_ID",
+  ];
+  const previous = Object.fromEntries(
+    names.map((name) => [name, process.env[name]]),
+  );
+  const valid = {
+    DATABASE_URL: "postgresql://user:password@127.0.0.1:5432/database",
+    AI_EMPLOYEE_DATA_KEY: Buffer.alloc(32, 1).toString("base64"),
+    AI_EMPLOYEE_TENANT_ID: "tenant-1",
+    AI_EMPLOYEE_APPROVER: "operator-1",
+    DINGTALK_TARGET_USER_IDS: "target-1",
+    DINGTALK_TARGET_USER_ID: "",
+    DINGTALK_TARGET_GROUP_IDS: "",
+    DINGTALK_SELF_USER_ID: "self-1",
+  };
+  try {
+    Object.assign(process.env, valid);
+    assert.equal(loadConfig({ production: true }).approver, "operator-1");
+    for (const name of [
+      "AI_EMPLOYEE_TENANT_ID",
+      "AI_EMPLOYEE_APPROVER",
+      "DINGTALK_TARGET_USER_IDS",
+      "DINGTALK_SELF_USER_ID",
+    ]) {
+      Object.assign(process.env, valid, { [name]: `replace_with_${name}` });
+      assert.throws(
+        () => loadConfig({ production: true }),
+        new RegExp(`${name} still contains a placeholder`, "u"),
+      );
+    }
+    Object.assign(process.env, valid, {
+      DINGTALK_TARGET_USER_IDS: "",
+      DINGTALK_TARGET_GROUP_IDS: "replace_with_group_id",
+    });
+    assert.throws(
+      () => loadConfig({ production: true }),
+      /DINGTALK_TARGET_GROUP_IDS still contains a placeholder/u,
+    );
+  } finally {
+    for (const name of names) {
+      if (previous[name] == null) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
 test("计划执行租约续租周期必须短于租约", () => {
   const previousLease = process.env.AI_EMPLOYEE_PLAN_EXECUTION_LEASE_MS;
   const previousRenew = process.env.AI_EMPLOYEE_PLAN_EXECUTION_LEASE_RENEW_MS;

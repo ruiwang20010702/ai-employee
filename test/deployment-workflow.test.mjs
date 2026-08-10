@@ -40,6 +40,23 @@ test("生产发布使用稳定版本目录、外部密钥门禁和失败回退",
     workflow.includes("${{ github.workspace }}/.runtime/production.json"),
     false,
   );
+  const ordered = [
+    "验证发布回退目标.mjs",
+    "npm run db:backup",
+    "npm run db:migrate",
+    "npm run production:doctor",
+    "npm run production:codex-probe",
+    "AI_EMPLOYEE_SERVICE_SWITCH_ATTEMPTED=true",
+    "npm run service:install",
+    "npm run production:service-verify",
+  ];
+  let cursor = -1;
+  for (const value of ordered) {
+    const next = workflow.indexOf(value, cursor + 1);
+    assert.notEqual(next, -1, `生产发布缺少步骤：${value}`);
+    assert.ok(next > cursor, `生产发布步骤顺序错误：${value}`);
+    cursor = next;
+  }
 });
 
 test("持续集成从真实发布包执行隔离复用验收", async () => {

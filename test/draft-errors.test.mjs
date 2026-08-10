@@ -76,6 +76,7 @@ test("Codex 超时会终止整个进程组且正文只从 stdin 传入", async (
   );
   const argumentsText = await readFile(argumentsFile, "utf8");
   assert.equal(argumentsText.includes(sensitive), false);
+  assert.match(argumentsText, /exec --skip-git-repo-check --ephemeral/u);
   const childPid = Number(await readFile(childPidFile, "utf8"));
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.throws(() => process.kill(childPid, 0), { code: "ESRCH" });
