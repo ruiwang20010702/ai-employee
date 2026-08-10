@@ -332,6 +332,39 @@ test("审批、人工回复检查和幂等键全部满足后才发送", async (t
   assert.equal(store.getTask(taskId).status, "completed");
 });
 
+test("DWS 未返回明确成功回执时进入发送结果未知", async (t) => {
+  const store = await fixture(t);
+  const taskId = enqueue(store, "unknown-receipt");
+  store.claimTask({ now: new Date("2026-07-31T10:00:00.010Z") });
+  store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "我先看一下。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "需要回复",
+  });
+  store.decideTask(taskId, { decision: "approved", actor: "tester" });
+  await processApprovedTask({
+    store,
+    dws: {
+      async hasManualReply() {
+        return { known: true, replied: false };
+      },
+      async sendText() {
+        return { result: [] };
+      },
+    },
+    config: {
+      ...baseConfig,
+      selfUserId: "self",
+      capabilities: new Set(["draft_reply", "send_message"]),
+    },
+  });
+  const task = store.getTask(taskId);
+  assert.equal(task.status, "send_unknown");
+  assert.match(task.last_error, /explicit success receipt/u);
+});
+
 test("检测到人工已经回复时取消发送", async (t) => {
   const store = await fixture(t);
   const taskId = enqueue(store);

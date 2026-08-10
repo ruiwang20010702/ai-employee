@@ -93,6 +93,17 @@ test("过期计划执行租约阻断就绪并进入指标", async () => {
   assert.match(prometheusMetrics(health), /ai_employee_expired_execution_leases 1/u);
 });
 
+test("失败或执行中的计划阻断严格业务就绪", async () => {
+  for (const workPlans of [{ failed: 1 }, { executing: 1 }, { verifying: 1 }]) {
+    const health = await evaluateHealth({
+      store: store({ workPlans }),
+      config: { ...config, requiredComponents: [], requiredOperationalChecks: [] },
+      now: new Date("2026-07-31T10:00:00.000Z"),
+    });
+    assert.equal(health.ready, false);
+  }
+});
+
 test("Prometheus 输出运营 SLO 且无样本不会伪造数值", async () => {
   const operationalMetrics = {
     availability: {

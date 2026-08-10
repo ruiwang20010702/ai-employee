@@ -8,11 +8,18 @@ import {
   verifyLoadedLaunchAgents,
 } from "../src/launch-agent-verification.mjs";
 
-function launchctlOutput({ label, scriptPath, workingDirectory, configPath }) {
+function launchctlOutput({
+  label,
+  scriptPath,
+  componentArgument = null,
+  workingDirectory,
+  configPath,
+}) {
   return `gui/501/${label} = {
   arguments = {
     /opt/homebrew/bin/node
     ${scriptPath}
+    ${componentArgument ?? ""}
   }
   working directory = ${workingDirectory}/
   environment = {
@@ -25,6 +32,7 @@ test("常驻服务必须精确匹配标签、脚本、工作目录和生产配�
   const expected = {
     label: "com.ai-employee.listener",
     scriptPath: "/releases/new/src/service-launcher.mjs",
+    componentArgument: "listener",
     workingDirectory: "/releases/new",
     configPath: "/releases/new/.runtime/production.json",
   };
@@ -36,6 +44,7 @@ test("常驻服务必须精确匹配标签、脚本、工作目录和生产配�
   for (const [field, value, failure] of [
     ["label", "com.ai-employee.old-listener", "label_mismatch"],
     ["scriptPath", "/releases/old/src/service-launcher.mjs", "script_path_mismatch"],
+    ["componentArgument", "worker", "component_argument_mismatch"],
     ["workingDirectory", "/releases/old", "working_directory_mismatch"],
     ["configPath", "/releases/old/.runtime/production.json", "config_path_mismatch"],
   ]) {
@@ -50,6 +59,7 @@ test("相似但不相等的旧版本路径不能冒充目标版本", () => {
   const expected = {
     label: "com.ai-employee.worker",
     scriptPath: "/releases/new/src/service-launcher.mjs",
+    componentArgument: "worker",
     workingDirectory: "/releases/new",
     configPath: "/releases/new/.runtime/production.json",
   };
@@ -95,6 +105,9 @@ test("全部 LaunchAgent 来自目标版本时验证通过", async (t) => {
         stdout: launchctlOutput({
           label,
           scriptPath: scriptPathFor(definition, resolvedRelease),
+          componentArgument: definition.component === "backup"
+            ? null
+            : definition.component,
           workingDirectory: resolvedRelease,
           configPath: resolvedConfig,
         }),
@@ -125,6 +138,7 @@ test("旧版本服务和无法读取的服务都会列入失败标签", async (t
         stdout: launchctlOutput({
           label,
           scriptPath: "/releases/old/src/service-launcher.mjs",
+          componentArgument: "listener",
           workingDirectory: fixture.releaseDirectory,
           configPath: fixture.configPath,
         }),

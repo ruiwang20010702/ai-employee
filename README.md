@@ -71,6 +71,27 @@ npm run projects:create -- \
 - PostgreSQL 16 或 17。
 - DWS 和 Codex 的有效本机授权。
 
+## 新环境向导
+
+从仓库运行时，先执行本地只读检查：
+
+```bash
+npm run setup:check
+```
+
+从真实 tarball、GitHub 或其他 npm 安装方式复用时，可以在自己的工作目录运行：
+
+```bash
+npm init -y
+npm install "github:ruiwang20010702/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA"
+npx --no-install ai-employee check
+npx --no-install ai-employee init
+npx --no-install ai-employee secrets
+npx --no-install ai-employee secrets --apply
+```
+
+安装时必须把占位内容替换为经过检查的完整 40 位提交编号，不使用会漂移的 `main` 作为生产版本。`check` 只检查 macOS、Node.js、DWS、Codex、PostgreSQL 工具、配置权限、必填项和危险能力开关，不连接钉钉、Codex 服务或数据库，也不输出配置值。`init` 默认只在当前工作目录创建 `.runtime/production.json`，权限为 `600`，已有文件绝不覆盖；文件只保存当前工作区独有的钥匙串引用，不保存生成的密钥值。`secrets` 默认只预览，只有显式增加 `--apply` 才把四项独立随机密钥直接写入对应 macOS 钥匙串并逐项回读。重复执行会复用全部有效的既有项；只存在部分条目、内容无效或冲突时会在新增写入前停止。写入或后续配置提交失败会清理由本次调用创建的条目，无法确认清理时明确要求人工核对。数据库连接仍由接入人单独安全配置。完成本地检查后仍必须继续执行 `production:preflight`，两者不能互相替代。
+
 ## 首次部署
 
 1. 安装依赖：
@@ -88,10 +109,12 @@ chmod 600 .runtime/secrets/postgres_password
 docker compose -f deploy/postgres.compose.yml up -d
 ```
 
-3. 初始化生产配置。脚本会生成相互独立的数据密钥、备份密钥和管理令牌，以 `600` 权限创建文件，且绝不覆盖已有配置：
+3. 初始化生产配置。脚本只生成当前工作区独有的四项钥匙串引用，以 `600` 权限创建文件，且绝不覆盖已有配置；随后单独预览并显式批准钥匙串写入：
 
 ```bash
 npm run config:init
+npm run config:provision-keychain
+npm run config:provision-keychain -- --apply
 ```
 
 已有环境需要轮换管理台令牌时，使用原子轮换命令。它先生成 `600` 权限配置快照，再写入两枚独立新令牌，输出中不包含令牌值：
@@ -100,12 +123,7 @@ npm run config:init
 npm run config:rotate-admin -- --yes
 ```
 
-然后编辑 `.runtime/production.json` 中列出的占位项：数据库连接、租户编号、监听对象、自身用户编号和操作人编号。也可以从[生产配置示例](./deploy/生产配置.example.json)手工创建，但数据密钥和备份密钥必须分别生成，不能相同：
-
-```bash
-openssl rand -base64 32
-openssl rand -base64 32
-```
+然后安全配置数据库连接，并编辑 `.runtime/production.json` 中列出的业务项：租户编号、监听对象、自身用户编号和操作人编号。也可以从[生产配置示例](./deploy/生产配置.example.json)手工创建；正式环境仍应使用外部密钥引用，不把数据密钥、备份密钥或管理令牌写进配置文件。
 
 生产配置中的密钥字段也支持外部引用，参考[外部密钥生产配置示例](./deploy/外部密钥生产配置.example.json)：
 
@@ -164,21 +182,21 @@ AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run service:install
 ```
 
-6. 先验证新版服务已经部署成功。这个检查会逐一核对 9 个 LaunchAgent 实际加载的脚本、工作目录和生产配置都精确属于目标不可变版本，同时要求健康进程、管理台、数据库、DWS、Codex、组件心跳、外部检查和消息覆盖均可用，并继续拒绝未知发送和过期执行租约；既有死亡任务会被如实报告，但不会把服务升级误判为失败：
+6. 先验证新版服务已经部署成功。这个检查会逐一核对 9 个 LaunchAgent 实际加载的脚本、共享启动器组件参数、工作目录和生产配置都精确属于目标不可变版本，同时要求健康进程、管理台、数据库、DWS、Codex、组件心跳、外部检查和消息覆盖均可用，并继续拒绝未知发送和过期执行租约；既有死亡任务会被如实报告，但不会把服务升级误判为失败：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run production:service-verify
 ```
 
-随后单独运行严格业务就绪检查。死亡任务、人工暂停或其他业务阻塞仍会让它失败，不能用服务部署成功代替：
+随后单独运行严格业务就绪检查。死亡任务、失败或执行中的计划、人工暂停及其他业务阻塞都会让它失败，不能用服务部署成功代替：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
   npm run production:verify
 ```
 
-真实发送保持关闭时，还可以执行只读影子验收。它会检查健康、异常任务、执行中的计划和发送能力，不会运行 Codex 或修改数据库：
+真实发送保持关闭时，还可以执行只读影子验收。它会检查健康、异常任务、失败或执行中的计划和发送能力，不会运行 Codex 或修改数据库：
 
 ```bash
 AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \

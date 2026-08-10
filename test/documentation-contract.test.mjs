@@ -58,3 +58,33 @@ test("正式文档文件名保持中文统一口径", async () => {
     assert.match(name, /^[\p{Script=Han}]+\.md$/u);
   }
 });
+
+test("候选版与既有生产版本的状态口径不互相冒充", async () => {
+  const matrix = await projectText("docs/完成度矩阵.md");
+  assert.match(matrix, /既有生产技术版本已部署；V2\.0 候选版尚未部署/u);
+  assert.doesNotMatch(matrix, /\| 生产放量 \| 新版已部署/u);
+});
+
+test("新环境文档禁止把生成的生产密钥写入配置", async () => {
+  const [readme, operations, requirements] = await Promise.all([
+    projectText("README.md"),
+    projectText("docs/生产运维手册.md"),
+    projectText("docs/产品需求文档.md"),
+  ]);
+  for (const text of [readme, operations, requirements]) {
+    assert.match(text, /钥匙串/u);
+    assert.match(text, /不(?:保存|生成或保存|把生成的生产密钥写入配置)/u);
+  }
+  assert.match(readme, /secrets --apply/u);
+  assert.match(operations, /secrets --apply/u);
+});
+
+test("公开仓库安装说明固定到已审核完整提交", async () => {
+  const readme = await projectText("README.md");
+  assert.match(
+    readme,
+    /github:ruiwang20010702\/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA/u,
+  );
+  assert.match(readme, /完整 40 位提交编号/u);
+  assert.doesNotMatch(readme, /npm install[^\n]+#main/u);
+});

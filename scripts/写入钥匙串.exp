@@ -9,7 +9,7 @@ if {[string length $secret] == 0} {
     exit 1
 }
 
-spawn -noecho /usr/bin/security add-generic-password -U -s $service -a $account -w
+spawn -noecho /usr/bin/security add-generic-password -s $service -a $account -w
 expect {
     -re {(password data|retype password).*:} {
         send -raw -- $secret

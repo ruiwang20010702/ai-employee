@@ -72,6 +72,40 @@ export function collectMessages(payload, senderUserId) {
     .filter((message) => message.id && message.conversationId);
 }
 
+export function assertSuccessfulSendReceipt(receipt) {
+  const values = [];
+  const visit = (value, depth = 0) => {
+    if (depth > 5 || value == null) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    if (typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      if (["sendStatus", "send_status", "status", "success"].includes(key)) {
+        values.push({ key, value: child });
+      }
+      visit(child, depth + 1);
+    }
+  };
+  visit(receipt);
+
+  const explicitFailure = values.some(({ key, value }) => (
+    (key === "success" && value !== true) ||
+    (key !== "success" && /^(?:FAIL|FAILED|ERROR|REJECTED|CANCELLED)$/iu.test(String(value)))
+  ));
+  const explicitSuccess = values.some(({ key, value }) => (
+    (key === "success" && value === true) ||
+    (key !== "success" && /^(?:SUCCESS|SENT|DELIVERED)$/iu.test(String(value)))
+  ));
+  if (explicitFailure || !explicitSuccess) {
+    const error = new Error("DWS send did not return an explicit success receipt");
+    error.code = explicitFailure ? "dws_send_failed" : "dws_send_receipt_unknown";
+    throw error;
+  }
+  return receipt;
+}
+
 function pagination(payload) {
   const result = payload?.result ?? payload ?? {};
   const nextCursor =

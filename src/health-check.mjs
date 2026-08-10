@@ -137,6 +137,8 @@ export async function evaluateHealth({
     !checks.paused &&
     checks.deadTasks === 0 &&
     checks.unknownSends === 0 &&
+    checks.failedWorkPlans === 0 &&
+    checks.executingWorkPlans === 0 &&
     checks.expiredExecutionLeases === 0 &&
     Object.values(heartbeats).every((heartbeat) => heartbeat.healthy) &&
     Object.values(operationalChecks).every((check) => check.healthy) &&

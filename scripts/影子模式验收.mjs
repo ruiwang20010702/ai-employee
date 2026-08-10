@@ -44,15 +44,16 @@ try {
   quality.gates.coverage = quality.coverage.accepted;
   quality.accepted = Object.values(quality.gates).every(Boolean);
   const blockingTaskStatuses = new Set(["dead", "send_unknown"]);
-  const blockingPlanStatuses = new Set(["executing", "verifying"]);
   const blockers = {
     unhealthy: !health.ready,
     abnormalTasks: tasks.filter((task) => blockingTaskStatuses.has(task.status)).length,
-    activePlans: plans.filter((plan) => blockingPlanStatuses.has(plan.status)).length,
+    failedPlans: plans.filter((plan) => plan.status === "failed").length,
+    activePlans: plans.filter((plan) => ["executing", "verifying"].includes(plan.status)).length,
   };
   const accepted =
     !blockers.unhealthy &&
     blockers.abnormalTasks === 0 &&
+    blockers.failedPlans === 0 &&
     blockers.activePlans === 0 &&
     quality.accepted;
   console.log(

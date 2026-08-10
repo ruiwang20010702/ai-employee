@@ -25,18 +25,18 @@ jobs:
       AI_EMPLOYEE_DEPLOY_ROOT: ${{ vars.AI_EMPLOYEE_DEPLOY_ROOT }}
     steps:
       - name: 签出当前发布控制器
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           path: .deployment-controller
       - name: 签出目标业务版本
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
           path: .release-source
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: npm

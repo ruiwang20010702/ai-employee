@@ -5,7 +5,7 @@ import {
 } from "./capability-summary.mjs";
 import { loadConfig } from "./config.mjs";
 import { generateReplyDraft } from "./draft.mjs";
-import { DwsAdapter } from "./dws.mjs";
+import { assertSuccessfulSendReceipt, DwsAdapter } from "./dws.mjs";
 import { safeErrorCode } from "./logging.mjs";
 import { proposeWorkPlanForTask } from "./plan-proposal.mjs";
 import { createProductionStore } from "./production-store.mjs";
@@ -310,10 +310,12 @@ export async function processApprovedTask({ store, dws, config }) {
   try {
     const effect = await store.beginSideEffect(task.id, "send_message");
     if (effect.status === "completed") {
+      const receipt = JSON.parse(effect.receipt_json ?? "{}");
+      assertSuccessfulSendReceipt(receipt);
       await store.completeSideEffect(
         task.id,
         "send_message",
-        JSON.parse(effect.receipt_json ?? "{}"),
+        receipt,
       );
       return true;
     }
@@ -336,6 +338,7 @@ export async function processApprovedTask({ store, dws, config }) {
           text: reply,
           idempotencyKey: task.id,
         });
+    assertSuccessfulSendReceipt(receipt);
     await store.completeSideEffect(task.id, "send_message", receipt);
     log("worker.send_completed", { taskId: task.id });
   } catch (error) {

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectMessages, DwsAdapter } from "../src/dws.mjs";
-import { fetchStart } from "../src/listener.mjs";
+import {
+  assertSuccessfulSendReceipt,
+  collectMessages,
+  DwsAdapter,
+} from "../src/dws.mjs";
+import { fetchStart, startListener } from "../src/listener.mjs";
 
 test("兼容 DWS 会话嵌套消息结构", () => {
   const messages = collectMessages(
@@ -54,6 +58,28 @@ test("增量抓取从检查点前重叠一段时间", () => {
       initialLookbackHours: 72,
     }).toISOString(),
     "2026-07-28T12:00:00.000Z",
+  );
+});
+
+test("发送回执必须明确成功，失败或空回执不能冒充已发送", () => {
+  assert.deepEqual(
+    assertSuccessfulSendReceipt({ result: { sendStatus: "SUCCESS" } }),
+    { result: { sendStatus: "SUCCESS" } },
+  );
+  assert.deepEqual(assertSuccessfulSendReceipt({ success: true }), {
+    success: true,
+  });
+  assert.throws(
+    () => assertSuccessfulSendReceipt({ success: false }),
+    (error) => error.code === "dws_send_failed",
+  );
+  assert.throws(
+    () => assertSuccessfulSendReceipt({ result: { sendStatus: "FAILED" } }),
+    (error) => error.code === "dws_send_failed",
+  );
+  assert.throws(
+    () => assertSuccessfulSendReceipt({ result: [] }),
+    (error) => error.code === "dws_send_receipt_unknown",
   );
 });
 
@@ -256,4 +282,71 @@ test("已有开放账号任务使用开放账号参数发送私聊", async () =>
   });
   assert.ok(args.includes("--open-dingtalk-id"));
   assert.ok(!args.includes("--user"));
+});
+
+function listenerStore() {
+  const checkpoints = new Map();
+  return {
+    closed: false,
+    async open() { return this; },
+    async getCheckpoint(key) { return checkpoints.get(key) ?? null; },
+    async setCheckpoint(key, value) { checkpoints.set(key, value); },
+    async ingestMessages(messages) { return messages.length; },
+    async createReadyTasks() { return []; },
+    async isPaused() { return false; },
+    async recordHeartbeat() {},
+    async close() { this.closed = true; },
+    checkpoints,
+  };
+}
+
+const listenerConfig = {
+  targetUserIds: ["good-user", "bad-user"],
+  targetGroupIds: [],
+  overlapMs: 60_000,
+  initialLookbackHours: 24,
+  quietWindowMs: 1_000,
+  bundleGapMs: 1_000,
+  maxMessagesPerTask: 20,
+  maxTaskAttempts: 3,
+};
+
+test("监听器部分目标失败时保留成功检查点并记录整体失败", async () => {
+  const store = listenerStore();
+  await startListener({
+    store,
+    config: listenerConfig,
+    once: true,
+    dws: {
+      async fetchBySender({ senderUserId }) {
+        if (senderUserId === "bad-user") throw new Error("DWS unavailable");
+        return [];
+      },
+    },
+  });
+  assert.equal(store.closed, true);
+  assert.equal(store.checkpoints.get("listener:last-full-failure"), "target_fetch_failed");
+  assert.equal(store.checkpoints.has("listener:last-full-success"), false);
+  assert.equal(
+    [...store.checkpoints.keys()].some((key) => key.startsWith("dws:last-success:")),
+    true,
+  );
+});
+
+test("监听器全部目标失败时一次运行明确失败且仍关闭存储", async () => {
+  const store = listenerStore();
+  await assert.rejects(
+    startListener({
+      store,
+      config: listenerConfig,
+      once: true,
+      dws: {
+        async fetchBySender() {
+          throw new Error("DWS unavailable");
+        },
+      },
+    }),
+    /failed for every configured target/u,
+  );
+  assert.equal(store.closed, true);
 });

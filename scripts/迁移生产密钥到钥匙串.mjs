@@ -41,6 +41,16 @@ function secretEquals(left, right) {
     timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+async function readExistingSecret(reader, service, account) {
+  try {
+    const value = await reader(service, account);
+    return typeof value === "string" && value.length > 0 ? value : null;
+  } catch (error) {
+    if (error?.code === 44) return null;
+    throw new Error("Keychain availability check failed");
+  }
+}
+
 function safeEnvironment() {
   return Object.fromEntries(
     ["HOME", "USER", "LOGNAME", "LANG", "LC_ALL"]
@@ -82,6 +92,35 @@ export async function writeMacosKeychainSecret(service, account, secret) {
   });
 }
 
+export async function deleteMacosKeychainSecret(service, account) {
+  if (process.platform !== "darwin") {
+    throw new Error("macOS Keychain is unavailable on this platform");
+  }
+  await new Promise((resolvePromise, reject) => {
+    const child = spawn(
+      "/usr/bin/security",
+      ["delete-generic-password", "-s", service, "-a", account],
+      {
+        env: { ...safeEnvironment(), PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        stdio: "ignore",
+      },
+    );
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("macOS Keychain delete timed out"));
+    }, 10_000);
+    child.once("error", () => {
+      clearTimeout(timeout);
+      reject(new Error("macOS Keychain delete failed"));
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timeout);
+      if (code === 0 || code === 44) resolvePromise();
+      else reject(new Error("macOS Keychain delete failed"));
+    });
+  });
+}
+
 async function writeProtectedJson(path, values) {
   const handle = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
   try {
@@ -99,6 +138,7 @@ export async function migrateProductionSecretsToKeychain({
   now = new Date(),
   platform = process.platform,
   keychainWriter = writeMacosKeychainSecret,
+  keychainDeleter = deleteMacosKeychainSecret,
   keychainReader,
 } = {}) {
   const destination = resolve(configPath);
@@ -169,17 +209,54 @@ export async function migrateProductionSecretsToKeychain({
     };
   }
 
+  const reusableAccounts = new Set();
   for (const [key, account] of keychainMigrationEntries) {
     if (!secrets.has(key)) continue;
-    try {
-      await keychainWriter(service, account, secrets.get(key));
+    const existing = await readExistingSecret(reader, service, account);
+    if (existing === null) continue;
+    if (!secretEquals(secrets.get(key), existing)) {
+      throw new Error(`Keychain target already contains another value: ${key}`);
+    }
+    reusableAccounts.add(account);
+  }
+
+  const createdAccounts = [];
+  let currentKey = "unknown";
+  let currentAccount = null;
+  let currentSecret = null;
+  try {
+    for (const [key, account] of keychainMigrationEntries) {
+      if (!secrets.has(key)) continue;
+      if (reusableAccounts.has(account)) continue;
+      currentKey = key;
+      currentAccount = account;
+      currentSecret = secrets.get(key);
+      await keychainWriter(service, account, currentSecret);
+      createdAccounts.push(account);
       const readback = await reader(service, account);
-      if (!secretEquals(secrets.get(key), readback)) {
+      if (!secretEquals(currentSecret, readback)) {
         throw new Error("readback mismatch");
       }
-    } catch {
-      throw new Error(`Keychain write or readback failed: ${key}`);
     }
+  } catch {
+    let cleanupUncertain = false;
+    if (currentAccount && !createdAccounts.includes(currentAccount)) {
+      try {
+        const currentValue = await readExistingSecret(reader, service, currentAccount);
+        if (currentValue !== null && secretEquals(currentSecret, currentValue)) {
+          createdAccounts.push(currentAccount);
+        }
+      } catch {
+        cleanupUncertain = true;
+      }
+    }
+    const cleanup = await Promise.allSettled(
+      createdAccounts.map((account) => keychainDeleter(service, account)),
+    );
+    if (cleanupUncertain || cleanup.some((result) => result.status === "rejected")) {
+      throw new Error(`Keychain write failed and cleanup is incomplete: ${currentKey}`);
+    }
+    throw new Error(`Keychain write or readback failed: ${currentKey}`);
   }
 
   const next = { ...values };
@@ -191,11 +268,14 @@ export async function migrateProductionSecretsToKeychain({
   const timestamp = now.toISOString().replaceAll(/[:.]/gu, "-");
   const rollbackSnapshot = join(backupDirectory, `production-${timestamp}.json`);
   const temporaryPath = join(directory, `.production-keychain-${randomUUID()}.tmp`);
-  await mkdir(backupDirectory, { recursive: true, mode: 0o700 });
-  await chmod(backupDirectory, 0o700);
-  await copyFile(destination, rollbackSnapshot, constants.COPYFILE_EXCL);
-  await chmod(rollbackSnapshot, 0o600);
+  let snapshotCreated = false;
+  let configCommitted = false;
   try {
+    await mkdir(backupDirectory, { recursive: true, mode: 0o700 });
+    await chmod(backupDirectory, 0o700);
+    await copyFile(destination, rollbackSnapshot, constants.COPYFILE_EXCL);
+    snapshotCreated = true;
+    await chmod(rollbackSnapshot, 0o600);
     await writeProtectedJson(temporaryPath, next);
     await applyProductionConfigFile({
       path: temporaryPath,
@@ -203,11 +283,29 @@ export async function migrateProductionSecretsToKeychain({
       secretResolverOptions: { keychainReader: reader },
     });
     await rename(temporaryPath, destination);
-    await chmod(destination, 0o600);
+    configCommitted = true;
+  } catch {
+    if (!configCommitted) {
+      const cleanup = await Promise.allSettled([
+        ...createdAccounts.map((account) => keychainDeleter(service, account)),
+        unlink(temporaryPath).catch((error) => {
+          if (error.code !== "ENOENT") throw error;
+        }),
+        snapshotCreated
+          ? unlink(rollbackSnapshot)
+          : Promise.resolve(),
+      ]);
+      if (cleanup.some((result) => result.status === "rejected")) {
+        throw new Error("Keychain migration failed and cleanup is incomplete");
+      }
+    }
+    throw new Error("Keychain migration failed before configuration commit");
   } finally {
-    await unlink(temporaryPath).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-    });
+    if (configCommitted) {
+      await unlink(temporaryPath).catch((error) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
   }
 
   return {
@@ -215,6 +313,9 @@ export async function migrateProductionSecretsToKeychain({
     dryRun: false,
     service,
     migratedKeys: plannedKeys,
+    reusedExistingKeys: keychainMigrationEntries
+      .filter(([, account]) => reusableAccounts.has(account))
+      .map(([key]) => key),
     alreadyExternalKeys,
     configUpdated: true,
     rollbackSnapshot,

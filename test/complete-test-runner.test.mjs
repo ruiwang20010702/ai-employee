@@ -81,6 +81,7 @@ test("完整测试失败后仍停止临时数据库并清理专用目录", async
     mkdir(postgresBin),
     mkdir(isolatedTemporaryDirectory),
     mkdir(project),
+    mkdir(join(project, "test"), { recursive: true }),
   ]);
   const executable = async (name, body) => {
     const path = join(postgresBin, name);
@@ -99,6 +100,7 @@ test("完整测试失败后仍停止临时数据库并清理专用目录", async
       private: true,
       scripts: { check: "node -e \"process.exit(7)\"" },
     }));
+    await writeFile(join(project, "test", "fixture.test.mjs"), "// fixture\n");
     await assert.rejects(
       () => runCompleteTest({
         environment: { PATH: process.env.PATH },
@@ -110,6 +112,21 @@ test("完整测试失败后仍停止临时数据库并清理专用目录", async
     );
     assert.equal(await readFile(stopReceipt, "utf8"), "stopped");
     assert.deepEqual(await readdir(isolatedTemporaryDirectory), []);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("发布安装包缺少源码测试时不会启动临时数据库", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "ai-employee-no-source-tests-"));
+  try {
+    await assert.rejects(
+      runCompleteTest({
+        root: fixture,
+        postgresBin: "/must-not-be-used",
+      }),
+      /只能在包含 test 目录的源码仓库中运行/u,
+    );
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }

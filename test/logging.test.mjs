@@ -19,4 +19,7 @@ test("Codex 草稿失败区分执行故障和结构无效", () => {
     safeErrorCode(new Error("Codex returned an invalid draft with private content")),
     "codex_output_invalid",
   );
+  const receiptError = new Error("private receipt content");
+  receiptError.code = "dws_send_receipt_unknown";
+  assert.equal(safeErrorCode(receiptError), "dws_send_receipt_unknown");
 });

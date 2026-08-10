@@ -3,7 +3,10 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { processNextWorkPlan } from "../src/plan-executor.mjs";
+import {
+  processNextWorkPlan,
+  runPlanExecutor,
+} from "../src/plan-executor.mjs";
 import { Store } from "../src/store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 
@@ -125,4 +128,29 @@ test("项目暂停时执行器不消费计划，恢复后继续", async (t) => {
     true,
   );
   assert.equal(executions, 1);
+});
+
+test("常驻执行器停止时立即唤醒并安全关闭存储", async () => {
+  let closed = false;
+  const store = {
+    async open() { return this; },
+    async recordHeartbeat() {},
+    async recoverExpiredWorkPlans() { return 0; },
+    async isPaused() { return false; },
+    async listWorkPlans() { return []; },
+    async close() { closed = true; },
+  };
+  const executor = await runPlanExecutor({
+    store,
+    adapters: {},
+    config: {
+      capabilities: new Set(),
+      planExecutorPollMs: 60_000,
+      heartbeatMs: 30_000,
+    },
+  });
+  const startedAt = Date.now();
+  await executor.stop();
+  assert.ok(Date.now() - startedAt < 1_000);
+  assert.equal(closed, true);
 });

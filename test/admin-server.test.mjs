@@ -13,6 +13,8 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.match(script, /plan-revise/u);
   assert.match(script, /\/api\/targets\//u);
   assert.match(script, /\/api\/privacy\/preview/u);
+  assert.match(script, /AbortSignal\.timeout\(10000\)/u);
+  assert.match(script, /请求超时，请确认服务状态后重试/u);
   assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
 });
 

@@ -3,6 +3,9 @@ export function safeErrorCode(error) {
   if (error?.code && /^CODEX_[A-Z_]+$/.test(String(error.code))) {
     return String(error.code).toLowerCase();
   }
+  if (["dws_send_failed", "dws_send_receipt_unknown"].includes(error?.code)) {
+    return error.code;
+  }
   if (/timeout|timed out|i\/o timeout|request_timeout/.test(text)) {
     return "request_timeout";
   }

@@ -10,6 +10,10 @@ const checkWorkflowUrl = new URL(
   "../.github/workflows/check.yml",
   import.meta.url,
 );
+const securityWorkflowUrl = new URL(
+  "../.github/workflows/security.yml",
+  import.meta.url,
+);
 
 test("生产发布使用稳定版本目录、外部密钥门禁和失败回退", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
@@ -62,6 +66,39 @@ test("生产发布使用稳定版本目录、外部密钥门禁和失败回退",
 test("持续集成从真实发布包执行隔离复用验收", async () => {
   const workflow = await readFile(checkWorkflowUrl, "utf8");
   assert.match(workflow, /fetch-depth: 0/u);
+  assert.match(workflow, /node-version: \[22, 24\]/u);
   assert.match(workflow, /npm run rollback:verify/u);
   assert.match(workflow, /npm run reuse:verify/u);
+  const ordered = [
+    "npm audit --audit-level=high",
+    "npm run check",
+    "npm run rollback:verify",
+    "npm pack --dry-run",
+    "npm run reuse:verify",
+  ];
+  let cursor = -1;
+  for (const value of ordered) {
+    const next = workflow.indexOf(value, cursor + 1);
+    assert.notEqual(next, -1, `持续集成缺少步骤：${value}`);
+    assert.ok(next > cursor, `持续集成步骤顺序错误：${value}`);
+    cursor = next;
+  }
+});
+
+test("供应链工作流扫描密钥并固定所有第三方动作提交", async () => {
+  const workflows = await Promise.all([
+    readFile(workflowUrl, "utf8"),
+    readFile(checkWorkflowUrl, "utf8"),
+    readFile(securityWorkflowUrl, "utf8"),
+  ]);
+  const security = workflows[2];
+  assert.match(security, /gitleaks\/gitleaks-action@[a-f0-9]{40}/u);
+  assert.match(security, /fetch-depth: 0/u);
+  for (const workflow of workflows) {
+    const actions = [...workflow.matchAll(/uses:\s+[^\s@]+@([^\s#]+)/gu)];
+    assert.ok(actions.length > 0);
+    for (const [, reference] of actions) {
+      assert.match(reference, /^[a-f0-9]{40}$/u);
+    }
+  }
 });

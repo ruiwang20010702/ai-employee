@@ -14,7 +14,7 @@ function outputLines(output) {
 
 export function validateLoadedLaunchAgent(
   output,
-  { label, scriptPath, workingDirectory, configPath },
+  { label, scriptPath, componentArgument = null, workingDirectory, configPath },
 ) {
   const lines = outputLines(output);
   const expectedHeaderSuffix = `/${label} = {`;
@@ -24,6 +24,9 @@ export function validateLoadedLaunchAgent(
 
   if (!lines[0]?.endsWith(expectedHeaderSuffix)) failures.push("label_mismatch");
   if (!lines.includes(scriptPath)) failures.push("script_path_mismatch");
+  if (componentArgument && !lines.includes(componentArgument)) {
+    failures.push("component_argument_mismatch");
+  }
   if (!lines.includes(expectedWorkingDirectory)) failures.push("working_directory_mismatch");
   if (!lines.includes(expectedConfig)) failures.push("config_path_mismatch");
 
@@ -65,9 +68,13 @@ export async function verifyLoadedLaunchAgents({
           timeout: 5_000,
           maxBuffer: 1024 * 1024,
         });
+        const scriptPath = scriptPathFor(definition, resolvedRelease);
         const result = validateLoadedLaunchAgent(stdout, {
           label: definition.label,
-          scriptPath: scriptPathFor(definition, resolvedRelease),
+          scriptPath,
+          componentArgument: scriptPath.endsWith("/src/service-launcher.mjs")
+            ? definition.component
+            : null,
           workingDirectory: resolvedRelease,
           configPath: resolvedConfig,
         });

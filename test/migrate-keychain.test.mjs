@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -33,6 +33,7 @@ function memoryKeychain() {
       entries.set(`${service}/${account}`, value);
     },
     reader: async (service, account) => entries.get(`${service}/${account}`),
+    deleter: async (service, account) => entries.delete(`${service}/${account}`),
   };
 }
 
@@ -93,6 +94,7 @@ test("任一钥匙串写入或回读失败时保留原配置、不留快照且�
         await keychain.writer(service, account, value);
       },
       keychainReader: keychain.reader,
+      keychainDeleter: keychain.deleter,
     });
   } catch (caught) {
     error = caught;
@@ -104,6 +106,7 @@ test("任一钥匙串写入或回读失败时保留原配置、不留快照且�
     assert.equal(error.message.includes(secret), false);
   }
   assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), sourceValues);
+  assert.equal(keychain.entries.size, 0);
   await assert.rejects(
     stat(join(directory, "keychain-migration-backups")),
     { code: "ENOENT" },
@@ -138,4 +141,111 @@ test("拒绝读取权限过宽的生产配置", async () => {
     migrateProductionSecretsToKeychain({ configPath }),
     /must not be readable by group or others/u,
   );
+});
+
+test("迁移失败且钥匙串清理失败时返回稳定的人工核对提示", async () => {
+  const { configPath } = await fixture();
+  let firstSecret;
+  await assert.rejects(
+    migrateProductionSecretsToKeychain({
+      configPath,
+      apply: true,
+      platform: "darwin",
+      keychainWriter: async (_service, account, value) => {
+        firstSecret ??= value;
+        if (account === "backup-key") throw new Error(value);
+      },
+      keychainReader: async () => firstSecret,
+      keychainDeleter: async () => { throw new Error(firstSecret); },
+    }),
+    (error) => (
+      error.message === "Keychain write failed and cleanup is incomplete: AI_EMPLOYEE_DATA_KEY" &&
+      !error.message.includes(firstSecret)
+    ),
+  );
+});
+
+test("配置提交前崩溃后重试可复用完全匹配的既有钥匙串项", async () => {
+  const { configPath } = await fixture();
+  const keychain = memoryKeychain();
+  for (const [key, account] of keychainMigrationEntries) {
+    await keychain.writer("ai-employee-production", account, sourceValues[key]);
+  }
+  let writes = 0;
+  const result = await migrateProductionSecretsToKeychain({
+    configPath,
+    apply: true,
+    platform: "darwin",
+    keychainWriter: async () => { writes += 1; },
+    keychainReader: keychain.reader,
+    keychainDeleter: keychain.deleter,
+  });
+  assert.equal(writes, 0);
+  assert.equal(result.reusedExistingKeys.length, 5);
+  assert.equal(result.configUpdated, true);
+});
+
+test("迁移目标存在冲突值时在写入配置和钥匙串前停止", async () => {
+  const { configPath } = await fixture();
+  const keychain = memoryKeychain();
+  await keychain.writer("ai-employee-production", "data-key", "different-value");
+  let writes = 0;
+  await assert.rejects(
+    migrateProductionSecretsToKeychain({
+      configPath,
+      apply: true,
+      platform: "darwin",
+      keychainWriter: async () => { writes += 1; },
+      keychainReader: keychain.reader,
+      keychainDeleter: keychain.deleter,
+    }),
+    /already contains another value: AI_EMPLOYEE_DATA_KEY/u,
+  );
+  assert.equal(writes, 0);
+  assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), sourceValues);
+});
+
+test("配置提交失败会清理本次新增钥匙串项和临时回滚快照", async () => {
+  const now = new Date("2026-08-10T08:00:00.000Z");
+  const { directory, configPath } = await fixture();
+  const backupDirectory = join(directory, "keychain-migration-backups");
+  const collision = join(backupDirectory, "production-2026-08-10T08-00-00-000Z.json");
+  await mkdir(backupDirectory, { mode: 0o700 });
+  await writeFile(collision, "existing", { mode: 0o600 });
+  const keychain = memoryKeychain();
+  await assert.rejects(
+    migrateProductionSecretsToKeychain({
+      configPath,
+      apply: true,
+      platform: "darwin",
+      now,
+      keychainWriter: keychain.writer,
+      keychainReader: keychain.reader,
+      keychainDeleter: keychain.deleter,
+    }),
+    /failed before configuration commit/u,
+  );
+  assert.equal(keychain.entries.size, 0);
+  assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), sourceValues);
+  assert.equal(await readFile(collision, "utf8"), "existing");
+});
+
+test("迁移写入后才报错时通过匹配回读清理当前项", async () => {
+  const { configPath } = await fixture();
+  const keychain = memoryKeychain();
+  await assert.rejects(
+    migrateProductionSecretsToKeychain({
+      configPath,
+      apply: true,
+      platform: "darwin",
+      keychainWriter: async (service, account, value) => {
+        await keychain.writer(service, account, value);
+        throw new Error(value);
+      },
+      keychainReader: keychain.reader,
+      keychainDeleter: keychain.deleter,
+    }),
+    /Keychain write or readback failed: DATABASE_URL/u,
+  );
+  assert.equal(keychain.entries.size, 0);
 });

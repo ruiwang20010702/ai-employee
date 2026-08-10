@@ -8,23 +8,30 @@ import { isMainModule } from "../src/main-module.mjs";
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const examplePath = join(projectRoot, "deploy", "生产配置.example.json");
 
-function secretKey() {
-  return randomBytes(32).toString("base64");
+function keychainReference(service, account) {
+  return `keychain://${encodeURIComponent(service)}/${encodeURIComponent(account)}`;
 }
 
-function accessToken() {
-  return randomBytes(32).toString("hex");
+function uniqueKeychainService() {
+  return `ai-employee-${randomBytes(8).toString("hex")}`;
 }
 
 export async function initializeProductionConfig({
   outputPath = defaultProductionConfigPath(),
+  keychainService = uniqueKeychainService(),
 } = {}) {
   const destination = resolve(outputPath);
   const values = JSON.parse(await readFile(examplePath, "utf8"));
-  values.AI_EMPLOYEE_DATA_KEY = secretKey();
-  values.AI_EMPLOYEE_BACKUP_KEY = secretKey();
-  values.AI_EMPLOYEE_ADMIN_READ_TOKEN = accessToken();
-  values.AI_EMPLOYEE_ADMIN_WRITE_TOKEN = accessToken();
+  const accounts = {
+    AI_EMPLOYEE_DATA_KEY: "data-key",
+    AI_EMPLOYEE_BACKUP_KEY: "backup-key",
+    AI_EMPLOYEE_ADMIN_READ_TOKEN: "admin-read-token",
+    AI_EMPLOYEE_ADMIN_WRITE_TOKEN: "admin-write-token",
+  };
+  for (const [key, account] of Object.entries(accounts)) {
+    values[key] = keychainReference(keychainService, account);
+  }
+  values.DATABASE_URL = "";
   values.AI_EMPLOYEE_BACKUP_DIRECTORY = join(
     dirname(destination),
     "backups",
@@ -51,12 +58,11 @@ export async function initializeProductionConfig({
     created: true,
     path: destination,
     mode: "600",
-    generatedSecrets: [
-      "AI_EMPLOYEE_DATA_KEY",
-      "AI_EMPLOYEE_BACKUP_KEY",
-      "AI_EMPLOYEE_ADMIN_READ_TOKEN",
-      "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
-    ],
+    secretStorage: "keychain",
+    keychainService,
+    generatedSecrets: [],
+    externalSecretReferences: Object.keys(accounts),
+    requiredSecretProvisioning: Object.keys(accounts),
     requiredEdits: [
       "DATABASE_URL",
       "AI_EMPLOYEE_TENANT_ID",

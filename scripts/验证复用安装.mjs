@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
+import { constants } from "node:fs";
 import {
   access,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   stat,
   writeFile,
@@ -58,12 +60,6 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function canonicalKey(value) {
-  if (typeof value !== "string") return false;
-  const decoded = Buffer.from(value, "base64");
-  return decoded.length === 32 && decoded.toString("base64") === value;
-}
-
 function packageFileGate(files) {
   const paths = files.map((file) => file.path);
   const required = [
@@ -72,7 +68,11 @@ function packageFileGate(files) {
     "README.md",
     "docs/产品需求文档.md",
     "docs/完成度矩阵.md",
+    "docs/统一审查报告.md",
     "scripts/初始化生产配置.mjs",
+    "scripts/初始化钥匙串密钥.mjs",
+    "scripts/新环境向导.mjs",
+    "scripts/运行代码检查.mjs",
     "scripts/创建项目配置.mjs",
     "scripts/校验项目能力.mjs",
     "scripts/运行完整测试.mjs",
@@ -81,6 +81,7 @@ function packageFileGate(files) {
     "src/capability-policy.mjs",
     "src/control-access.mjs",
     "src/privacy-erasure.mjs",
+    "src/reuse-readiness.mjs",
     "src/production-config-file.mjs",
     "plugins/ai-employee/.codex-plugin/plugin.json",
     "plugins/ai-employee/.mcp.json",
@@ -181,9 +182,18 @@ export async function verifyReusableInstallation({
     const packDirectory = join(temporary, "pack");
     const installDirectory = join(temporary, "consumer");
     const runtimeDirectory = join(temporary, "runtime");
+    const workspaceA = join(temporary, "workspace-a");
+    const workspaceB = join(temporary, "workspace-b");
     const projectDirectory = join(temporary, "example-project");
     await Promise.all(
-      [packDirectory, installDirectory, runtimeDirectory, projectDirectory]
+      [
+        packDirectory,
+        installDirectory,
+        runtimeDirectory,
+        workspaceA,
+        workspaceB,
+        projectDirectory,
+      ]
         .map((directory) => mkdir(directory, { recursive: true, mode: 0o700 })),
     );
 
@@ -227,6 +237,10 @@ export async function verifyReusableInstallation({
     );
     assert(installedMetadata.name === packageName, "Installed package identity changed");
     assert(installedMetadata.version === packResult[0].version, "Installed package version changed");
+    assert(
+      installedMetadata.bin?.["ai-employee"] === "scripts/新环境向导.mjs",
+      "Installed package is missing the reusable environment guide",
+    );
     const [sourceCount, pluginValidation, portableContentFiles] = await Promise.all([
       verifyInstalledSources(packageDirectory),
       verifyInstalledPlugin(packageDirectory),
@@ -236,21 +250,139 @@ export async function verifyReusableInstallation({
       installedMetadata.version === pluginValidation.version,
       "Installed package and Codex plugin versions are inconsistent",
     );
+    const installedCheck = JSON.parse((await run(
+      npmPath,
+      ["run", "check", "--silent"],
+      { cwd: packageDirectory },
+    )).stdout);
+    assert(
+      installedCheck.valid === true &&
+      installedCheck.mode === "installed_package" &&
+      installedCheck.tests === 0 &&
+      installedCheck.sourceModules === sourceCount,
+      "Installed package code check is unavailable or misleading",
+    );
 
     const configPath = join(runtimeDirectory, "production.json");
+    const guideScript = join(packageDirectory, "scripts", "新环境向导.mjs");
+    assert(
+      ((await stat(guideScript)).mode & 0o111) !== 0,
+      "Installed reusable environment guide is not executable",
+    );
+    const installedGuide = join(
+      installDirectory,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "ai-employee.cmd" : "ai-employee",
+    );
+    await access(installedGuide, constants.X_OK);
+    const guideHelp = JSON.parse((await run(
+      installedGuide,
+      ["help"],
+      { cwd: runtimeDirectory },
+    )).stdout);
+    assert(
+      Array.isArray(guideHelp.usage) &&
+      guideHelp.boundary.includes("不连接钉钉、Codex 或数据库"),
+      "Installed reusable environment guide lost its read-only boundary",
+    );
+    const [initializedA, initializedB] = await Promise.all([
+      run(installedGuide, ["init"], { cwd: workspaceA }).then(({ stdout }) => JSON.parse(stdout)),
+      run(installedGuide, ["init"], { cwd: workspaceB }).then(({ stdout }) => JSON.parse(stdout)),
+    ]);
+    const workspaceConfigA = join(workspaceA, ".runtime", "production.json");
+    const workspaceConfigB = join(workspaceB, ".runtime", "production.json");
+    const canonicalWorkspaceA = await realpath(workspaceA);
+    const canonicalWorkspaceB = await realpath(workspaceB);
+    const canonicalWorkspaceConfigA = join(
+      canonicalWorkspaceA,
+      ".runtime",
+      "production.json",
+    );
+    const canonicalWorkspaceConfigB = join(
+      canonicalWorkspaceB,
+      ".runtime",
+      "production.json",
+    );
+    assert(
+      initializedA.path === canonicalWorkspaceConfigA &&
+      initializedB.path === canonicalWorkspaceConfigB,
+      "Reusable guide wrote configuration outside the consumer workspace",
+    );
+    const [workspaceValuesA, workspaceValuesB] = await Promise.all([
+      readFile(workspaceConfigA, "utf8").then(JSON.parse),
+      readFile(workspaceConfigB, "utf8").then(JSON.parse),
+    ]);
+    for (const key of [
+      "AI_EMPLOYEE_DATA_KEY",
+      "AI_EMPLOYEE_BACKUP_KEY",
+      "AI_EMPLOYEE_ADMIN_READ_TOKEN",
+      "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
+    ]) {
+      assert(
+        /^keychain:\/\/ai-employee-[a-f0-9]{16}\//u.test(workspaceValuesA[key]) &&
+        /^keychain:\/\/ai-employee-[a-f0-9]{16}\//u.test(workspaceValuesB[key]) &&
+        workspaceValuesA[key] !== workspaceValuesB[key],
+        `Independent workspaces reused or exposed secret storage: ${key}`,
+      );
+    }
+    assert(
+      initializedA.generatedSecrets.length === 0 &&
+      initializedB.generatedSecrets.length === 0 &&
+      initializedA.requiredSecretProvisioning.length === 4 &&
+      initializedB.requiredSecretProvisioning.length === 4,
+      "Reusable initialization wrote secret values or lost provisioning guidance",
+    );
+    assert(
+      workspaceValuesA.AI_EMPLOYEE_PROJECTS_DIRECTORY === join(canonicalWorkspaceA, ".runtime", "projects") &&
+      workspaceValuesB.AI_EMPLOYEE_PROJECTS_DIRECTORY === join(canonicalWorkspaceB, ".runtime", "projects") &&
+      ((await stat(workspaceConfigA)).mode & 0o777) === 0o600 &&
+      ((await stat(workspaceConfigB)).mode & 0o777) === 0o600,
+      "Independent workspace paths or permissions are not isolated",
+    );
+    let workspaceOverwriteRefused = false;
+    try {
+      await run(installedGuide, ["init"], { cwd: workspaceA });
+    } catch {
+      workspaceOverwriteRefused = true;
+    }
+    assert(workspaceOverwriteRefused, "Reusable guide overwrote a consumer workspace");
+    const guideCheck = JSON.parse((await run(
+      installedGuide,
+      ["check", "--config", configPath],
+      { cwd: runtimeDirectory },
+    )).stdout);
+    assert(
+      guideCheck.schema === "ai-employee-reuse/v1" &&
+      guideCheck.readOnly === true &&
+      guideCheck.config.exists === false &&
+      guideCheck.readyForPreflight === false,
+      "Installed reusable environment guide did not safely detect missing configuration",
+    );
     const initializeScript = join(packageDirectory, "scripts", "初始化生产配置.mjs");
     await run(process.execPath, [initializeScript, "--output", configPath]);
     const configMode = (await stat(configPath)).mode & 0o777;
     assert(configMode === 0o600, "Generated production config permissions are not 600");
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    assert(canonicalKey(config.AI_EMPLOYEE_DATA_KEY), "Generated data key is invalid");
-    assert(canonicalKey(config.AI_EMPLOYEE_BACKUP_KEY), "Generated backup key is invalid");
-    assert(config.AI_EMPLOYEE_DATA_KEY !== config.AI_EMPLOYEE_BACKUP_KEY, "Generated keys are not independent");
     assert(
-      typeof config.AI_EMPLOYEE_ADMIN_READ_TOKEN === "string" &&
-      config.AI_EMPLOYEE_ADMIN_READ_TOKEN.length >= 64 &&
-      config.AI_EMPLOYEE_ADMIN_READ_TOKEN !== config.AI_EMPLOYEE_ADMIN_WRITE_TOKEN,
-      "Generated admin tokens are invalid or not independent",
+      [
+        config.AI_EMPLOYEE_DATA_KEY,
+        config.AI_EMPLOYEE_BACKUP_KEY,
+        config.AI_EMPLOYEE_ADMIN_READ_TOKEN,
+        config.AI_EMPLOYEE_ADMIN_WRITE_TOKEN,
+      ].every((value) => /^keychain:\/\/ai-employee-[a-f0-9]{16}\//u.test(value)),
+      "Generated configuration contains inline secrets or invalid Keychain references",
+    );
+    const secretPreview = JSON.parse((await run(
+      installedGuide,
+      ["secrets", "--config", configPath],
+      { cwd: runtimeDirectory },
+    )).stdout);
+    assert(
+      secretPreview.dryRun === true &&
+      secretPreview.plannedKeys.length === 4 &&
+      secretPreview.secretsPrinted === false,
+      "Installed Keychain provisioning command is not safely previewable",
     );
     assert(config.GBRAIN_PATH === "gbrain", "Generated production config is missing gbrain runtime path");
     for (const key of [
@@ -271,6 +403,10 @@ export async function verifyReusableInstallation({
     assert(refusedOverwrite, "Production config initializer overwrote an existing file");
 
     Object.assign(config, {
+      AI_EMPLOYEE_DATA_KEY: "env://AI_EMPLOYEE_REUSE_DATA_KEY",
+      AI_EMPLOYEE_BACKUP_KEY: "env://AI_EMPLOYEE_REUSE_BACKUP_KEY",
+      AI_EMPLOYEE_ADMIN_READ_TOKEN: "env://AI_EMPLOYEE_REUSE_ADMIN_READ_TOKEN",
+      AI_EMPLOYEE_ADMIN_WRITE_TOKEN: "env://AI_EMPLOYEE_REUSE_ADMIN_WRITE_TOKEN",
       AI_EMPLOYEE_TENANT_ID: "reuse-tenant",
       AI_EMPLOYEE_APPROVER: "reuse-operator",
       DINGTALK_TARGET_USER_IDS: "reuse-target-user",
@@ -280,6 +416,21 @@ export async function verifyReusableInstallation({
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, {
       mode: 0o600,
     });
+    const configuredGuideCheck = JSON.parse((await run(
+      installedGuide,
+      ["check", "--config", configPath],
+      { cwd: runtimeDirectory },
+    )).stdout);
+    assert(
+      configuredGuideCheck.config.exists === true &&
+      configuredGuideCheck.config.protected === true &&
+      configuredGuideCheck.config.externalSecretReferences === 4 &&
+      configuredGuideCheck.config.inlineSecretValues === 0 &&
+      configuredGuideCheck.config.unsafeCapabilitiesEnabled.length === 0 &&
+      !JSON.stringify(configuredGuideCheck).includes("reuse-target-user") &&
+      !JSON.stringify(configuredGuideCheck).includes("reuse-self-user"),
+      "Installed reusable environment guide exposed values or misread safe defaults",
+    );
 
     await run("/usr/bin/git", ["-C", projectDirectory, "init"]);
     const projectScript = join(packageDirectory, "scripts", "创建项目配置.mjs");
@@ -291,7 +442,13 @@ export async function verifyReusableInstallation({
       "--requester", "reuse-test-user",
       "--write",
     ];
-    const runtimeEnvironment = { AI_EMPLOYEE_CONFIG_FILE: configPath };
+    const runtimeEnvironment = {
+      AI_EMPLOYEE_CONFIG_FILE: configPath,
+      AI_EMPLOYEE_REUSE_DATA_KEY: Buffer.alloc(32, 1).toString("base64"),
+      AI_EMPLOYEE_REUSE_BACKUP_KEY: Buffer.alloc(32, 2).toString("base64"),
+      AI_EMPLOYEE_REUSE_ADMIN_READ_TOKEN: "r".repeat(64),
+      AI_EMPLOYEE_REUSE_ADMIN_WRITE_TOKEN: "w".repeat(64),
+    };
     await run(process.execPath, projectArgs, { env: runtimeEnvironment });
     const manifestPath = join(runtimeDirectory, "projects", "reuse_example.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -326,9 +483,14 @@ export async function verifyReusableInstallation({
       checkedPluginFiles: pluginValidation.checkedFiles,
       checkedPortableContentFiles: portableContentFiles,
       versionAligned: true,
+      reusableGuide: true,
+      installedCodeCheck: true,
+      isolatedWorkspaces: 2,
       configMode: "600",
       projectMode: "600",
       overwriteProtection: true,
+      inlineSecretsWritten: 0,
+      keychainProvisioningPreview: true,
       defaultExternalCapabilities: "disabled",
       productionWrite: false,
     };

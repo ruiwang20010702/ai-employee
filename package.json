@@ -1,6 +1,9 @@
 {
   "name": "ai-employee-dingtalk-listener",
   "version": "0.2.0",
+  "bin": {
+    "ai-employee": "scripts/新环境向导.mjs"
+  },
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -38,12 +41,16 @@
     "targets:update": "node scripts/更新监听目标.mjs",
     "projects:validate": "node scripts/校验项目能力.mjs",
     "projects:create": "node scripts/创建项目配置.mjs",
+    "setup:check": "node scripts/新环境向导.mjs check",
+    "setup:init": "node scripts/新环境向导.mjs init",
+    "setup:secrets": "node scripts/新环境向导.mjs secrets",
     "reuse:verify": "node scripts/验证复用安装.mjs",
     "codex:verify": "node scripts/验证Codex插件.mjs",
     "ci:verify": "node scripts/验证GitHub提交.mjs",
     "rollback:verify": "node scripts/验证服务回退兼容.mjs",
     "plan:check": "node scripts/评估任务计划.mjs",
     "config:init": "node scripts/初始化生产配置.mjs",
+    "config:provision-keychain": "node scripts/初始化钥匙串密钥.mjs",
     "config:migrate-keychain": "node scripts/迁移生产密钥到钥匙串.mjs",
     "config:rotate-admin": "node scripts/轮换管理令牌.mjs",
     "production:doctor": "node scripts/只读生产诊断.mjs",
@@ -59,7 +66,7 @@
     "db:restore": "node scripts/恢复数据库.mjs",
     "db:restore:drill": "node scripts/隔离恢复演练.mjs",
     "db:migrate": "node src/migrate.mjs",
-    "check": "node --check src/*.mjs && node --test --test-concurrency=4 test/*.test.mjs",
+    "check": "node scripts/运行代码检查.mjs",
     "check:full": "node scripts/运行完整测试.mjs",
     "check:security": "npm audit --audit-level=high",
     "check:dws": "node src/listener.mjs --once"

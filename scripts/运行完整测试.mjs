@@ -161,6 +161,15 @@ export async function runCompleteTest({
   postgresBin,
   systemTemporaryDirectory = tmpdir(),
 } = {}) {
+  const testFiles = await readdir(join(resolve(root), "test"))
+    .then((entries) => entries.filter((name) => name.endsWith(".test.mjs")))
+    .catch((error) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+  if (testFiles.length === 0) {
+    throw new Error("完整测试只能在包含 test 目录的源码仓库中运行");
+  }
   const bin = postgresBin ?? await findPostgresBin({ environment });
   const temporaryRoot = assertSafeTemporaryTestDirectory(
     await mkdtemp(join(systemTemporaryDirectory, testDirectoryPrefix)),

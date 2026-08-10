@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { initializeProductionConfig } from "../scripts/初始化生产配置.mjs";
 
-test("production config initializer writes protected unique secrets and refuses overwrite", async () => {
+test("production config initializer writes protected isolated references and refuses overwrite", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ai-employee-config-"));
   const destination = join(directory, "nested", "production.json");
   const result = await initializeProductionConfig({ outputPath: destination });
@@ -14,8 +14,8 @@ test("production config initializer writes protected unique secrets and refuses 
 
   assert.equal(result.path, destination);
   assert.equal(metadata.mode & 0o777, 0o600);
-  assert.equal(Buffer.from(config.AI_EMPLOYEE_DATA_KEY, "base64").length, 32);
-  assert.equal(Buffer.from(config.AI_EMPLOYEE_BACKUP_KEY, "base64").length, 32);
+  assert.match(config.AI_EMPLOYEE_DATA_KEY, /^keychain:\/\/ai-employee-[a-f0-9]{16}\/data-key$/u);
+  assert.match(config.AI_EMPLOYEE_BACKUP_KEY, /^keychain:\/\/ai-employee-[a-f0-9]{16}\/backup-key$/u);
   assert.notEqual(config.AI_EMPLOYEE_DATA_KEY, config.AI_EMPLOYEE_BACKUP_KEY);
   assert.notEqual(
     config.AI_EMPLOYEE_ADMIN_READ_TOKEN,
@@ -29,6 +29,15 @@ test("production config initializer writes protected unique secrets and refuses 
   assert.equal(config.DINGTALK_TARGET_USER_IDS, "");
   assert.equal(config.DINGTALK_TARGET_GROUP_IDS, "");
   assert.equal(config.DINGTALK_SELF_USER_ID, "");
+  assert.equal(config.DATABASE_URL, "");
+  assert.equal(result.secretStorage, "keychain");
+  assert.equal(result.generatedSecrets.length, 0);
+  assert.deepEqual(result.externalSecretReferences, [
+    "AI_EMPLOYEE_DATA_KEY",
+    "AI_EMPLOYEE_BACKUP_KEY",
+    "AI_EMPLOYEE_ADMIN_READ_TOKEN",
+    "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
+  ]);
   assert.deepEqual(result.requiredEdits, [
     "DATABASE_URL",
     "AI_EMPLOYEE_TENANT_ID",
@@ -41,4 +50,13 @@ test("production config initializer writes protected unique secrets and refuses 
     () => initializeProductionConfig({ outputPath: destination }),
     (error) => error.code === "EEXIST",
   );
+});
+
+test("two initialized workspaces never reuse a Keychain namespace", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-employee-config-pair-"));
+  const firstPath = join(directory, "first.json");
+  const secondPath = join(directory, "second.json");
+  const first = await initializeProductionConfig({ outputPath: firstPath });
+  const second = await initializeProductionConfig({ outputPath: secondPath });
+  assert.notEqual(first.keychainService, second.keychainService);
 });
