@@ -170,13 +170,17 @@ test("上一版本含017但不含018时拒绝回退到已应用018的数据库",
   };
 
   await assert.rejects(
-    verifyServiceRollbackState({ pool, previousRelease: directory }),
+    verifyServiceRollbackState({ config: {}, pool, previousRelease: directory }),
     { code: "service_rollback_capability_budget_unsupported" },
   );
 
   await writeFile(join(migrations, "018_能力次数预算.sql"), "SELECT 1;\n");
   assert.equal(
-    (await verifyServiceRollbackState({ pool, previousRelease: directory }))
+    (await verifyServiceRollbackState({
+      config: {},
+      pool,
+      previousRelease: directory,
+    }))
       .compatible,
     true,
   );

@@ -1229,9 +1229,11 @@ test("依赖安装禁用生命周期且目标进程只获得最小环境", () =>
     runtimePath[0],
     resolveTrustedReleaseTool("node").replace(/\/[^/]+$/u, ""),
   );
+  assert.deepEqual(
+    runtimePath.slice(1),
+    ["/usr/bin", "/bin", "/usr/sbin", "/sbin"],
+  );
   assert.equal(runtimePath.includes(join(homedir(), ".local", "bin")), false);
-  assert.equal(runtimePath.includes("/opt/homebrew/bin"), false);
-  assert.equal(runtimePath.includes("/usr/local/bin"), false);
   assert.equal(environment.TMPDIR, "/private/tmp/safe");
   assert.equal(environment.LANG, "zh_CN.UTF-8");
   assert.equal(environment.HTTPS_PROXY, "http://127.0.0.1:8080");
