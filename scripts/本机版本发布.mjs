@@ -46,6 +46,9 @@ const execFileAsync = promisify(execFile);
 const commandTimeoutMs = 20 * 60_000;
 const pendingReleaseFilename = ".pending-release.json";
 const pendingReleaseSchema = "ai-employee-pending-release/v1";
+const capabilityBudgetMigration = "018_能力次数预算.sql";
+const ordinaryReleaseForwardOnlyError =
+  "普通本机发布已阻止：目标版本支持第 018 号能力次数预算迁移，但上一版本不支持；必须另行采用经显式授权的维护/前滚流程，本脚本当前不提供前滚旁路。";
 const pendingReleasePhases = new Set([
   "service_switch_started",
   "service_verified",
@@ -109,6 +112,7 @@ export const localReleaseSteps = Object.freeze([
   "核对并恢复中断发布",
   "准备不可变版本目录",
   "写入目标提交并完成包内检查",
+  "核对第 018 号前滚边界",
   "复制受保护生产配置",
   "只读生产预检与回退目标门禁",
   "创建加密数据库备份",
@@ -1338,6 +1342,99 @@ export async function verifyReleaseAgainstCommit({
   }
 }
 
+async function inspectCanonicalDirectory(path, label, { optional = false } = {}) {
+  let metadata;
+  try {
+    metadata = await lstat(path);
+  } catch (error) {
+    if (optional && error?.code === "ENOENT") return false;
+    throw new Error(`${label}无法验证`);
+  }
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`${label}不能是符号链接`);
+  }
+  if (!metadata.isDirectory()) {
+    throw new Error(`${label}不是普通目录`);
+  }
+  let canonical;
+  try {
+    canonical = await realpath(path);
+  } catch {
+    throw new Error(`${label}无法验证`);
+  }
+  if (canonical !== path) {
+    throw new Error(`${label}的规范路径与词法路径不一致`);
+  }
+  return true;
+}
+
+async function verifiedReleaseIncludesCapabilityBudget(releaseDirectory, label) {
+  if (
+    typeof releaseDirectory !== "string" ||
+    !isAbsolute(releaseDirectory) ||
+    resolve(releaseDirectory) !== releaseDirectory ||
+    /[\0\r\n]/u.test(releaseDirectory)
+  ) {
+    throw new Error(`${label}版本目录不是已验证的绝对路径`);
+  }
+  await inspectCanonicalDirectory(releaseDirectory, `${label}版本目录`);
+  const databaseDirectory = join(releaseDirectory, "db");
+  if (!(await inspectCanonicalDirectory(
+    databaseDirectory,
+    `${label}版本 db 目录`,
+    { optional: true },
+  ))) return false;
+  const migrationsDirectory = join(databaseDirectory, "migrations");
+  if (!(await inspectCanonicalDirectory(
+    migrationsDirectory,
+    `${label}版本 migrations 目录`,
+    { optional: true },
+  ))) return false;
+  const migrationPath = join(
+    migrationsDirectory,
+    capabilityBudgetMigration,
+  );
+  let metadata;
+  try {
+    metadata = await lstat(migrationPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`${label}版本的第 018 号固定迁移文件不能是符号链接`);
+  }
+  if (!metadata.isFile()) {
+    throw new Error(`${label}版本的第 018 号固定迁移文件不是普通文件`);
+  }
+  let canonicalMigration;
+  try {
+    canonicalMigration = await realpath(migrationPath);
+  } catch {
+    throw new Error(`${label}版本的第 018 号固定迁移文件无法验证`);
+  }
+  if (canonicalMigration !== migrationPath) {
+    throw new Error(
+      `${label}版本的第 018 号固定迁移文件规范路径与词法路径不一致`,
+    );
+  }
+  return true;
+}
+
+export async function assertOrdinaryReleaseMigrationBoundary({
+  releaseDirectory,
+  previousRelease,
+} = {}) {
+  const [targetSupports018, previousSupports018] = await Promise.all([
+    verifiedReleaseIncludesCapabilityBudget(releaseDirectory, "目标"),
+    verifiedReleaseIncludesCapabilityBudget(previousRelease, "上一"),
+  ]);
+  if (targetSupports018 && !previousSupports018) {
+    throw new Error(ordinaryReleaseForwardOnlyError);
+  }
+  return { targetSupports018, previousSupports018 };
+}
+
 export async function validateAndCopyProductionConfig({
   configPath,
   releaseDirectory,
@@ -1583,6 +1680,8 @@ function releasePlan({ sha, root, sourceDirectory, configPath }) {
     sourceDirectory,
     configPath,
     steps: localReleaseSteps,
+    forwardOnlyBoundary:
+      "普通 --apply 若目标版本支持第 018 号迁移而上一版本不支持，会在复制生产配置、备份、迁移和服务动作前停止；本脚本不提供前滚旁路。",
     rollback: "服务切换后失败时，先检查新结构状态，再只恢复上一版本服务；绝不自动恢复或反向迁移数据库。",
   };
 }
@@ -1707,6 +1806,16 @@ export async function runLocalAtomicRelease({
       expected: releaseIntegrity,
     });
     complete("写入目标提交并完成包内检查");
+
+    await dependencies.verifyPreviousReleaseIntegrity({
+      releaseDirectory: previousRelease,
+      expectedDigest: previousIntegrityDigest,
+    });
+    await assertOrdinaryReleaseMigrationBoundary({
+      releaseDirectory,
+      previousRelease,
+    });
+    complete("核对第 018 号前滚边界");
 
     releaseConfigPath = await dependencies.copyProductionConfig({
       configPath,

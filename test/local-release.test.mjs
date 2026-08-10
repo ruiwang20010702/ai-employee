@@ -16,9 +16,10 @@ import {
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import {
   acquireLocalReleaseLock,
+  assertOrdinaryReleaseMigrationBoundary,
   captureReleaseIntegrity,
   clearPendingReleaseJournal,
   compareReleaseRuntimeIdentity,
@@ -101,13 +102,84 @@ async function createProtectedRelease(root, name) {
   return realpath(releaseDirectory);
 }
 
+async function createMigrationRelease(root, name, { supports018 = false } = {}) {
+  const releaseDirectory = join(root, name);
+  const migrations = join(releaseDirectory, "db", "migrations");
+  await mkdir(migrations, { recursive: true, mode: 0o700 });
+  await writeFile(join(releaseDirectory, "package.json"), "{}\n");
+  if (supports018) {
+    await writeFile(
+      join(migrations, "018_能力次数预算.sql"),
+      "SELECT 1;\n",
+    );
+  }
+  return realpath(releaseDirectory);
+}
+
+async function createSymlinkedMigrationRelease(root, name, linkLevel) {
+  const releaseDirectory = join(root, name);
+  const outside = join(root, `${name}-outside`);
+  await mkdir(releaseDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(join(releaseDirectory, "package.json"), "{}\n");
+  if (linkLevel === "db") {
+    await mkdir(join(outside, "migrations"), {
+      recursive: true,
+      mode: 0o700,
+    });
+    await writeFile(
+      join(outside, "migrations", "018_能力次数预算.sql"),
+      "SELECT 1;\n",
+    );
+    await symlink(outside, join(releaseDirectory, "db"));
+  } else if (linkLevel === "migrations") {
+    await mkdir(join(releaseDirectory, "db"), {
+      recursive: true,
+      mode: 0o700,
+    });
+    await mkdir(outside, { recursive: true, mode: 0o700 });
+    await writeFile(
+      join(outside, "018_能力次数预算.sql"),
+      "SELECT 1;\n",
+    );
+    await symlink(outside, join(releaseDirectory, "db", "migrations"));
+  } else if (linkLevel === "migration") {
+    const migrations = join(releaseDirectory, "db", "migrations");
+    await mkdir(migrations, { recursive: true, mode: 0o700 });
+    await mkdir(outside, { recursive: true, mode: 0o700 });
+    const outsideMigration = join(outside, "018.sql");
+    await writeFile(outsideMigration, "SELECT 1;\n");
+    await symlink(
+      outsideMigration,
+      join(migrations, "018_能力次数预算.sql"),
+    );
+  } else {
+    throw new Error(`unknown link level: ${linkLevel}`);
+  }
+  return realpath(releaseDirectory);
+}
+
+const fakeReleaseRoot = await realpath(
+  await mkdtemp(join(tmpdir(), "ai-employee-local-release-fixture-")),
+);
+const fakePreviousRelease = await createMigrationRelease(
+  fakeReleaseRoot,
+  "previous",
+  { supports018: true },
+);
+const fakeTargetRelease = await createMigrationRelease(
+  fakeReleaseRoot,
+  "target",
+  { supports018: true },
+);
+after(() => rm(fakeReleaseRoot, { recursive: true, force: true }));
+
 function pendingReleaseRecord(overrides = {}) {
   return {
     token: "11111111-1111-4111-8111-111111111111",
     sha,
     previousSha,
-    previousRelease: "/releases/old",
-    targetRelease: "/releases/new",
+    previousRelease: fakePreviousRelease,
+    targetRelease: fakeTargetRelease,
     ...pendingDigests,
     ...overrides,
   };
@@ -115,7 +187,8 @@ function pendingReleaseRecord(overrides = {}) {
 
 function fakeDependencies(events, {
   failAt = "",
-  previousRelease = "/releases/old",
+  previousRelease = fakePreviousRelease,
+  targetRelease = fakeTargetRelease,
 } = {}) {
   const failures = new Set(Array.isArray(failAt) ? failAt : [failAt]);
   function operation(name, result) {
@@ -127,7 +200,12 @@ function fakeDependencies(events, {
   }
   function releaseOperation(name, result) {
     return async ({ releaseDirectory }) => {
-      const event = `${name}:${releaseDirectory}`;
+      const displayDirectory = releaseDirectory === fakeTargetRelease
+        ? "/releases/new"
+        : releaseDirectory === fakePreviousRelease
+          ? "/releases/old"
+          : releaseDirectory;
+      const event = `${name}:${displayDirectory}`;
       events.push(event);
       if (failures.has(event)) throw new Error(`simulated ${event} failure`);
       return result;
@@ -169,15 +247,19 @@ function fakeDependencies(events, {
     ),
     writePendingRelease: operation(
       "write-pending",
-      pendingReleaseRecord(),
+      pendingReleaseRecord({ previousRelease, targetRelease }),
     ),
     updatePendingRelease: operation(
       "update-pending",
-      pendingReleaseRecord({ phase: "service_verified" }),
+      pendingReleaseRecord({
+        previousRelease,
+        targetRelease,
+        phase: "service_verified",
+      }),
     ),
     clearPendingRelease: operation("clear-pending", { cleared: true }),
     prepareRelease: operation("prepare", {
-      releaseDirectory: "/releases/new",
+      releaseDirectory: targetRelease,
       previousRelease,
     }),
     materializeRelease: operation("materialize"),
@@ -191,7 +273,7 @@ function fakeDependencies(events, {
     checkRelease: operation("check"),
     copyProductionConfig: operation(
       "copy-config",
-      "/releases/new/.runtime/production.json",
+      join(targetRelease, ".runtime", "production.json"),
     ),
     validateRollbackTarget: operation("rollback-target"),
     backupDatabase: operation("backup"),
@@ -217,11 +299,148 @@ test("本机版本发布默认只返回计划且不调用任何依赖", async ()
   assert.equal(result.executed, false);
   assert.equal(result.applyRequired, true);
   assert.equal(events.length, 0);
+  assert.match(result.forwardOnlyBoundary, /第 018 号迁移/u);
+  assert.match(result.forwardOnlyBoundary, /本脚本不提供前滚旁路/u);
   assert.match(result.rollback, /绝不自动恢复或反向迁移数据库/u);
   await assert.rejects(
     runLocalAtomicRelease({ ...releaseOptions, sha: "main" }),
     /40 位小写 SHA/u,
   );
+});
+
+test("普通 apply 在 target 有 018 而 previous 无 018 时于生产动作前阻断", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-forward-only-boundary-")),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const targetRelease = await createMigrationRelease(
+    directory,
+    "target",
+    { supports018: true },
+  );
+  const previousRelease = await createMigrationRelease(
+    directory,
+    "previous",
+  );
+  const events = [];
+  const dependencies = fakeDependencies(events, {
+    targetRelease,
+    previousRelease,
+  });
+  let injectedBoundaryCalled = false;
+  dependencies.assertOrdinaryReleaseMigrationBoundary = async () => {
+    injectedBoundaryCalled = true;
+    return { targetSupports018: false, previousSupports018: true };
+  };
+
+  await assert.rejects(
+    runLocalAtomicRelease({
+      ...releaseOptions,
+      apply: true,
+      forwardOnly: true,
+      dependencies,
+    }),
+    /普通本机发布已阻止.*显式授权的维护\/前滚流程.*不提供前滚旁路/u,
+  );
+
+  assert.equal(injectedBoundaryCalled, false);
+  assert.ok(
+    events.indexOf("verify-previous-integrity") >
+      events.indexOf("verify-previous-commit"),
+  );
+  assert.equal(
+    events.filter((event) => event === "verify-integrity").length,
+    2,
+  );
+  for (const forbidden of [
+    "copy-config",
+    "compare-runtime-identity",
+    "rollback-target",
+    "backup",
+    "migrate",
+    "doctor",
+    "codex-probe",
+  ]) {
+    assert.equal(events.includes(forbidden), false, forbidden);
+  }
+  assert.equal(
+    events.some((event) => event.startsWith("service-")),
+    false,
+  );
+  assert.equal(events.at(-2), "verify-previous-integrity");
+  assert.equal(events.at(-1), "unlock");
+});
+
+test("target 与 previous 都有固定 018 文件时普通发布保持原流程", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-supported-018-boundary-")),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const targetRelease = await createMigrationRelease(
+    directory,
+    "target",
+    { supports018: true },
+  );
+  const previousRelease = await createMigrationRelease(
+    directory,
+    "previous",
+    { supports018: true },
+  );
+  const events = [];
+  const dependencies = fakeDependencies(events, {
+    targetRelease,
+    previousRelease,
+  });
+  const result = await runLocalAtomicRelease({
+    ...releaseOptions,
+    apply: true,
+    dependencies,
+  });
+
+  assert.equal(result.released, true);
+  const verifiedPrevious = events.indexOf("verify-previous-integrity");
+  assert.ok(verifiedPrevious < events.indexOf("copy-config"));
+  assert.ok(verifiedPrevious < events.indexOf("backup"));
+  assert.ok(verifiedPrevious < events.indexOf("migrate"));
+  assert.ok(events.includes(`service-install:${targetRelease}`));
+  assert.ok(events.includes(`activate:${targetRelease}`));
+});
+
+test("018 边界逐级拒绝 target 和 previous 的目录或固定文件符号链接", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-018-symlink-boundary-")),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const ordinaryRelease = await createMigrationRelease(
+    directory,
+    "ordinary",
+    { supports018: true },
+  );
+  const cases = [
+    { level: "db", expected: /db 目录不能是符号链接/u },
+    { level: "migrations", expected: /migrations 目录不能是符号链接/u },
+    { level: "migration", expected: /固定迁移文件不能是符号链接/u },
+  ];
+  for (const role of ["target", "previous"]) {
+    for (const item of cases) {
+      const linkedRelease = await createSymlinkedMigrationRelease(
+        directory,
+        `${role}-${item.level}`,
+        item.level,
+      );
+      await assert.rejects(
+        assertOrdinaryReleaseMigrationBoundary({
+          releaseDirectory: role === "target"
+            ? linkedRelease
+            : ordinaryRelease,
+          previousRelease: role === "previous"
+            ? linkedRelease
+            : ordinaryRelease,
+        }),
+        item.expected,
+      );
+    }
+  }
 });
 
 test("发布严格在云端门禁后接触配置和数据库并最终原子激活", async () => {
@@ -248,6 +467,7 @@ test("发布严格在云端门禁后接触配置和数据库并最终原子激�
     "verify-integrity",
     "install-dependencies",
     "verify-integrity",
+    "verify-previous-integrity",
     "copy-config",
     "compare-runtime-identity",
     "rollback-target",
@@ -827,7 +1047,7 @@ test("下次发布先完成中断对账并停止，不把旧 current 当作新�
 
   assert.equal(result.recoveredInterruptedRelease, true);
   assert.equal(result.recoveryStatus, "target_recovered");
-  assert.equal(result.releaseDirectory, "/releases/new");
+  assert.equal(result.releaseDirectory, fakeTargetRelease);
   assert.equal(events.includes("prepare"), false);
   assert.equal(events.includes("copy-config"), false);
   assert.equal(events.at(-1), "unlock");
@@ -1017,13 +1237,15 @@ test("服务切换后失败先过状态保护再只恢复上一版本服务", as
     /simulated service-verify/u,
   );
 
-  const guard = events.indexOf("rollback-state-guard:/releases/new");
+  const guard = events.indexOf(
+    `rollback-state-guard:${fakeTargetRelease}`,
+  );
   const reinstall = events.indexOf("service-install:/releases/old");
   const cleanup = events.indexOf("service-cleanup:/releases/old");
   const verify = events.indexOf("service-verify:/releases/old");
   assert.ok(guard > events.indexOf("service-verify:/releases/new"));
   assert.ok(guard < reinstall && reinstall < cleanup && cleanup < verify);
-  assert.equal(guardedPreviousRelease, "/releases/old");
+  assert.equal(guardedPreviousRelease, fakePreviousRelease);
   assert.equal(events.includes("restore-database"), false);
   assert.equal(events.includes("reverse-migrate"), false);
 });
@@ -1066,7 +1288,7 @@ test("回退前上一版本代码漂移时绝不执行其安装脚本", async ()
   dependencies.verifyPreviousReleaseIntegrity = async () => {
     events.push("verify-previous-integrity");
     previousChecks += 1;
-    if (previousChecks === 2) {
+    if (previousChecks === 3) {
       throw new Error("上一版本目录已偏离完整性基线");
     }
   };
