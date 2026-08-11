@@ -20,6 +20,7 @@ import test, { after } from "node:test";
 import {
   acquireLocalReleaseLock,
   assertOrdinaryReleaseMigrationBoundary,
+  captureForwardBackupEvidence,
   captureReleaseIntegrity,
   clearPendingReleaseJournal,
   compareReleaseRuntimeIdentity,
@@ -245,18 +246,18 @@ function fakeDependencies(events, {
       "verify-runtime-binding",
       { valid: true },
     ),
-    writePendingRelease: operation(
-      "write-pending",
-      pendingReleaseRecord({ previousRelease, targetRelease }),
-    ),
-    updatePendingRelease: operation(
-      "update-pending",
-      pendingReleaseRecord({
+    async writePendingRelease({ mode = "atomic", phase = "service_switch_started" }) {
+      events.push("write-pending");
+      if (failures.has("write-pending")) {
+        throw new Error("simulated write-pending failure");
+      }
+      return pendingReleaseRecord({
         previousRelease,
         targetRelease,
-        phase: "service_verified",
-      }),
-    ),
+        mode,
+        phase,
+      });
+    },
     clearPendingRelease: operation("clear-pending", { cleared: true }),
     prepareRelease: operation("prepare", {
       releaseDirectory: targetRelease,
@@ -276,7 +277,24 @@ function fakeDependencies(events, {
       join(targetRelease, ".runtime", "production.json"),
     ),
     validateRollbackTarget: operation("rollback-target"),
-    backupDatabase: operation("backup"),
+    backupDatabase: operation("backup", {
+      completed: true,
+      backupPath: "/var/tmp/ai-employee-production/backups/forward.dump.enc",
+      metadataPath: "/var/tmp/ai-employee-production/backups/forward.dump.enc.json",
+    }),
+    restoreBackupDrill: operation("restore-drill", {
+      restored: true,
+      isolated: true,
+    }),
+    captureForwardBackupEvidence: operation("capture-backup-evidence", {
+      backupPath: "/var/tmp/ai-employee-production/backups/forward.dump.enc",
+      metadataPath: "/var/tmp/ai-employee-production/backups/forward.dump.enc.json",
+      backupDigest: "1".repeat(64),
+      metadataDigest: "2".repeat(64),
+    }),
+    verifyForwardBackupEvidence: operation("verify-backup-evidence", {
+      valid: true,
+    }),
     migrateDatabase: operation("migrate"),
     runDoctor: operation("doctor"),
     runCodexProbe: operation("codex-probe"),
@@ -285,6 +303,33 @@ function fakeDependencies(events, {
     verifyService: releaseOperation("service-verify"),
     activateRelease: releaseOperation("activate", { activated: true }),
     rollbackStateGuard: releaseOperation("rollback-state-guard"),
+    runForwardPreflight: operation("forward-preflight", { valid: true }),
+    pauseSystem: operation("pause", { paused: true }),
+    inspectForwardMaintenanceState: operation("forward-state", {
+      safe: true,
+      paused: true,
+    }),
+    stopServicesForMaintenance: operation("stop-services", {
+      stopped: true,
+      forwardOnly: true,
+    }),
+    installForwardOnlyService: releaseOperation("forward-service-install", {
+      installed: true,
+      forwardOnly: true,
+    }),
+    async updatePendingRelease({ phase, backupEvidence }) {
+      events.push("update-pending");
+      if (failures.has("update-pending")) {
+        throw new Error("simulated update-pending failure");
+      }
+      return pendingReleaseRecord({
+        previousRelease,
+        targetRelease,
+        mode: phase.startsWith("forward_") ? "forward_only" : "atomic",
+        phase,
+        ...(backupEvidence ?? {}),
+      });
+    },
   };
 }
 
@@ -369,6 +414,134 @@ test("普通 apply 在 target 有 018 而 previous 无 018 时于生产动作前
   );
   assert.equal(events.at(-2), "verify-previous-integrity");
   assert.equal(events.at(-1), "unlock");
+});
+
+test("维护前滚必须使用绑定目标 SHA 的精确不可回退确认", async () => {
+  for (const forwardConfirmation of ["", `I_ACCEPT_FORWARD_ONLY:${"b".repeat(40)}`]) {
+    const events = [];
+    await assert.rejects(
+      runLocalAtomicRelease({
+        ...releaseOptions,
+        apply: true,
+        maintenanceForward: true,
+        forwardConfirmation,
+        dependencies: fakeDependencies(events),
+      }),
+      /必须绑定目标 SHA 的不可回退确认值/u,
+    );
+    assert.deepEqual(events, []);
+  }
+});
+
+test("维护前滚按暂停、零在途、停服、恢复演练、迁移和前滚安装顺序完成且保持暂停", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-maintenance-forward-")),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const targetRelease = await createMigrationRelease(
+    directory,
+    "target",
+    { supports018: true },
+  );
+  const previousRelease = await createMigrationRelease(directory, "previous");
+  const events = [];
+  const dependencies = fakeDependencies(events, {
+    targetRelease,
+    previousRelease,
+  });
+
+  const result = await runLocalAtomicRelease({
+    ...releaseOptions,
+    apply: true,
+    maintenanceForward: true,
+    forwardConfirmation: `I_ACCEPT_FORWARD_ONLY:${sha}`,
+    dependencies,
+  });
+
+  assert.equal(result.released, true);
+  assert.equal(result.forwardOnly, true);
+  assert.equal(result.paused, true);
+  assert.equal(result.databaseRollbackPerformed, false);
+  const ordered = [
+    "forward-preflight",
+    "pause",
+    "forward-state",
+    "write-pending",
+    "forward-state",
+    "stop-services",
+    "forward-state",
+    "backup",
+    "restore-drill",
+    "capture-backup-evidence",
+    "update-pending",
+    "migrate",
+    "update-pending",
+    "verify-backup-evidence",
+    "doctor",
+    "codex-probe",
+    `forward-service-install:${targetRelease}`,
+    `activate:${targetRelease}`,
+    "clear-pending",
+  ];
+  let cursor = -1;
+  for (const event of ordered) {
+    const next = events.indexOf(event, cursor + 1);
+    assert.ok(next > cursor, `${event} must follow ${events[cursor] ?? "start"}`);
+    cursor = next;
+  }
+  assert.equal(
+    events.some((event) => event.startsWith("service-install:/releases/old")),
+    false,
+  );
+  assert.equal(
+    events.some((event) => event.startsWith("rollback-state-guard:")),
+    false,
+  );
+});
+
+test("维护前滚迁移后失败保留中断记录且绝不恢复 0.2", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-maintenance-forward-failure-")),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const targetRelease = await createMigrationRelease(
+    directory,
+    "target",
+    { supports018: true },
+  );
+  const previousRelease = await createMigrationRelease(directory, "previous");
+  const events = [];
+  const dependencies = fakeDependencies(events, {
+    targetRelease,
+    previousRelease,
+    failAt: "doctor",
+  });
+
+  await assert.rejects(
+    runLocalAtomicRelease({
+      ...releaseOptions,
+      apply: true,
+      maintenanceForward: true,
+      forwardConfirmation: `I_ACCEPT_FORWARD_ONLY:${sha}`,
+      dependencies,
+    }),
+    /已保留中断记录.*保持暂停.*只允许继续前滚/u,
+  );
+  assert.ok(events.includes("migrate"));
+  assert.equal(events.includes("clear-pending"), false);
+  assert.equal(events.some((event) => event === "pause"), true);
+  assert.equal(
+    events.some((event) => event.startsWith("service-install:/releases/old")),
+    false,
+  );
+  assert.equal(
+    events.some((event) => event.startsWith("activate:/releases/old")),
+    false,
+  );
+  assert.equal(
+    events.some((event) => event.startsWith("rollback-state-guard:")),
+    false,
+  );
 });
 
 test("target 与 previous 都有固定 018 文件时普通发布保持原流程", async (t) => {
@@ -666,6 +839,63 @@ test("中断发布记录以 600 权限原子替换并按令牌清理", async (t)
   );
   await clearPendingReleaseJournal({ root, token: created.token });
   assert.equal(await inspectPendingReleaseJournal({ root }), null);
+});
+
+test("维护前滚 journal 绑定 600 权限备份与元数据摘要并拒绝篡改", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-forward-journal-")),
+  );
+  const root = join(directory, "ai-employee-production");
+  await mkdir(join(root, "releases"), { recursive: true, mode: 0o700 });
+  const previousRelease = await createProtectedRelease(
+    root,
+    `${previousSha}-100-1`,
+  );
+  const targetRelease = await createProtectedRelease(root, `${sha}-101-1`);
+  const backupDirectory = join(root, "backups");
+  await mkdir(backupDirectory, { mode: 0o700 });
+  const backupPath = join(backupDirectory, "forward.dump.enc");
+  const metadataPath = `${backupPath}.json`;
+  await writeFile(backupPath, "encrypted-backup", { mode: 0o600 });
+  await writeFile(metadataPath, "{}\n", { mode: 0o600 });
+  await chmod(backupPath, 0o600);
+  await chmod(metadataPath, 0o600);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  const created = await writePendingReleaseJournal({
+    root,
+    sha,
+    runId: "101",
+    attempt: "1",
+    previousRelease,
+    targetRelease,
+    previousSha,
+    ...pendingDigests,
+    mode: "forward_only",
+    phase: "forward_prepared",
+  });
+  const evidence = await captureForwardBackupEvidence({
+    root,
+    backupPath,
+    metadataPath,
+  });
+  const updated = await updatePendingReleaseJournal({
+    root,
+    token: created.token,
+    phase: "forward_backup_verified",
+    backupEvidence: evidence,
+  });
+  assert.equal(updated.backupPath, backupPath);
+  assert.equal(updated.metadataPath, metadataPath);
+  assert.match(updated.backupDigest, /^[0-9a-f]{64}$/u);
+  assert.match(updated.metadataDigest, /^[0-9a-f]{64}$/u);
+
+  await writeFile(backupPath, "tampered-backup", { mode: 0o600 });
+  await assert.rejects(
+    inspectPendingReleaseJournal({ root }),
+    /前滚备份证据已发生变化/u,
+  );
+  assert.equal((await lstat(join(root, ".pending-release.json"))).isFile(), true);
 });
 
 test("中断发布记录权限变宽后必须保留现场并拒绝读取", async (t) => {
@@ -1589,6 +1819,60 @@ test("依赖安装固定由受信 Node 启动 npm CLI 且不传 GitHub token", a
     "NODE_OPTIONS",
   ]) {
     assert.equal(Object.hasOwn(calls[0].options.env, key), false, key);
+  }
+});
+
+test("维护控制命令来自受门禁控制器并明确绑定固定目标版本", async () => {
+  const calls = [];
+  const targetRelease = "/releases/d9e5eaf-target";
+  const configPath = `${targetRelease}/.runtime/production.json`;
+  const dependencies = createLocalReleaseDependencies({
+    async command(command, args, options) {
+      calls.push({ command, args, options });
+      const script = args[0];
+      if (script.endsWith("备份数据库.mjs")) {
+        return JSON.stringify({
+          completed: true,
+          backupPath: "/var/tmp/ai-employee-production/backups/a.dump.enc",
+          metadataPath: "/var/tmp/ai-employee-production/backups/a.dump.enc.json",
+        });
+      }
+      if (script.endsWith("隔离恢复演练.mjs")) {
+        return JSON.stringify({ restored: true, isolated: true });
+      }
+      if (script.endsWith("验证维护前滚状态.mjs")) {
+        return JSON.stringify({ safe: true, paused: true });
+      }
+      if (script.endsWith("管理常驻服务.mjs")) {
+        return JSON.stringify(
+          args[1] === "stop-for-maintenance"
+            ? { stopped: true, forwardOnly: true }
+            : { installed: true, forwardOnly: true },
+        );
+      }
+      throw new Error(`unexpected controller command: ${script}`);
+    },
+  });
+  const context = { releaseDirectory: targetRelease, configPath };
+  const backup = await dependencies.backupDatabase(context);
+  await dependencies.restoreBackupDrill({
+    ...context,
+    backupPath: backup.backupPath,
+  });
+  await dependencies.inspectForwardMaintenanceState(context);
+  await dependencies.stopServicesForMaintenance(context);
+  await dependencies.installForwardOnlyService(context);
+
+  assert.equal(calls.length, 5);
+  for (const call of calls) {
+    assert.equal(call.command, resolveTrustedReleaseTool("node"));
+    assert.equal(call.args[0].startsWith(`${process.cwd()}/`), true);
+    assert.equal(call.args[0].startsWith(`${targetRelease}/`), false);
+    assert.equal(
+      call.options.env.AI_EMPLOYEE_EXPECTED_RELEASE_DIRECTORY,
+      targetRelease,
+    );
+    assert.equal(call.options.env.AI_EMPLOYEE_CONFIG_FILE, configPath);
   }
 });
 

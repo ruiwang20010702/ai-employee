@@ -122,7 +122,11 @@ try {
   );
   await rename(partialMetadataPath, metadataPath);
   await rename(partialDestination, destination);
-  console.log(JSON.stringify({ completed: true }));
+  console.log(JSON.stringify({
+    completed: true,
+    backupPath: destination,
+    metadataPath,
+  }));
 } catch (error) {
   dump.kill("SIGTERM");
   await Promise.all([

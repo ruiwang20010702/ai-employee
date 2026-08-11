@@ -110,6 +110,8 @@ test("备份成功后原子发布且可以通过认证解密恢复", async (t) =
   );
   assert.equal(backupFiles.length, 1);
   const destination = join(directory, backupFiles[0]);
+  assert.equal(receipt.backupPath, destination);
+  assert.equal(receipt.metadataPath, `${destination}.json`);
   const encrypted = await readFile(destination);
   assert.equal(encrypted.includes(Buffer.from("verified-dump-content")), false);
   assert.equal(

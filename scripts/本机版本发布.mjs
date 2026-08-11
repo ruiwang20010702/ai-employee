@@ -3,6 +3,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   constants as fsConstants,
+  createReadStream,
   realpathSync,
   statSync,
 } from "node:fs";
@@ -32,6 +33,7 @@ import {
   resolve,
 } from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import {
   validateCommitSha,
   verifyGitHubReleaseCommit,
@@ -44,6 +46,10 @@ import {
 
 const execFileAsync = promisify(execFile);
 const commandTimeoutMs = 20 * 60_000;
+const controllerDirectory = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 const pendingReleaseFilename = ".pending-release.json";
 const pendingReleaseSchema = "ai-employee-pending-release/v1";
 const capabilityBudgetMigration = "018_能力次数预算.sql";
@@ -52,7 +58,18 @@ const ordinaryReleaseForwardOnlyError =
 const pendingReleasePhases = new Set([
   "service_switch_started",
   "service_verified",
+  "forward_prepared",
+  "forward_backup_verified",
+  "forward_migrated",
+  "forward_service_verified",
 ]);
+const forwardPendingPhases = new Set([
+  "forward_prepared",
+  "forward_backup_verified",
+  "forward_migrated",
+  "forward_service_verified",
+]);
+const forwardConfirmationPrefix = "I_ACCEPT_FORWARD_ONLY:";
 export const productionRepository = "ruiwang20010702/ai-employee";
 export const npmInstallArguments = Object.freeze(["ci", "--ignore-scripts"]);
 const requiredKeychainKeys = Object.freeze([
@@ -180,6 +197,89 @@ function safeEnvironmentValue(value, pattern, maxLength = 2_048) {
 function pathIsWithin(root, target) {
   const remainder = relative(root, target);
   return remainder === "" || (!remainder.startsWith("..") && !isAbsolute(remainder));
+}
+
+async function sha256File(path) {
+  const hash = createHash("sha256");
+  const stream = createReadStream(path);
+  for await (const chunk of stream) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+export async function captureForwardBackupEvidence({
+  root: rootInput,
+  backupPath: backupInput,
+  metadataPath: metadataInput,
+} = {}) {
+  const root = await realpath(deploymentRoot(rootInput)).catch(() => {
+    throw new Error("生产发布根目录不可读取");
+  });
+  if (
+    !isAbsolute(String(backupInput ?? "")) ||
+    !isAbsolute(String(metadataInput ?? "")) ||
+    /[\0\r\n]/u.test(`${backupInput}${metadataInput}`)
+  ) {
+    throw new Error("前滚备份证据必须使用安全绝对路径");
+  }
+  const backupPath = await realpath(backupInput).catch(() => {
+    throw new Error("前滚备份文件不可读取");
+  });
+  const metadataPath = await realpath(metadataInput).catch(() => {
+    throw new Error("前滚备份元数据不可读取");
+  });
+  if (
+    !pathIsWithin(root, backupPath) ||
+    !pathIsWithin(root, metadataPath) ||
+    metadataPath !== `${backupPath}.json`
+  ) {
+    throw new Error("前滚备份证据越出专用生产目录");
+  }
+  const [backupMetadata, metadataMetadata] = await Promise.all([
+    lstat(backupPath),
+    lstat(metadataPath),
+  ]);
+  if (
+    !backupMetadata.isFile() ||
+    backupMetadata.isSymbolicLink() ||
+    (backupMetadata.mode & 0o077) !== 0 ||
+    !metadataMetadata.isFile() ||
+    metadataMetadata.isSymbolicLink() ||
+    (metadataMetadata.mode & 0o077) !== 0
+  ) {
+    throw new Error("前滚备份证据文件类型或权限不安全");
+  }
+  const [backupDigest, metadataDigest] = await Promise.all([
+    sha256File(backupPath),
+    sha256File(metadataPath),
+  ]);
+  return {
+    backupPath,
+    metadataPath,
+    backupDigest,
+    metadataDigest,
+  };
+}
+
+export async function verifyForwardBackupEvidence({ root, expected } = {}) {
+  if (
+    !expected ||
+    !/^[0-9a-f]{64}$/u.test(String(expected.backupDigest ?? "")) ||
+    !/^[0-9a-f]{64}$/u.test(String(expected.metadataDigest ?? ""))
+  ) {
+    throw new Error("前滚备份摘要无效");
+  }
+  const actual = await captureForwardBackupEvidence({
+    root,
+    backupPath: expected.backupPath,
+    metadataPath: expected.metadataPath,
+  });
+  if (
+    actual.backupDigest !== expected.backupDigest ||
+    actual.metadataDigest !== expected.metadataDigest
+  ) {
+    throw new Error("前滚备份证据已发生变化");
+  }
+  return { valid: true, ...actual };
 }
 
 export function resolveTrustedReleaseTool(name) {
@@ -546,14 +646,18 @@ async function normalizePendingReleaseRecord(rootInput, record) {
   const root = await realpath(deploymentRoot(rootInput)).catch(() => {
     throw new Error("生产发布根目录不可读取");
   });
+  const mode = record?.mode ?? "atomic";
+  const forwardOnly = mode === "forward_only";
   if (
     !record ||
     Array.isArray(record) ||
     record.schema !== pendingReleaseSchema ||
+    !new Set(["atomic", "forward_only"]).has(mode) ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
       String(record.token ?? ""),
     ) ||
     !pendingReleasePhases.has(record.phase) ||
+    (forwardOnly !== forwardPendingPhases.has(record.phase)) ||
     !/^[0-9a-f]{64}$/u.test(String(record.integrityDigest ?? "")) ||
     !/^[0-9a-f]{40}$/u.test(String(record.previousSha ?? "")) ||
     !/^[0-9a-f]{64}$/u.test(String(record.previousIntegrityDigest ?? "")) ||
@@ -586,8 +690,30 @@ async function normalizePendingReleaseRecord(rootInput, record) {
   ) {
     throw new Error("中断发布记录与不可变版本目录不一致");
   }
+  let backupEvidence = {
+    backupPath: "",
+    metadataPath: "",
+    backupDigest: "",
+    metadataDigest: "",
+  };
+  if (forwardOnly && record.phase !== "forward_prepared") {
+    backupEvidence = await verifyForwardBackupEvidence({
+      root,
+      expected: record,
+    });
+  } else if (
+    [
+      record.backupPath,
+      record.metadataPath,
+      record.backupDigest,
+      record.metadataDigest,
+    ].some(Boolean)
+  ) {
+    throw new Error("中断发布记录包含不适用的前滚备份证据");
+  }
   return {
     schema: pendingReleaseSchema,
+    mode,
     token: record.token,
     phase: record.phase,
     integrityDigest: record.integrityDigest,
@@ -603,6 +729,10 @@ async function normalizePendingReleaseRecord(rootInput, record) {
     previousRelease,
     targetRelease,
     createdAt: new Date(record.createdAt).toISOString(),
+    backupPath: backupEvidence.backupPath,
+    metadataPath: backupEvidence.metadataPath,
+    backupDigest: backupEvidence.backupDigest,
+    metadataDigest: backupEvidence.metadataDigest,
   };
 }
 
@@ -679,6 +809,10 @@ export async function writePendingReleaseJournal({
   previousConfigDigest,
   targetIdentityDigest,
   previousIdentityDigest,
+  mode = "atomic",
+  phase = mode === "forward_only"
+    ? "forward_prepared"
+    : "service_switch_started",
   now = () => new Date(),
 } = {}) {
   const root = await realpath(deploymentRoot(rootInput)).catch(() => {
@@ -686,8 +820,9 @@ export async function writePendingReleaseJournal({
   });
   return atomicWritePendingRelease(root, {
     schema: pendingReleaseSchema,
+    mode,
     token: randomUUID(),
-    phase: "service_switch_started",
+    phase,
     integrityDigest,
     previousSha,
     previousIntegrityDigest,
@@ -701,6 +836,10 @@ export async function writePendingReleaseJournal({
     previousRelease,
     targetRelease,
     createdAt: now().toISOString(),
+    backupPath: "",
+    metadataPath: "",
+    backupDigest: "",
+    metadataDigest: "",
   });
 }
 
@@ -708,6 +847,7 @@ export async function updatePendingReleaseJournal({
   root: rootInput,
   token,
   phase,
+  backupEvidence = null,
 } = {}) {
   const root = await realpath(deploymentRoot(rootInput)).catch(() => {
     throw new Error("生产发布根目录不可读取");
@@ -718,7 +858,11 @@ export async function updatePendingReleaseJournal({
   }
   return atomicWritePendingRelease(
     root,
-    { ...existing, phase },
+    {
+      ...existing,
+      phase,
+      ...(backupEvidence ?? {}),
+    },
     { replaceToken: token },
   );
 }
@@ -961,6 +1105,34 @@ export async function reconcilePendingLocalRelease({
   await dependencies.verifyReleaseRuntimeIdentityBinding(
     runtimeBindingContext,
   );
+  if (pending.mode === "forward_only") {
+    try {
+      const result = await completeForwardOnlyRelease({
+        root,
+        sha: pending.sha,
+        runId: activationRunId,
+        attempt: activationAttempt,
+        previousRelease: pending.previousRelease,
+        releaseDirectory: pending.targetRelease,
+        releaseConfigPath: targetContext.configPath,
+        pendingRelease: pending,
+        dependencies,
+      });
+      return {
+        recovered: true,
+        status: "forward_target_recovered_paused",
+        releaseDirectory: result.releaseDirectory,
+        previousRelease: pending.previousRelease,
+        sha: pending.sha,
+        paused: true,
+      };
+    } catch (error) {
+      throw new AggregateError(
+        [error],
+        "维护前滚中断恢复未完成；已保留记录，绝不恢复上一版本服务",
+      );
+    }
+  }
   let targetFailure = null;
   try {
     await dependencies.verifyService(targetContext);
@@ -1421,7 +1593,7 @@ async function verifiedReleaseIncludesCapabilityBudget(releaseDirectory, label) 
   return true;
 }
 
-export async function assertOrdinaryReleaseMigrationBoundary({
+export async function inspectReleaseMigrationBoundary({
   releaseDirectory,
   previousRelease,
 } = {}) {
@@ -1429,6 +1601,12 @@ export async function assertOrdinaryReleaseMigrationBoundary({
     verifiedReleaseIncludesCapabilityBudget(releaseDirectory, "目标"),
     verifiedReleaseIncludesCapabilityBudget(previousRelease, "上一"),
   ]);
+  return { targetSupports018, previousSupports018 };
+}
+
+export async function assertOrdinaryReleaseMigrationBoundary(context = {}) {
+  const { targetSupports018, previousSupports018 } =
+    await inspectReleaseMigrationBoundary(context);
   if (targetSupports018 && !previousSupports018) {
     throw new Error(ordinaryReleaseForwardOnlyError);
   }
@@ -1491,7 +1669,7 @@ async function runReleaseScript({
   args = [],
   description,
 }) {
-  await runQuiet(
+  return runQuiet(
     resolveTrustedReleaseTool("node"),
     [join(releaseDirectory, relativePath), ...args],
     {
@@ -1500,6 +1678,35 @@ async function runReleaseScript({
       description,
     },
   );
+}
+
+async function runControllerScript({
+  releaseDirectory,
+  configPath,
+  relativePath,
+  args = [],
+  description,
+  command = runQuiet,
+}) {
+  return command(
+    resolveTrustedReleaseTool("node"),
+    [join(controllerDirectory, relativePath), ...args],
+    {
+      cwd: controllerDirectory,
+      env: sanitizedReleaseEnvironment({ configPath, releaseDirectory }),
+      description,
+    },
+  );
+}
+
+function structuredReleaseOutput(output, description) {
+  try {
+    const value = JSON.parse(String(output ?? ""));
+    if (!value || Array.isArray(value)) throw new Error("invalid object");
+    return value;
+  } catch {
+    throw new Error(`${description}未返回有效的结构化凭据`);
+  }
 }
 
 export function createLocalReleaseDependencies({
@@ -1546,6 +1753,8 @@ export function createLocalReleaseDependencies({
     captureReleaseIntegrity,
     verifyReleaseIntegrity,
     verifyPendingReleaseIntegrity: verifyReleaseIntegrityDigest,
+    captureForwardBackupEvidence,
+    verifyForwardBackupEvidence,
     verifyPreviousReleaseAgainstCommit: verifyReleaseAgainstCommit,
     verifyPreviousReleaseIntegrity: verifyReleaseIntegrityDigest,
     compareReleaseRuntimeIdentity,
@@ -1597,12 +1806,44 @@ export function createLocalReleaseDependencies({
         description: "验证生产预检和服务回退目标",
       });
     },
-    async backupDatabase(context) {
+    async runForwardPreflight(context) {
       await runReleaseScript({
+        ...context,
+        relativePath: "scripts/生产预检.mjs",
+        description: "运行维护前滚生产预检",
+      });
+      return { valid: true };
+    },
+    async backupDatabase(context) {
+      const output = await runControllerScript({
         ...context,
         relativePath: "scripts/备份数据库.mjs",
         description: "创建加密数据库备份",
+        command,
       });
+      const receipt = structuredReleaseOutput(output, "数据库备份");
+      if (
+        receipt.completed !== true ||
+        typeof receipt.backupPath !== "string" ||
+        typeof receipt.metadataPath !== "string"
+      ) {
+        throw new Error("数据库备份未返回完整凭据");
+      }
+      return receipt;
+    },
+    async restoreBackupDrill(context) {
+      const output = await runControllerScript({
+        ...context,
+        relativePath: "scripts/隔离恢复演练.mjs",
+        args: [context.backupPath],
+        description: "执行隔离数据库恢复演练",
+        command,
+      });
+      const receipt = structuredReleaseOutput(output, "隔离恢复演练");
+      if (receipt.restored !== true || receipt.isolated !== true) {
+        throw new Error("隔离恢复演练没有形成成功凭据");
+      }
+      return receipt;
     },
     async migrateDatabase(context) {
       await runReleaseScript({
@@ -1632,6 +1873,58 @@ export function createLocalReleaseDependencies({
         args: ["install"],
         description: "安装常驻服务",
       });
+    },
+    async pauseSystem(context) {
+      const output = await runReleaseScript({
+        ...context,
+        relativePath: "src/control.mjs",
+        args: ["pause"],
+        description: "暂停生产系统",
+      });
+      const receipt = structuredReleaseOutput(output, "暂停生产系统");
+      if (receipt.paused !== true) throw new Error("生产系统未进入暂停状态");
+      return receipt;
+    },
+    async inspectForwardMaintenanceState(context) {
+      const output = await runControllerScript({
+        ...context,
+        relativePath: "scripts/验证维护前滚状态.mjs",
+        description: "验证维护前滚状态",
+        command,
+      });
+      const receipt = structuredReleaseOutput(output, "维护前滚状态检查");
+      if (receipt.safe !== true || receipt.paused !== true) {
+        throw new Error("维护前滚状态检查未通过");
+      }
+      return receipt;
+    },
+    async stopServicesForMaintenance(context) {
+      const output = await runControllerScript({
+        ...context,
+        relativePath: "scripts/管理常驻服务.mjs",
+        args: ["stop-for-maintenance"],
+        description: "停止维护窗口内常驻服务",
+        command,
+      });
+      const receipt = structuredReleaseOutput(output, "维护停服");
+      if (receipt.stopped !== true || receipt.forwardOnly !== true) {
+        throw new Error("维护停服未形成前滚凭据");
+      }
+      return receipt;
+    },
+    async installForwardOnlyService(context) {
+      const output = await runControllerScript({
+        ...context,
+        relativePath: "scripts/管理常驻服务.mjs",
+        args: ["install-forward-only"],
+        description: "安装维护前滚常驻服务",
+        command,
+      });
+      const receipt = structuredReleaseOutput(output, "维护前滚服务安装");
+      if (receipt.installed !== true || receipt.forwardOnly !== true) {
+        throw new Error("维护前滚服务安装未形成成功凭据");
+      }
+      return receipt;
     },
     async cleanupServices(context) {
       await runReleaseScript({
@@ -1686,12 +1979,127 @@ function releasePlan({ sha, root, sourceDirectory, configPath }) {
   };
 }
 
+async function completeForwardOnlyRelease({
+  root,
+  sha,
+  runId,
+  attempt,
+  previousRelease,
+  releaseDirectory,
+  releaseConfigPath,
+  pendingRelease,
+  dependencies,
+}) {
+  let pending = pendingRelease;
+  const releaseContext = {
+    releaseDirectory,
+    configPath: releaseConfigPath,
+  };
+  await dependencies.verifyPendingReleaseIntegrity({
+    releaseDirectory,
+    expectedDigest: pending.integrityDigest,
+  });
+  await dependencies.verifyReleaseRuntimeIdentityBinding({
+    targetConfigPath: releaseConfigPath,
+    previousConfigPath: join(previousRelease, ".runtime", "production.json"),
+    expected: pending,
+  });
+  await dependencies.inspectForwardMaintenanceState(releaseContext);
+  await dependencies.stopServicesForMaintenance(releaseContext);
+  await dependencies.inspectForwardMaintenanceState(releaseContext);
+
+  if (pending.phase === "forward_prepared") {
+    const backup = await dependencies.backupDatabase(releaseContext);
+    await dependencies.restoreBackupDrill({
+      ...releaseContext,
+      backupPath: backup.backupPath,
+    });
+    const backupEvidence = await dependencies.captureForwardBackupEvidence({
+      root,
+      backupPath: backup.backupPath,
+      metadataPath: backup.metadataPath,
+    });
+    pending = await dependencies.updatePendingRelease({
+      root,
+      token: pending.token,
+      phase: "forward_backup_verified",
+      backupEvidence,
+    });
+  } else {
+    await dependencies.verifyForwardBackupEvidence({
+      root,
+      expected: pending,
+    });
+  }
+
+  if (pending.phase === "forward_backup_verified") {
+    await dependencies.migrateDatabase(releaseContext);
+    pending = await dependencies.updatePendingRelease({
+      root,
+      token: pending.token,
+      phase: "forward_migrated",
+    });
+  }
+
+  await dependencies.verifyForwardBackupEvidence({
+    root,
+    expected: pending,
+  });
+  await dependencies.runDoctor(releaseContext);
+  await dependencies.runCodexProbe(releaseContext);
+  await dependencies.verifyPendingReleaseIntegrity({
+    releaseDirectory,
+    expectedDigest: pending.integrityDigest,
+  });
+  await dependencies.installDependencies({ releaseDirectory });
+  await dependencies.verifyPendingReleaseIntegrity({
+    releaseDirectory,
+    expectedDigest: pending.integrityDigest,
+  });
+  await dependencies.installForwardOnlyService(releaseContext);
+  await dependencies.cleanupServices(releaseContext);
+  await dependencies.verifyService(releaseContext);
+  await dependencies.verifyPendingReleaseIntegrity({
+    releaseDirectory,
+    expectedDigest: pending.integrityDigest,
+  });
+  pending = await dependencies.updatePendingRelease({
+    root,
+    token: pending.token,
+    phase: "forward_service_verified",
+  });
+  await dependencies.activateRelease({
+    ...releaseContext,
+    root,
+    runId: String(runId),
+    attempt: String(attempt),
+  });
+  await dependencies.clearPendingRelease({
+    root,
+    token: pending.token,
+  });
+  return {
+    schema: "ai-employee-local-release-result/v1",
+    dryRun: false,
+    executed: true,
+    released: true,
+    forwardOnly: true,
+    paused: true,
+    sha,
+    releaseDirectory,
+    previousReleaseAvailable: true,
+    databaseRollbackPerformed: false,
+  };
+}
+
 export async function runLocalAtomicRelease({
   sha: shaInput,
   root: rootInput,
   sourceDirectory: sourceInput = process.cwd(),
   configPath: configInput,
   apply = false,
+  maintenanceForward = false,
+  forwardConfirmation = "",
   runId = `${Date.now()}${process.pid}`,
   attempt = "1",
   dependencies = createLocalReleaseDependencies(),
@@ -1702,7 +2110,21 @@ export async function runLocalAtomicRelease({
   if (!configInput) throw new Error("必须明确指定生产配置文件");
   const configPath = resolve(configInput);
   const plan = releasePlan({ sha, root, sourceDirectory, configPath });
+  if (maintenanceForward) {
+    plan.maintenanceForward = true;
+    plan.confirmationRequired = `${forwardConfirmationPrefix}${sha}`;
+    plan.resumePolicy = "成功激活后仍保持全局暂停，必须独立回验后再恢复";
+  }
   if (!apply) return plan;
+  if (!maintenanceForward && forwardConfirmation) {
+    throw new Error("不可回退确认值只能用于维护前滚模式");
+  }
+  if (
+    maintenanceForward &&
+    forwardConfirmation !== `${forwardConfirmationPrefix}${sha}`
+  ) {
+    throw new Error("维护前滚必须绑定目标 SHA 的不可回退确认值");
+  }
 
   let releaseDirectory = "";
   let releaseConfigPath = "";
@@ -1747,7 +2169,10 @@ export async function runLocalAtomicRelease({
         schema: "ai-employee-local-release-result/v1",
         dryRun: false,
         executed: true,
-        released: recovery.status === "target_recovered",
+        released: new Set([
+          "target_recovered",
+          "forward_target_recovered_paused",
+        ]).has(recovery.status),
         recoveredInterruptedRelease: true,
         recoveryStatus: recovery.status,
         sha,
@@ -1755,6 +2180,7 @@ export async function runLocalAtomicRelease({
         previousReleaseAvailable: true,
         completedSteps,
         databaseRollbackPerformed: false,
+        paused: recovery.paused === true,
       };
     }
 
@@ -1811,10 +2237,25 @@ export async function runLocalAtomicRelease({
       releaseDirectory: previousRelease,
       expectedDigest: previousIntegrityDigest,
     });
-    await assertOrdinaryReleaseMigrationBoundary({
+    const migrationBoundary = await inspectReleaseMigrationBoundary({
       releaseDirectory,
       previousRelease,
     });
+    if (maintenanceForward) {
+      if (
+        migrationBoundary.targetSupports018 !== true ||
+        migrationBoundary.previousSupports018 !== false
+      ) {
+        throw new Error(
+          "维护前滚入口只允许目标支持第 018 号迁移且上一版本不支持的精确边界",
+        );
+      }
+    } else if (
+      migrationBoundary.targetSupports018 &&
+      !migrationBoundary.previousSupports018
+    ) {
+      throw new Error(ordinaryReleaseForwardOnlyError);
+    }
     complete("核对第 018 号前滚边界");
 
     releaseConfigPath = await dependencies.copyProductionConfig({
@@ -1833,6 +2274,55 @@ export async function runLocalAtomicRelease({
         targetConfigPath: releaseConfigPath,
         previousConfigPath,
       });
+    if (maintenanceForward) {
+      await dependencies.runForwardPreflight(releaseContext);
+      const previousContext = {
+        releaseDirectory: previousRelease,
+        configPath: previousConfigPath,
+      };
+      await dependencies.pauseSystem(previousContext);
+      await dependencies.inspectForwardMaintenanceState(releaseContext);
+      await dependencies.verifyPreviousReleaseIntegrity({
+        releaseDirectory: previousRelease,
+        expectedDigest: previousIntegrityDigest,
+      });
+      pendingRelease = await dependencies.writePendingRelease({
+        root,
+        sha,
+        runId: String(runId),
+        attempt: String(attempt),
+        previousRelease,
+        targetRelease: releaseDirectory,
+        integrityDigest: releaseIntegrityDigest(releaseIntegrity.entries),
+        previousSha,
+        previousIntegrityDigest,
+        ...runtimeIdentityBinding,
+        mode: "forward_only",
+        phase: "forward_prepared",
+      });
+      const result = await completeForwardOnlyRelease({
+        root,
+        sha,
+        runId,
+        attempt,
+        previousRelease,
+        releaseDirectory,
+        releaseConfigPath,
+        pendingRelease,
+        dependencies,
+      });
+      pendingRelease = null;
+      return {
+        ...result,
+        completedSteps: [
+          ...completedSteps,
+          "暂停生产并核对零在途状态",
+          "停止旧服务并完成备份恢复演练",
+          "执行前向迁移并安装目标服务",
+          "原子激活成功版本（保持暂停）",
+        ],
+      };
+    }
     await dependencies.validateRollbackTarget({
       ...releaseContext,
       previousRelease,
@@ -1924,6 +2414,14 @@ export async function runLocalAtomicRelease({
       databaseRollbackPerformed: false,
     };
   } catch (error) {
+    if (maintenanceForward) {
+      throw new AggregateError(
+        [error],
+        pendingRelease
+          ? "维护前滚发布未完成；已保留中断记录，生产必须保持暂停并只允许继续前滚"
+          : "维护前滚发布在建立中断记录前停止；生产保持暂停，未执行数据库回退",
+      );
+    }
     if (serviceSwitchAttempted && previousRelease && releaseConfigPath) {
       if (currentActivated) {
         throw new AggregateError(
@@ -2005,6 +2503,7 @@ function option(args, name, { required = false } = {}) {
 function parseArguments(args) {
   const apply = args.includes("--apply");
   const dryRun = args.includes("--dry-run");
+  const maintenanceForward = args.includes("--maintenance-forward");
   if (apply && dryRun) throw new Error("--apply 和 --dry-run 不能同时使用");
   const known = new Set([
     "--sha",
@@ -2013,13 +2512,19 @@ function parseArguments(args) {
     "--source",
     "--run-id",
     "--attempt",
+    "--confirm-forward-only",
     "--apply",
     "--dry-run",
+    "--maintenance-forward",
   ]);
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (!known.has(value)) throw new Error(`未知参数：${value}`);
-    if (!["--apply", "--dry-run"].includes(value)) index += 1;
+    if (![
+      "--apply",
+      "--dry-run",
+      "--maintenance-forward",
+    ].includes(value)) index += 1;
   }
   return {
     sha: option(args, "--sha", { required: true }),
@@ -2029,6 +2534,8 @@ function parseArguments(args) {
     runId: option(args, "--run-id") ?? `${Date.now()}${process.pid}`,
     attempt: option(args, "--attempt") ?? "1",
     apply,
+    maintenanceForward,
+    forwardConfirmation: option(args, "--confirm-forward-only") ?? "",
   };
 }
 

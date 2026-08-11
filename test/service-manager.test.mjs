@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  removeForwardLaunchAgents,
   restoreLaunchAgents,
+  stopLaunchAgentsForMaintenance,
   validateServiceConfig,
 } from "../scripts/管理常驻服务.mjs";
 
@@ -96,4 +98,52 @@ test("首次安装服务在回退后仍被加载时判定回退不完整", async
     failedLabels: ["worker"],
   });
   await assert.rejects(stat(join(directory, "worker.plist")), { code: "ENOENT" });
+});
+
+test("维护前滚停服要求所有标签都已从登录会话卸载", async () => {
+  const calls = [];
+  const result = await stopLaunchAgentsForMaintenance({
+    serviceDefinitions: [{ label: "listener" }, { label: "worker" }],
+    destinationDirectory: "/tmp/launch-agents",
+    launchDomain: "gui/test",
+    runLaunchctl: async (_path, args) => {
+      calls.push(args);
+      if (args[0] === "print" && args[1].endsWith("/worker")) {
+        throw new Error("not loaded");
+      }
+    },
+  });
+
+  assert.deepEqual(result, {
+    complete: false,
+    failedLabels: ["listener"],
+  });
+  assert.equal(calls.filter((args) => args[0] === "bootout").length, 2);
+  assert.equal(calls.filter((args) => args[0] === "print").length, 2);
+});
+
+test("前滚安装失败只清除新服务且绝不恢复旧 plist", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-employee-forward-cleanup-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(join(directory, "listener.plist"), "target-listener\n", {
+    mode: 0o600,
+  });
+  await writeFile(join(directory, "worker.plist"), "target-worker\n", {
+    mode: 0o600,
+  });
+  const calls = [];
+  const result = await removeForwardLaunchAgents({
+    serviceDefinitions: [{ label: "listener" }, { label: "worker" }],
+    destinationDirectory: directory,
+    launchDomain: "gui/test",
+    runLaunchctl: async (_path, args) => {
+      calls.push(args);
+      if (args[0] === "print") throw new Error("not loaded");
+    },
+  });
+
+  assert.deepEqual(result, { complete: true, failedLabels: [] });
+  await assert.rejects(stat(join(directory, "listener.plist")), { code: "ENOENT" });
+  await assert.rejects(stat(join(directory, "worker.plist")), { code: "ENOENT" });
+  assert.equal(calls.some((args) => args[0] === "bootstrap"), false);
 });
