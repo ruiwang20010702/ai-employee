@@ -235,6 +235,13 @@ export function loadConfig({
       "DINGTALK_QUIET_WINDOW_MS must not exceed AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS",
     );
   }
+  const workerConcurrency = positiveInteger(
+    "AI_EMPLOYEE_WORKER_CONCURRENCY",
+    2,
+  );
+  if (workerConcurrency > 4) {
+    throw new Error("AI_EMPLOYEE_WORKER_CONCURRENCY must not exceed 4");
+  }
 
   return {
     targetUserIds,
@@ -274,6 +281,7 @@ export function loadConfig({
     ),
     overlapMs: positiveNumber("DINGTALK_FETCH_OVERLAP_MS", 600_000),
     workerPollMs: positiveNumber("AI_EMPLOYEE_WORKER_POLL_MS", 2_000),
+    workerConcurrency,
     planExecutorPollMs: positiveNumber(
       "AI_EMPLOYEE_PLAN_EXECUTOR_POLL_MS",
       5_000,

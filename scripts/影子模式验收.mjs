@@ -2,6 +2,7 @@ import { applyProductionConfigFile } from "../src/production-config-file.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { evaluateHealth } from "../src/health-check.mjs";
 import { createProductionStore } from "../src/production-store.mjs";
+import { evaluateBusinessAcceptance } from "../src/business-acceptance.mjs";
 import {
   evaluateDecisionQuality,
   evaluateDecisionReviewCoverage,
@@ -24,7 +25,7 @@ let store;
 try {
   store = await createProductionStore(config, { readOnly: true });
   const [health, tasks, plans, memories, reviews] = await Promise.all([
-    evaluateHealth({ store, config }),
+    evaluateHealth({ store, config, includeOperationalMetrics: true }),
     store.listTasks({ limit: 500 }),
     store.listWorkPlans({ limit: 100 }),
     store.listMemories({ limit: 100 }),
@@ -43,6 +44,7 @@ try {
   });
   quality.gates.coverage = quality.coverage.accepted;
   quality.accepted = Object.values(quality.gates).every(Boolean);
+  const businessAcceptance = evaluateBusinessAcceptance({ health, quality });
   const blockingTaskStatuses = new Set(["dead", "send_unknown"]);
   const blockers = {
     unhealthy: !health.ready,
@@ -55,7 +57,7 @@ try {
     blockers.abnormalTasks === 0 &&
     blockers.failedPlans === 0 &&
     blockers.activePlans === 0 &&
-    quality.accepted;
+    businessAcceptance.accepted;
   console.log(
     JSON.stringify({
       accepted,
@@ -69,6 +71,8 @@ try {
       },
       blockers,
       quality,
+      businessAcceptance,
+      operationalMetrics: health.checks.operationalMetrics,
     }),
   );
   if (!accepted) process.exitCode = 1;

@@ -27,6 +27,7 @@ import { safeCommandEnvironment } from "./controlled-command-runner.mjs";
 import { isMainModule } from "./main-module.mjs";
 import { safeErrorCode } from "./logging.mjs";
 import { buildPlanTakeover } from "./plan-takeover.mjs";
+import { evaluateBusinessAcceptance } from "./business-acceptance.mjs";
 import { validatePrivacySelector } from "./privacy-erasure.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
 
@@ -528,13 +529,33 @@ export async function startAdminServer({
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/operations") {
-        const now = new Date();
-        json(response, 200, await store.operationalMetrics({
-          since: new Date(now.getTime() - 24 * 60 * 60 * 1000),
-          now,
-          availabilityIntervalMs: config.availabilitySampleIntervalMs,
-          availabilityWindowMs: config.availabilityWindowMs,
-        }));
+        const [health, reviews, tasks] = await Promise.all([
+          evaluateHealth({
+            store,
+            config,
+            includeOperationalMetrics: true,
+          }),
+          store.listDecisionReviews({ limit: 10_000 }),
+          store.listTasks({ limit: 500 }),
+        ]);
+        const quality = evaluateDecisionQuality(reviews, {
+          minimumSamples: config.shadowMinimumSamples,
+          minimumReplyAccuracy: config.shadowMinimumReplyAccuracy,
+          minimumNoReplyAccuracy: config.shadowMinimumNoReplyAccuracy,
+          minimumDraftSamples: config.shadowMinimumDraftSamples,
+          minimumDraftUsability: config.shadowMinimumDraftUsability,
+        });
+        const coverage = evaluateDecisionReviewCoverage(tasks, reviews, {
+          targetGroupIds: config.targetGroupIds,
+          minimumSamples: config.shadowMinimumSamples,
+        });
+        quality.gates.coverage = coverage.accepted;
+        quality.accepted = Object.values(quality.gates).every(Boolean);
+        const operationalMetrics = health.checks.operationalMetrics;
+        json(response, 200, {
+          ...operationalMetrics,
+          businessAcceptance: evaluateBusinessAcceptance({ health, quality }),
+        });
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/memories") {

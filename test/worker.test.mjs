@@ -1278,3 +1278,71 @@ test("Worker 停止时会立即唤醒，不等待完整轮询周期", async (t) 
   await worker.stop();
   assert.ok(Date.now() - startedAt < 1_000);
 });
+
+test("Worker 按上限并行生成草稿且停止会等待在途任务", async (t) => {
+  const store = await fixture(t);
+  const taskIds = [
+    enqueue(store, "parallel-1", "请分别检查方案一"),
+    enqueue(store, "parallel-2", "请分别检查方案二"),
+    enqueue(store, "parallel-3", "请分别检查方案三"),
+  ];
+  let active = 0;
+  let maxActive = 0;
+  let entered = 0;
+  let releaseFirstWave;
+  const firstWave = new Promise((resolve) => { releaseFirstWave = resolve; });
+  let resolveTwoEntered;
+  const twoEntered = new Promise((resolve) => { resolveTwoEntered = resolve; });
+  const worker = await runWorker({
+    store,
+    dws: { async fetchDirect() { return []; } },
+    config: {
+      ...baseConfig,
+      workerConcurrency: 2,
+      workerPollMs: 60_000,
+      heartbeatMs: 30_000,
+      manualReplyRecheckMs: 60_000,
+    },
+    async generator() {
+      active += 1;
+      entered += 1;
+      maxActive = Math.max(maxActive, active);
+      if (entered === 2) resolveTwoEntered();
+      if (entered <= 2) await firstWave;
+      active -= 1;
+      return {
+        shouldReply: false,
+        reply: "",
+        confidence: 1,
+        riskLevel: "low",
+        reason: "并发测试完成",
+      };
+    },
+  });
+
+  let timeout;
+  await Promise.race([
+    twoEntered,
+    new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error("两个草稿任务未并发进入")), 1_000);
+    }),
+  ]).finally(() => clearTimeout(timeout));
+  assert.equal(entered, 2);
+  assert.equal(maxActive, 2);
+
+  const stopPromise = worker.stop();
+  let stopped = false;
+  stopPromise.then(() => { stopped = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stopped, false);
+  releaseFirstWave();
+  await stopPromise;
+
+  assert.equal(entered, 2);
+  assert.equal(maxActive, 2);
+  await store.open();
+  assert.deepEqual(
+    taskIds.map((taskId) => store.getTask(taskId)?.status),
+    ["no_reply", "no_reply", "queued"],
+  );
+});

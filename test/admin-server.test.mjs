@@ -39,6 +39,9 @@ test("判断质量页使用内嵌两步表单连续复核", () => {
   assert.match(adminHtml, /quality-detail/u);
   assert.match(adminHtml, /aria-pressed/u);
   assert.match(adminHtml, /建议回复准确率/u);
+  assert.match(adminHtml, /业务放量总门禁/u);
+  assert.match(adminHtml, /未知值也按未通过处理/u);
+  assert.match(adminHtml, /开启自动发送或计划执行仍需单独审批/u);
   assert.match(adminHtml, /分歧原因/u);
   assert.doesNotMatch(script, /MutationObserver/u);
   assert.doesNotMatch(script, /function chooseReason/u);
@@ -102,6 +105,7 @@ function fixture({ taskReply = "准备回复" } = {}) {
         lowRiskTasks: { samples: 1, successes: 1, successRate: 1, successRateTarget: 0.95, successRateTargetMet: true, durationSamples: 1, durationP95Ms: 60000, durationTargetMs: 120000, durationTargetMet: true, lifecycleSamples: 1, lifecycleP95Ms: 90000 },
         approvalWait: { samples: 1, p95Ms: 30000 },
         reliability: { duplicateSideEffects: 0, unknownSideEffects: 0, completedSideEffects: 1, sideEffectAuditCoverage: 1, codexTimeouts: 0, deadTasks: 0 },
+        memoryConflicts: { activeConflictGroups: 0 },
       };
     },
     async previewPrivacyErasure(selector) {
@@ -295,7 +299,17 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     });
     const operations = await fetch(`${base}/api/operations`, { headers: read });
     assert.equal(operations.status, 200);
-    assert.equal((await operations.json()).messageDetection.p95Ms, 1000);
+    const operationBody = await operations.json();
+    assert.equal(operationBody.messageDetection.p95Ms, 1000);
+    assert.equal(operationBody.businessAcceptance.accepted, false);
+    assert.equal(
+      operationBody.businessAcceptance.blockers.includes("availability"),
+      true,
+    );
+    assert.equal(
+      operationBody.businessAcceptance.blockers.includes("decisionQuality"),
+      true,
+    );
     const plans = await fetch(`${base}/api/plans`, { headers: read });
     const planBody = await plans.json();
     assert.equal(

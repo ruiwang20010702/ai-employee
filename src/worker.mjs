@@ -732,7 +732,13 @@ export async function runWorker({
       }
     }
     if (await store.isPaused()) return expired > 0 || reconciled > 0;
-    const drafted = await processDraftTask({ store, dws, config, generator });
+    const draftResults = await Promise.all(
+      Array.from(
+        { length: config.workerConcurrency ?? 1 },
+        () => processDraftTask({ store, dws, config, generator }),
+      ),
+    );
+    const drafted = draftResults.some(Boolean);
     const sent = await processApprovedTask({ store, dws, config });
     return expired > 0 || reconciled > 0 || drafted || sent;
   };
@@ -747,6 +753,7 @@ export async function runWorker({
 
   log("worker.started", {
     capabilities: [...config.capabilities],
+    draftConcurrency: config.workerConcurrency ?? 1,
     sendEnabled: config.capabilities.has("send_message"),
   });
   heartbeatTimer = setInterval(() => {

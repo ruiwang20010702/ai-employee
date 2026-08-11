@@ -326,6 +326,35 @@ test("连续消息安静窗口不能超过总等待上限", () => {
   }
 });
 
+test("草稿 Worker 并发默认保守且有硬上限", () => {
+  const name = "AI_EMPLOYEE_WORKER_CONCURRENCY";
+  const previous = process.env[name];
+  try {
+    delete process.env[name];
+    assert.equal(loadConfig({ requireTargets: false }).workerConcurrency, 2);
+    process.env[name] = "4";
+    assert.equal(loadConfig({ requireTargets: false }).workerConcurrency, 4);
+    process.env[name] = "0";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must be a positive number/u,
+    );
+    process.env[name] = "1.5";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must be a positive integer/u,
+    );
+    process.env[name] = "5";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must not exceed 4/u,
+    );
+  } finally {
+    if (previous == null) delete process.env[name];
+    else process.env[name] = previous;
+  }
+});
+
 test("开启计划执行时必须把执行器纳入健康组件", () => {
   const previousCapabilities = process.env.AI_EMPLOYEE_ALLOWED_CAPABILITIES;
   const previousComponents = process.env.AI_EMPLOYEE_REQUIRED_COMPONENTS;
