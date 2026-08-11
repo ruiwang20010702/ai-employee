@@ -14,6 +14,7 @@ function launchctlOutput({
   componentArgument = null,
   workingDirectory,
   configPath,
+  workingDirectoryTrailingSlash = false,
 }) {
   return `gui/501/${label} = {
   arguments = {
@@ -21,7 +22,7 @@ function launchctlOutput({
     ${scriptPath}
     ${componentArgument ?? ""}
   }
-  working directory = ${workingDirectory}/
+  working directory = ${workingDirectory}${workingDirectoryTrailingSlash ? "/" : ""}
   environment = {
     AI_EMPLOYEE_CONFIG_FILE => ${configPath}
   }
@@ -38,6 +39,13 @@ test("常驻服务必须精确匹配标签、脚本、工作目录和生产配�
   };
   assert.deepEqual(
     validateLoadedLaunchAgent(launchctlOutput(expected), expected),
+    { verified: true, failures: [] },
+  );
+  assert.deepEqual(
+    validateLoadedLaunchAgent(
+      launchctlOutput({ ...expected, workingDirectoryTrailingSlash: true }),
+      expected,
+    ),
     { verified: true, failures: [] },
   );
 

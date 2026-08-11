@@ -18,7 +18,10 @@ export function validateLoadedLaunchAgent(
 ) {
   const lines = outputLines(output);
   const expectedHeaderSuffix = `/${label} = {`;
-  const expectedWorkingDirectory = `working directory = ${workingDirectory}/`;
+  const expectedWorkingDirectories = new Set([
+    `working directory = ${workingDirectory}`,
+    `working directory = ${workingDirectory}/`,
+  ]);
   const expectedConfig = `AI_EMPLOYEE_CONFIG_FILE => ${configPath}`;
   const failures = [];
 
@@ -27,7 +30,9 @@ export function validateLoadedLaunchAgent(
   if (componentArgument && !lines.includes(componentArgument)) {
     failures.push("component_argument_mismatch");
   }
-  if (!lines.includes(expectedWorkingDirectory)) failures.push("working_directory_mismatch");
+  if (!lines.some((line) => expectedWorkingDirectories.has(line))) {
+    failures.push("working_directory_mismatch");
+  }
   if (!lines.includes(expectedConfig)) failures.push("config_path_mismatch");
 
   return {
