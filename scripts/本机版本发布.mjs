@@ -206,14 +206,80 @@ async function sha256File(path) {
   return hash.digest("hex");
 }
 
+async function configuredBackupRoot(configPathInput) {
+  const configPath = resolve(String(configPathInput ?? ""));
+  const [metadata, canonical] = await Promise.all([
+    lstat(configPath),
+    realpath(configPath),
+  ]).catch(() => {
+    throw new Error("生产配置不可读取，无法绑定前滚备份目录");
+  });
+  if (
+    canonical !== configPath ||
+    !metadata.isFile() ||
+    metadata.isSymbolicLink() ||
+    (metadata.mode & 0o077) !== 0
+  ) {
+    throw new Error("生产配置路径或权限不安全，无法绑定前滚备份目录");
+  }
+  let config;
+  try {
+    config = JSON.parse(await readFile(configPath, "utf8"));
+  } catch {
+    throw new Error("生产配置不是有效 JSON，无法绑定前滚备份目录");
+  }
+  const value = config?.AI_EMPLOYEE_BACKUP_DIRECTORY;
+  if (
+    typeof value !== "string" ||
+    !isAbsolute(value) ||
+    /[\0\r\n]/u.test(value)
+  ) {
+    throw new Error("维护前滚要求生产配置使用绝对备份目录");
+  }
+  const backupRoot = await realpath(value).catch(() => {
+    throw new Error("生产配置指定的备份目录不可读取");
+  });
+  const backupRootMetadata = await lstat(backupRoot);
+  if (
+    !backupRootMetadata.isDirectory() ||
+    backupRootMetadata.isSymbolicLink() ||
+    backupRoot === parse(backupRoot).root ||
+    backupRoot === resolve(homedir()) ||
+    (backupRootMetadata.mode & 0o077) !== 0
+  ) {
+    throw new Error("生产配置指定的备份目录类型或权限不安全");
+  }
+  return backupRoot;
+}
+
 export async function captureForwardBackupEvidence({
   root: rootInput,
+  backupRoot: backupRootInput,
   backupPath: backupInput,
   metadataPath: metadataInput,
 } = {}) {
   const root = await realpath(deploymentRoot(rootInput)).catch(() => {
     throw new Error("生产发布根目录不可读取");
   });
+  if (
+    !isAbsolute(String(backupRootInput ?? "")) ||
+    /[\0\r\n]/u.test(String(backupRootInput ?? ""))
+  ) {
+    throw new Error("前滚备份根目录必须是安全绝对路径");
+  }
+  const backupRoot = await realpath(backupRootInput).catch(() => {
+    throw new Error("前滚备份根目录不可读取");
+  });
+  const backupRootMetadata = await lstat(backupRoot);
+  if (
+    !backupRootMetadata.isDirectory() ||
+    backupRootMetadata.isSymbolicLink() ||
+    backupRoot === parse(backupRoot).root ||
+    backupRoot === resolve(homedir()) ||
+    (backupRootMetadata.mode & 0o077) !== 0
+  ) {
+    throw new Error("前滚备份根目录类型或权限不安全");
+  }
   if (
     !isAbsolute(String(backupInput ?? "")) ||
     !isAbsolute(String(metadataInput ?? "")) ||
@@ -228,11 +294,11 @@ export async function captureForwardBackupEvidence({
     throw new Error("前滚备份元数据不可读取");
   });
   if (
-    !pathIsWithin(root, backupPath) ||
-    !pathIsWithin(root, metadataPath) ||
+    !pathIsWithin(backupRoot, backupPath) ||
+    !pathIsWithin(backupRoot, metadataPath) ||
     metadataPath !== `${backupPath}.json`
   ) {
-    throw new Error("前滚备份证据越出专用生产目录");
+    throw new Error("前滚备份证据越出配置指定的备份目录");
   }
   const [backupMetadata, metadataMetadata] = await Promise.all([
     lstat(backupPath),
@@ -253,6 +319,7 @@ export async function captureForwardBackupEvidence({
     sha256File(metadataPath),
   ]);
   return {
+    backupRoot,
     backupPath,
     metadataPath,
     backupDigest,
@@ -270,6 +337,7 @@ export async function verifyForwardBackupEvidence({ root, expected } = {}) {
   }
   const actual = await captureForwardBackupEvidence({
     root,
+    backupRoot: expected.backupRoot,
     backupPath: expected.backupPath,
     metadataPath: expected.metadataPath,
   });
@@ -691,6 +759,7 @@ async function normalizePendingReleaseRecord(rootInput, record) {
     throw new Error("中断发布记录与不可变版本目录不一致");
   }
   let backupEvidence = {
+    backupRoot: "",
     backupPath: "",
     metadataPath: "",
     backupDigest: "",
@@ -704,6 +773,7 @@ async function normalizePendingReleaseRecord(rootInput, record) {
   } else if (
     [
       record.backupPath,
+      record.backupRoot,
       record.metadataPath,
       record.backupDigest,
       record.metadataDigest,
@@ -730,6 +800,7 @@ async function normalizePendingReleaseRecord(rootInput, record) {
     targetRelease,
     createdAt: new Date(record.createdAt).toISOString(),
     backupPath: backupEvidence.backupPath,
+    backupRoot: backupEvidence.backupRoot,
     metadataPath: backupEvidence.metadataPath,
     backupDigest: backupEvidence.backupDigest,
     metadataDigest: backupEvidence.metadataDigest,
@@ -837,6 +908,7 @@ export async function writePendingReleaseJournal({
     targetRelease,
     createdAt: now().toISOString(),
     backupPath: "",
+    backupRoot: "",
     metadataPath: "",
     backupDigest: "",
     metadataDigest: "",
@@ -1814,6 +1886,10 @@ export function createLocalReleaseDependencies({
       });
       return { valid: true };
     },
+    async validateForwardBackupRoot(context) {
+      await configuredBackupRoot(context.configPath);
+      return { valid: true };
+    },
     async backupDatabase(context) {
       const output = await runControllerScript({
         ...context,
@@ -1829,7 +1905,10 @@ export function createLocalReleaseDependencies({
       ) {
         throw new Error("数据库备份未返回完整凭据");
       }
-      return receipt;
+      return {
+        ...receipt,
+        backupRoot: await configuredBackupRoot(context.configPath),
+      };
     },
     async restoreBackupDrill(context) {
       const output = await runControllerScript({
@@ -2016,6 +2095,7 @@ async function completeForwardOnlyRelease({
     });
     const backupEvidence = await dependencies.captureForwardBackupEvidence({
       root,
+      backupRoot: backup.backupRoot,
       backupPath: backup.backupPath,
       metadataPath: backup.metadataPath,
     });
@@ -2275,6 +2355,7 @@ export async function runLocalAtomicRelease({
         previousConfigPath,
       });
     if (maintenanceForward) {
+      await dependencies.validateForwardBackupRoot(releaseContext);
       await dependencies.runForwardPreflight(releaseContext);
       const previousContext = {
         releaseDirectory: previousRelease,

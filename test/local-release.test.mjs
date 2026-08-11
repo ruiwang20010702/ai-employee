@@ -279,6 +279,7 @@ function fakeDependencies(events, {
     validateRollbackTarget: operation("rollback-target"),
     backupDatabase: operation("backup", {
       completed: true,
+      backupRoot: "/var/tmp/ai-employee-production/backups",
       backupPath: "/var/tmp/ai-employee-production/backups/forward.dump.enc",
       metadataPath: "/var/tmp/ai-employee-production/backups/forward.dump.enc.json",
     }),
@@ -287,6 +288,7 @@ function fakeDependencies(events, {
       isolated: true,
     }),
     captureForwardBackupEvidence: operation("capture-backup-evidence", {
+      backupRoot: "/var/tmp/ai-employee-production/backups",
       backupPath: "/var/tmp/ai-employee-production/backups/forward.dump.enc",
       metadataPath: "/var/tmp/ai-employee-production/backups/forward.dump.enc.json",
       backupDigest: "1".repeat(64),
@@ -304,6 +306,7 @@ function fakeDependencies(events, {
     activateRelease: releaseOperation("activate", { activated: true }),
     rollbackStateGuard: releaseOperation("rollback-state-guard"),
     runForwardPreflight: operation("forward-preflight", { valid: true }),
+    validateForwardBackupRoot: operation("validate-backup-root", { valid: true }),
     pauseSystem: operation("pause", { paused: true }),
     inspectForwardMaintenanceState: operation("forward-state", {
       safe: true,
@@ -463,6 +466,7 @@ test("维护前滚按暂停、零在途、停服、恢复演练、迁移和前�
   assert.equal(result.paused, true);
   assert.equal(result.databaseRollbackPerformed, false);
   const ordered = [
+    "validate-backup-root",
     "forward-preflight",
     "pause",
     "forward-state",
@@ -542,6 +546,40 @@ test("维护前滚迁移后失败保留中断记录且绝不恢复 0.2", async (
     events.some((event) => event.startsWith("rollback-state-guard:")),
     false,
   );
+});
+
+test("维护前滚在暂停生产前拒绝不安全的备份根目录", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-forward-backup-root-")),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const targetRelease = await createMigrationRelease(
+    directory,
+    "target",
+    { supports018: true },
+  );
+  const previousRelease = await createMigrationRelease(directory, "previous");
+  const events = [];
+  const dependencies = fakeDependencies(events, {
+    targetRelease,
+    previousRelease,
+    failAt: "validate-backup-root",
+  });
+
+  await assert.rejects(
+    runLocalAtomicRelease({
+      ...releaseOptions,
+      apply: true,
+      maintenanceForward: true,
+      forwardConfirmation: `I_ACCEPT_FORWARD_ONLY:${sha}`,
+      dependencies,
+    }),
+    /建立中断记录前停止/u,
+  );
+  assert.equal(events.includes("validate-backup-root"), true);
+  assert.equal(events.includes("pause"), false);
+  assert.equal(events.includes("backup"), false);
+  assert.equal(events.includes("migrate"), false);
 });
 
 test("target 与 previous 都有固定 018 文件时普通发布保持原流程", async (t) => {
@@ -876,6 +914,7 @@ test("维护前滚 journal 绑定 600 权限备份与元数据摘要并拒绝篡
   });
   const evidence = await captureForwardBackupEvidence({
     root,
+    backupRoot: backupDirectory,
     backupPath,
     metadataPath,
   });
@@ -1822,10 +1861,23 @@ test("依赖安装固定由受信 Node 启动 npm CLI 且不传 GitHub token", a
   }
 });
 
-test("维护控制命令来自受门禁控制器并明确绑定固定目标版本", async () => {
+test("维护控制命令来自受门禁控制器并明确绑定固定目标版本", async (t) => {
   const calls = [];
-  const targetRelease = "/releases/d9e5eaf-target";
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-controller-binding-")),
+  );
+  const targetRelease = join(directory, "d9e5eaf-target");
   const configPath = `${targetRelease}/.runtime/production.json`;
+  const backupRoot = join(directory, "Backups");
+  await mkdir(join(targetRelease, ".runtime"), { recursive: true, mode: 0o700 });
+  await mkdir(backupRoot, { mode: 0o700 });
+  await writeFile(
+    configPath,
+    `${JSON.stringify({ AI_EMPLOYEE_BACKUP_DIRECTORY: backupRoot })}\n`,
+    { mode: 0o600 },
+  );
+  await chmod(configPath, 0o600);
+  t.after(() => rm(directory, { recursive: true, force: true }));
   const dependencies = createLocalReleaseDependencies({
     async command(command, args, options) {
       calls.push({ command, args, options });
@@ -1833,8 +1885,8 @@ test("维护控制命令来自受门禁控制器并明确绑定固定目标版�
       if (script.endsWith("备份数据库.mjs")) {
         return JSON.stringify({
           completed: true,
-          backupPath: "/var/tmp/ai-employee-production/backups/a.dump.enc",
-          metadataPath: "/var/tmp/ai-employee-production/backups/a.dump.enc.json",
+          backupPath: join(backupRoot, "a.dump.enc"),
+          metadataPath: join(backupRoot, "a.dump.enc.json"),
         });
       }
       if (script.endsWith("隔离恢复演练.mjs")) {
