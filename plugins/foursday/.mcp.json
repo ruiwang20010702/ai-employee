@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "ai-employee": {
+    "foursday": {
       "type": "stdio",
       "command": "node",
       "args": ["scripts/mcp-server.mjs"],

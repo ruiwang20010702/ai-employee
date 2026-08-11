@@ -9,7 +9,7 @@ export function postgresPoolOptions(config, { readOnly = false } = {}) {
     max: config.databasePoolMax,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
-    application_name: readOnly ? "ai-employee-read-only" : "ai-employee",
+    application_name: readOnly ? "foursday-read-only" : "foursday",
     ssl: config.databaseSsl ? { rejectUnauthorized: true } : false,
     ...(readOnly ? { options: "-c default_transaction_read_only=on" } : {}),
   };

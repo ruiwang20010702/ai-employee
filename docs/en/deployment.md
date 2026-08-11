@@ -1,5 +1,11 @@
 # Deployment
 
+> Rename compatibility: new installations use the Foursday CLI, plugin,
+> service labels, release root, and Keychain namespace. Existing `0.x`
+> installations may keep `AI_EMPLOYEE_*` configuration keys and legacy secret
+> references; the release tooling validates and migrates them without exposing
+> values.
+
 [Overview](./overview.md) · [简体中文生产运维手册](../生产运维手册.md)
 
 > This guide explains the public deployment model. The Chinese operations manual remains the authoritative runbook for the current production installation.
@@ -9,8 +15,8 @@
 Repository validation does not require DingTalk, production PostgreSQL, or Codex credentials:
 
 ```bash
-git clone https://github.com/ruiwang20010702/ai-employee.git
-cd ai-employee
+git clone https://github.com/ruiwang20010702/foursday.git
+cd foursday
 npm ci
 npm run check
 ```
@@ -36,12 +42,12 @@ Never deploy from a mutable branch name. Install a reviewed full commit SHA in a
 
 ```bash
 npm init -y
-npm install "github:ruiwang20010702/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA"
-npx --no-install ai-employee check
-npx --no-install ai-employee init
-npx --no-install ai-employee init --apply
-npx --no-install ai-employee secrets
-npx --no-install ai-employee secrets --apply
+npm install "github:ruiwang20010702/foursday#REPLACE_WITH_APPROVED_FULL_SHA"
+npx --no-install foursday check
+npx --no-install foursday init
+npx --no-install foursday init --apply
+npx --no-install foursday secrets
+npx --no-install foursday secrets --apply
 ```
 
 Mutating setup commands are preview-only without `--apply`. Initialization refuses to overwrite an existing configuration and stores only workspace-specific Keychain references in a mode-`600` file.
@@ -57,7 +63,7 @@ npm run production:preflight
 npm run db:backup
 npm run db:migrate
 npm run production:doctor
-npm run production:codex-probe
+npm run production:agent-probe
 npm run service:install
 npm run production:service-verify
 npm run production:verify
@@ -87,12 +93,12 @@ Example local controller invocation:
 ```bash
 npm run release:local -- \
   --sha REPLACE_WITH_APPROVED_FULL_SHA \
-  --root /absolute/path/ai-employee-production \
+  --root /absolute/path/foursday-production \
   --config /absolute/path/production.json
 
 npm run release:local -- \
   --sha REPLACE_WITH_APPROVED_FULL_SHA \
-  --root /absolute/path/ai-employee-production \
+  --root /absolute/path/foursday-production \
   --config /absolute/path/production.json \
   --apply
 ```

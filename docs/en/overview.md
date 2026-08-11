@@ -1,10 +1,22 @@
-# AI Employee Overview
+# Foursday Overview
 
 [Project home](../../README.md) · [简体中文设计总览](../设计总览.md)
 
 ## One sentence
 
-AI Employee is a safety-first DingTalk agent runtime that decides when to respond, proposes project-scoped work, requests approval, executes authorized tools, reads the target system back, and retains only auditable memory.
+Foursday is an open-source work twin that decides when to respond, proposes project-scoped work, requests approval, executes authorized tools, reads the target system back, and retains only auditable memory. Its mission is to return one verified workday per user each week. DingTalk uses DWS; Feishu uses the official Open Platform and never depends on DWS.
+
+## Try it without an enterprise account
+
+```bash
+npm ci
+npm run demo
+```
+
+The interactive demo uses the same versioned `MessageAdapter`, `AgentRuntime`,
+and `ModelProvider` contracts as production integrations. It never connects to
+an external system. Approval is still required before the in-memory effect is
+recorded, and completion still requires simulated target read-back evidence.
 
 ## Why it exists
 
@@ -18,13 +30,13 @@ Text generation is only one part of workplace automation. A production agent mus
 - What should happen when a person takes over or the outcome is unknown?
 - Which facts may become long-term memory, and who confirms them?
 
-AI Employee makes these questions explicit in code, storage, tests, and operational gates.
+Foursday makes these questions explicit in code, storage, tests, and operational gates.
 
 ## End-to-end flow
 
 ```mermaid
 flowchart LR
-    A["DingTalk message"] --> B["Scope, deduplication, bounded bundling"]
+    A["DingTalk / Feishu message"] --> B["MessageAdapter scope, deduplication, bounded bundling"]
     B --> C{"Ignore, clarify, reply, or propose work"}
     C -->|"Ignore"| D["Persist a reason"]
     C -->|"Clarify or reply"| E["Draft awaiting review"]
@@ -34,7 +46,7 @@ flowchart LR
     H --> I["Target-system read-back"]
     I --> J["Result draft, evidence, and memory candidates"]
     E --> K["Final human-takeover check"]
-    K --> L["DWS send with receipt verification"]
+    K --> L["Channel-native send with receipt verification"]
 ```
 
 ## Core principles
@@ -68,6 +80,7 @@ Implemented capability does not mean enabled capability. Production environments
 ## Read next
 
 - [Architecture](./architecture.md)
+- [Integration guide](./integrations.md)
 - [Capabilities and memory](./capabilities.md)
 - [Deployment](./deployment.md)
 - [Security policy](../../SECURITY.md)

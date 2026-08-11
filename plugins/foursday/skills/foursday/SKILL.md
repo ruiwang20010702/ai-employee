@@ -1,9 +1,9 @@
 ---
-name: ai-employee
-description: 查看本机 AI 员工的运行健康、待审批回复、工作计划、人工接管状态和授权能力；用户提到 AI 员工状态、草稿、计划、审批或管理台时使用。
+name: foursday
+description: 查看本机 Foursday 工作分身的运行健康、待审批回复、工作计划、人工接管状态和授权能力；用户提到 Foursday、AI 员工状态、草稿、计划、审批或管理台时使用。
 ---
 
-# AI 员工 Codex 入口
+# Foursday Codex 入口
 
 使用本插件提供的只读 MCP 工具获取当前状态，不根据历史对话或模型记忆猜测运行结果。
 

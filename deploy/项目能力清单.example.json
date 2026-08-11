@@ -46,7 +46,7 @@
       "timeoutMs": 120000,
       "remote": "origin",
       "expectedRemoteUrl": "https://github.com/example/ai-employee-project.git",
-      "branchPrefix": "ai-employee/"
+      "branchPrefix": "foursday/"
     },
     "production_deploy": {
       "mode": "approval_required",

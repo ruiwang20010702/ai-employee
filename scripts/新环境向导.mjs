@@ -35,7 +35,7 @@ const bundledCommands = Object.freeze({
   probe: Object.freeze({
     script: "scripts/验证草稿生成.mjs",
     applyRequired: true,
-    effect: "使用固定合成消息调用一次 Codex，不读取业务消息或数据库",
+    effect: "使用固定合成消息调用当前 AgentRuntime，不读取业务消息或数据库",
   }),
   verify: Object.freeze({
     script: "scripts/验证生产服务.mjs",
@@ -64,7 +64,7 @@ const serviceActions = Object.freeze({
     script: "scripts/管理常驻服务.mjs",
     args: ["uninstall"],
     applyRequired: true,
-    effect: "卸载 AI 员工 LaunchAgent；保留 plist 以便人工恢复",
+    effect: "卸载 Foursday LaunchAgent；保留 plist 以便人工恢复",
   }),
   verify: Object.freeze({
     script: "scripts/验证服务部署.mjs",
@@ -186,17 +186,17 @@ async function runBundledCommand({
 function help() {
   return {
     usage: [
-      "ai-employee check [--config /absolute/path.json]",
-      "ai-employee init [--apply] [--config /absolute/path.json]",
-      "ai-employee secrets [--apply] [--config /absolute/path.json]",
-      "ai-employee preflight [--dry-run] [--config /absolute/path.json]",
-      "ai-employee doctor [--dry-run] [--config /absolute/path.json]",
-      "ai-employee backup [--apply] [--config /absolute/path.json]",
-      "ai-employee migrate [--apply] [--config /absolute/path.json]",
-      "ai-employee probe [--apply] [--config /absolute/path.json]",
-      "ai-employee service [generate|install|uninstall|verify] [--apply|--dry-run] [--config /absolute/path.json]",
-      "ai-employee verify [--dry-run] [--config /absolute/path.json]",
-      "ai-employee shadow [--dry-run] [--config /absolute/path.json]",
+      "foursday check [--config /absolute/path.json]",
+      "foursday init [--apply] [--config /absolute/path.json]",
+      "foursday secrets [--apply] [--config /absolute/path.json]",
+      "foursday preflight [--dry-run] [--config /absolute/path.json]",
+      "foursday doctor [--dry-run] [--config /absolute/path.json]",
+      "foursday backup [--apply] [--config /absolute/path.json]",
+      "foursday migrate [--apply] [--config /absolute/path.json]",
+      "foursday probe [--apply] [--config /absolute/path.json]",
+      "foursday service [generate|install|uninstall|verify] [--apply|--dry-run] [--config /absolute/path.json]",
+      "foursday verify [--dry-run] [--config /absolute/path.json]",
+      "foursday shadow [--dry-run] [--config /absolute/path.json]",
     ],
     sequence: [
       "init --apply",
@@ -212,7 +212,7 @@ function help() {
       "verify",
       "shadow",
     ],
-    boundary: "check 和所有 --dry-run 只读取本机文件或生成执行计划，不连接钉钉、Codex 或数据库；init、secrets、backup、migrate、probe 及服务变更只有显式 --apply 才执行。生产放量仍需独立审批。",
+    boundary: "check 和所有 --dry-run 只读取本机文件或生成执行计划，不连接钉钉、AgentRuntime 或数据库；init、secrets、backup、migrate、probe 及服务变更只有显式 --apply 才执行。生产放量仍需独立审批。",
   };
 }
 
@@ -250,18 +250,18 @@ export async function runReuseGuide({
       dryRun: false,
       executed: true,
       ...initialized,
-      next: "先运行 ai-employee secrets --apply，再填写 requiredEdits 并运行 ai-employee check",
+      next: "先运行 foursday secrets --apply，再填写 requiredEdits 并运行 foursday check",
     };
   }
   if (command === "secrets") {
     if (options.positionals.length > 0 || options.dryRun) {
-      throw new Error("Usage: ai-employee secrets [--apply] [--config /absolute/path.json]");
+      throw new Error("Usage: foursday secrets [--apply] [--config /absolute/path.json]");
     }
     return keychainProvisioner({ configPath, apply: options.apply });
   }
   if (command === "check") {
     if (options.positionals.length > 0 || options.apply || options.dryRun) {
-      throw new Error("Usage: ai-employee check [--config /absolute/path.json]");
+      throw new Error("Usage: foursday check [--config /absolute/path.json]");
     }
     return inspectReuseReadiness({ configPath });
   }
@@ -269,7 +269,7 @@ export async function runReuseGuide({
     const action = options.positionals.shift() ?? "install";
     const definition = serviceActions[action];
     if (!definition) {
-      throw new Error("Usage: ai-employee service [generate|install|uninstall|verify] [--apply|--dry-run] [--config /absolute/path.json]");
+      throw new Error("Usage: foursday service [generate|install|uninstall|verify] [--apply|--dry-run] [--config /absolute/path.json]");
     }
     return runBundledCommand({
       command,
@@ -292,7 +292,7 @@ export async function runReuseGuide({
       scriptRunner,
     });
   }
-  throw new Error("Usage: ai-employee help");
+  throw new Error("Usage: foursday help (legacy alias: ai-employee help)");
 }
 
 if (isMainModule(import.meta.url)) {

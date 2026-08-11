@@ -4,15 +4,15 @@
 
 ## System shape
 
-AI Employee separates fast message ingestion, slow model work, external side effects, and human control. PostgreSQL is the production state and evidence store; SQLite is retained for local development and parity testing.
+Foursday separates fast message ingestion, slow model work, external side effects, and human control. PostgreSQL is the production state and evidence store; SQLite is retained for local development and parity testing.
 
 ```mermaid
 flowchart LR
-    DT["DingTalk"] --> SIGNAL["Activity signal"]
-    SIGNAL --> DWS["DWS source of truth"]
-    DWS --> DB[("PostgreSQL")]
+    CHANNEL["DingTalk / Feishu / Demo"] --> MESSAGE["MessageAdapter"]
+    MESSAGE --> DB[("PostgreSQL")]
     DB --> WORKER["Draft worker"]
-    WORKER --> CODEX["Codex"]
+    WORKER --> RUNTIME["AgentRuntime"]
+    RUNTIME --> PROVIDER["ModelProvider or agent CLI"]
     DB --> EXECUTOR["Plan executor"]
     EXECUTOR --> ADAPTERS["DWS / Git / Tests / Release"]
     ADAPTERS --> VERIFY["Target read-back"]
@@ -25,7 +25,7 @@ flowchart LR
 
 | Component | Responsibility |
 |---|---|
-| Listener | Fetch scoped messages through DWS, deduplicate them, reconcile gaps, and build bounded bundles |
+| Listener | Receive normalized adapter messages, deduplicate them, reconcile gaps, and build bounded bundles |
 | Draft worker | Decide ignore/clarify/reply/work, generate drafts, propose memory, and detect human takeover |
 | Policy engine | Evaluate requester, project, capability, risk, target scope, expiry, and persistent run budget |
 | Plan executor | Acquire leases, revalidate policy, run one step at a time, and persist evidence |
@@ -34,6 +34,53 @@ flowchart LR
 | Health and alerts | Track heartbeats, dead tasks, unknown sends, leases, message coverage, and SLO samples |
 | Admin console | Expose local review and control with separate read/write tokens |
 | Codex plugin | Present read-only status, drafts, plans, capabilities, and takeover information |
+
+## Versioned integration contracts
+
+The runtime exposes three independent `1.0` contracts:
+
+| Contract | Owns | Does not own |
+|---|---|---|
+| `MessageAdapter` | Message identity, scoped ingestion, conversation context, manual-reply detection, sending, and receipt read-back | Reply policy, project authorization, or model selection |
+| `AgentRuntime` | Producing a schema-validated draft through an agent such as Codex or Claude Code | Message credentials or permission to execute work |
+| `ModelProvider` | Structured model generation for provider-backed runtimes | Tool authorization, side effects, or approval state |
+
+DWS is contained inside the DingTalk adapter. The Feishu adapter uses Feishu's
+official event subscription and messaging APIs and has no DWS dependency. Adapters
+share normalized identities and lifecycle semantics, not platform credentials
+or platform-specific fields.
+
+### Channel-specific receive paths
+
+```mermaid
+sequenceDiagram
+    participant DT as DingTalk desktop
+    participant DWS as DingTalk DWS adapter
+    participant FS as Feishu WebSocket
+    participant FA as Feishu adapter
+    participant DB as Durable store
+    DT-->>DWS: Local database activity signal
+    DWS->>DWS: Pull allowlisted messages and reconcile gaps
+    DWS->>DB: Persist normalized messages
+    FS->>FA: im.message.receive_v1 event
+    FA->>FA: Validate sender, text, group mention, and event identity
+    FA->>DB: Persist before the callback returns
+    Note over FA,DB: Model work never runs inside the event callback
+```
+
+Feishu delivery is at least once, so the adapter deduplicates by message ID.
+Only direct messages and allowlisted group messages that explicitly mention the
+work twin are eligible. Sending uses Feishu's native UUID field; completion
+still requires an exact message ID, conversation, and text read-back.
+
+### Agent runtime selection
+
+Set `AI_EMPLOYEE_AGENT_RUNTIME=codex` (default) or
+`AI_EMPLOYEE_AGENT_RUNTIME=claude-code`. Pin `CODEX_PATH` or
+`CLAUDE_CODE_PATH` in managed environments. Both CLIs receive the draft prompt
+through stdin, run without tools, and must return the same JSON Schema. Direct
+model integrations implement `ModelProvider` and inherit the same draft
+validation.
 
 ## Message lifecycle
 

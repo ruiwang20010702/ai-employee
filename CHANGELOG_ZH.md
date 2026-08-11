@@ -8,8 +8,21 @@
 
 ### 计划中
 
-- 无需真实钉钉账号的交互式演示模式。
 - 更易安装的桌面发行包和社区案例库。
+
+## [0.4.0] - 2026-08-11
+
+### 变更
+
+- 项目正式更名为 **Foursday**，定位为开源工作分身，长期使命是每周为每位用户返还一个经过验证的工作日。
+- `foursday` 成为主 CLI；`0.x` 版本继续保留 `ai-employee` 兼容别名。
+- Codex 市场、插件、MCP 服务、技能和状态资源统一迁移为 Foursday，并提供明确迁移步骤。
+
+### 新增
+
+- 版本化渠道、智能体运行时和模型提供方契约。
+- 无需企业账号或模型凭据的五分钟本地演示。
+- 在钉钉 DWS 与 Codex 之外，新增飞书开放平台与 Claude Code 集成契约。
 
 ## [0.3.0] - 2026-08-11
 
@@ -41,6 +54,7 @@
 - 本机管理台、只读 Codex 插件和 macOS 常驻服务。
 - SQLite 开发存储与基础生产诊断流程。
 
-[未发布]: https://github.com/ruiwang20010702/ai-employee/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/ruiwang20010702/ai-employee/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/ruiwang20010702/ai-employee/releases/tag/v0.2.0
+[未发布]: https://github.com/ruiwang20010702/foursday/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ruiwang20010702/foursday/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/ruiwang20010702/foursday/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/ruiwang20010702/foursday/releases/tag/v0.2.0

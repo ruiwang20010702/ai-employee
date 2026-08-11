@@ -71,7 +71,8 @@ const forwardPendingPhases = new Set([
   "forward_service_verified",
 ]);
 const forwardConfirmationPrefix = "I_ACCEPT_FORWARD_ONLY:";
-export const productionRepository = "ruiwang20010702/ai-employee";
+export const productionRepository = "ruiwang20010702/foursday";
+const deploymentRootNames = new Set(["foursday-production", "ai-employee-production"]);
 export const npmInstallArguments = Object.freeze(["ci", "--ignore-scripts"]);
 const requiredKeychainKeys = Object.freeze([
   "DATABASE_URL",
@@ -520,9 +521,9 @@ function deploymentRoot(value) {
     /[\0\r\n]/u.test(String(value)) ||
     root === parse(root).root ||
     root === resolve(homedir()) ||
-    basename(root) !== "ai-employee-production"
+    !deploymentRootNames.has(basename(root))
   ) {
-    throw new Error("部署根目录必须是名称为 ai-employee-production 的专用绝对目录");
+    throw new Error("部署根目录必须是名称为 foursday-production 的专用绝对目录（旧环境兼容 ai-employee-production）");
   }
   return root;
 }

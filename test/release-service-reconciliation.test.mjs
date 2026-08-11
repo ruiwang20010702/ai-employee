@@ -12,8 +12,9 @@ test("版本服务对账会备份并卸载目标版本不再包含的服务", as
   const destination = join(root, "LaunchAgents");
   await mkdir(generated, { recursive: true });
   await mkdir(destination, { recursive: true });
-  await writeFile(join(generated, "com.ai-employee.listener.plist"), "new");
-  await writeFile(join(destination, "com.ai-employee.listener.plist"), "current");
+  await writeFile(join(generated, "com.foursday.listener.plist"), "new");
+  await writeFile(join(destination, "com.foursday.listener.plist"), "current");
+  await writeFile(join(destination, "com.ai-employee.listener.plist"), "legacy");
   await writeFile(join(destination, "com.ai-employee.memory-source.plist"), "stale");
   await writeFile(join(destination, "com.ai-employee.postgresql.plist"), "database");
   await writeFile(join(destination, "com.example.unrelated.plist"), "keep");
@@ -28,8 +29,11 @@ test("版本服务对账会备份并卸载目标版本不再包含的服务", as
     },
   });
 
-  assert.deepEqual(result.removed, ["com.ai-employee.memory-source"]);
-  assert.equal(await readFile(join(destination, "com.ai-employee.listener.plist"), "utf8"), "current");
+  assert.deepEqual(result.removed, [
+    "com.ai-employee.listener",
+    "com.ai-employee.memory-source",
+  ]);
+  assert.equal(await readFile(join(destination, "com.foursday.listener.plist"), "utf8"), "current");
   assert.equal(await readFile(join(destination, "com.example.unrelated.plist"), "utf8"), "keep");
   assert.equal(await readFile(join(destination, "com.ai-employee.postgresql.plist"), "utf8"), "database");
   assert.equal((await readdir(destination)).includes("com.ai-employee.memory-source.plist"), false);
@@ -44,8 +48,8 @@ test("版本服务对账在没有版本外服务时不修改 LaunchAgents", asyn
   const destination = join(root, "LaunchAgents");
   await mkdir(generated, { recursive: true });
   await mkdir(destination, { recursive: true });
-  await writeFile(join(generated, "com.ai-employee.listener.plist"), "new");
-  await writeFile(join(destination, "com.ai-employee.listener.plist"), "current");
+  await writeFile(join(generated, "com.foursday.listener.plist"), "new");
+  await writeFile(join(destination, "com.foursday.listener.plist"), "current");
 
   const result = await reconcileVersionServices({
     releaseDirectory: release,

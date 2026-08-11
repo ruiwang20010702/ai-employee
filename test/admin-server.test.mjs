@@ -224,7 +224,7 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     const html = await page.text();
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-security-policy"), /nonce-/u);
-    assert.match(html, /AI 员工管理台/u);
+    assert.match(html, /Foursday 管理台/u);
     assert.match(html, /明确替代这条旧记忆/u);
     assert.doesNotMatch(html, /conflictIds\[0\]/u);
     assert.doesNotMatch(html, /read-secret|write-secret/u);

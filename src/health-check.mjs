@@ -355,5 +355,8 @@ export function prometheusMetrics(health) {
       );
     }
   }
-  return `${lines.join("\n")}\n`;
+  const foursdayLines = lines.map((line) =>
+    line.replaceAll("ai_employee", "foursday")
+  );
+  return `${foursdayLines.join("\n")}\n${lines.join("\n")}\n`;
 }

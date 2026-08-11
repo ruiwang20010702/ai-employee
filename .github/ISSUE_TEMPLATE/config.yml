@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: 私密安全报告
-    url: https://github.com/ruiwang20010702/ai-employee/security/advisories/new
+    url: https://github.com/ruiwang20010702/foursday/security/advisories/new
     about: 凭据、权限绕过、隐私数据、远程执行和生产发布问题请通过此处私下报告。

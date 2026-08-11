@@ -181,9 +181,17 @@ async function inspectConfig(configPath) {
   result.runtimePaths = {
     dws: String(values.DWS_PATH ?? "dws"),
     codex: String(values.CODEX_PATH ?? "codex"),
+    claudeCode: String(values.CLAUDE_CODE_PATH ?? "claude"),
+    agentRuntime: String(values.AI_EMPLOYEE_AGENT_RUNTIME ?? "codex"),
     pgDump: String(values.PG_DUMP_PATH ?? "pg_dump"),
     pgRestore: String(values.PG_RESTORE_PATH ?? "pg_restore"),
   };
+  if (!["codex", "claude-code"].includes(result.runtimePaths.agentRuntime)) {
+    result.requiredEdits.push(
+      "AI_EMPLOYEE_AGENT_RUNTIME 只能是 codex 或 claude-code",
+    );
+    result.valid = false;
+  }
   return result;
 }
 
@@ -199,12 +207,17 @@ export async function inspectReuseReadiness({
   const paths = config.runtimePaths ?? {
     dws: "dws",
     codex: "codex",
+    claudeCode: "claude",
+    agentRuntime: "codex",
     pgDump: "pg_dump",
     pgRestore: "pg_restore",
   };
+  const agentCommand = paths.agentRuntime === "claude-code"
+    ? ["Claude Code", paths.claudeCode]
+    : ["Codex", paths.codex];
   const commandInputs = [
     ["DWS", paths.dws],
-    ["Codex", paths.codex],
+    agentCommand,
     ["pg_dump", paths.pgDump],
     ["pg_restore", paths.pgRestore],
     ["Git", "/usr/bin/git"],
@@ -227,9 +240,9 @@ export async function inspectReuseReadiness({
   if (!supportedPlatform) nextActions.push("使用 macOS 主机运行生产服务");
   if (!supportedNode) nextActions.push("安装 Node.js 22.5 或更高版本");
   if (missingCommands.length > 0) nextActions.push(`安装或配置：${missingCommands.join("、")}`);
-  if (!config.exists) nextActions.push("运行 ai-employee init --apply 创建受保护配置");
+  if (!config.exists) nextActions.push("运行 foursday init --apply 创建受保护配置");
   else nextActions.push(...config.requiredEdits);
-  if (readyForPreflight) nextActions.push("运行 ai-employee preflight 进行联网只读预检");
+  if (readyForPreflight) nextActions.push("运行 foursday preflight 进行联网只读预检");
 
   return {
     schema: "ai-employee-reuse/v1",

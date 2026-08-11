@@ -8,8 +8,21 @@ Notable changes to this project are documented here. The format follows [Keep a 
 
 ### Planned
 
-- An interactive demo that does not require a real DingTalk account.
 - Easier desktop distribution and a community example library.
+
+## [0.4.0] - 2026-08-11
+
+### Changed
+
+- Renamed the project to **Foursday**, an open-source work twin whose mission is to return one verified workday per user each week.
+- Made `foursday` the primary CLI and retained `ai-employee` as a compatibility alias for the `0.x` line.
+- Renamed the Codex marketplace, plugin, MCP server, skill, and status resource to Foursday with an explicit migration procedure.
+
+### Added
+
+- Versioned channel, agent-runtime, and model-provider contracts.
+- A five-minute local demo without enterprise accounts or model credentials.
+- Feishu Open Platform and Claude Code integration contracts alongside DingTalk/DWS and Codex.
 
 ## [0.3.0] - 2026-08-11
 
@@ -41,6 +54,7 @@ Notable changes to this project are documented here. The format follows [Keep a 
 - A local admin console, read-only Codex plugin, and macOS background services.
 - SQLite development storage and the initial production diagnostic workflow.
 
-[Unreleased]: https://github.com/ruiwang20010702/ai-employee/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/ruiwang20010702/ai-employee/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/ruiwang20010702/ai-employee/releases/tag/v0.2.0
+[Unreleased]: https://github.com/ruiwang20010702/foursday/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ruiwang20010702/foursday/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/ruiwang20010702/foursday/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/ruiwang20010702/foursday/releases/tag/v0.2.0

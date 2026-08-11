@@ -11,7 +11,7 @@ test("PostgreSQL 只读连接由数据库会话强制拒绝写入", () => {
     databasePoolMax: 2,
     databaseSsl: false,
   }, { readOnly: true });
-  assert.equal(options.application_name, "ai-employee-read-only");
+  assert.equal(options.application_name, "foursday-read-only");
   assert.equal(options.options, "-c default_transaction_read_only=on");
 });
 

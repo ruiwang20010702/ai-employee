@@ -159,6 +159,7 @@ async function postAlertWebhook({
       headers: {
         "content-type": "application/json",
         "content-length": Buffer.byteLength(body),
+        "x-foursday-signature": `sha256=${signature}`,
         "x-ai-employee-signature": `sha256=${signature}`,
       },
       lookup(_hostname, options, callback) {
@@ -247,6 +248,7 @@ export async function runAlertCheck({
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-foursday-signature": `sha256=${signature}`,
           "x-ai-employee-signature": `sha256=${signature}`,
         },
         body,

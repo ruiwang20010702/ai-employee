@@ -4,7 +4,7 @@
 
 ## Capability is not permission
 
-AI Employee separates three concepts:
+Foursday separates three concepts:
 
 1. **Implemented capability** — an adapter and verifier exist in the codebase.
 2. **Configured capability** — a project manifest defines who, what, where, when, and how often it may be used.

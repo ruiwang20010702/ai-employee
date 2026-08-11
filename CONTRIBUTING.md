@@ -1,8 +1,8 @@
-# Contributing to AI Employee
+# Contributing to Foursday
 
 **English** · [简体中文](./CONTRIBUTING_ZH.md)
 
-Thank you for helping improve AI Employee. This project treats workplace messaging and external actions as production systems, so authorization boundaries, failure paths, and verifiable evidence are first-class requirements.
+Thank you for helping improve Foursday. This project treats workplace messaging and external actions as production systems, so authorization boundaries, failure paths, and verifiable evidence are first-class requirements.
 
 ## What you can contribute
 
@@ -15,11 +15,11 @@ Sanitize anything related to real DingTalk accounts, production data, or interna
 
 ## Local development
 
-AI Employee requires Node.js 22.5 or later:
+Foursday requires Node.js 22.5 or later:
 
 ```bash
-git clone https://github.com/ruiwang20010702/ai-employee.git
-cd ai-employee
+git clone https://github.com/ruiwang20010702/foursday.git
+cd foursday
 npm ci
 npm run check
 ```

@@ -1,26 +1,38 @@
 <div align="center">
 
-![AI Employee](./assets/ai-employee-hero.svg)
+![Foursday](./assets/foursday-hero.svg)
 
-# AI Employee
+# Foursday
 
-**A safety-first DingTalk agent runtime that can plan work, request approval, execute tools, verify outcomes, and retain auditable memory.**
+**Your open-source work twin. One more you, one less workday.**
 
-It turns DingTalk messages into drafts and project-scoped work plans. Real sending and plan execution are disabled by default, and chat content can never grant new permissions.
+Foursday learns how you work, turns workplace messages into reviewable replies
+and project-scoped plans, executes only authorized tools, and verifies the
+result. Its long-term mission is simple: give every user one workday back.
+
+DingTalk uses DWS; Feishu uses its official event and messaging APIs. Real
+sending and plan execution are disabled by default, and chat content can never
+grant new permissions. Foursday should work like another you without silently
+impersonating you.
 
 **English** · [简体中文](./README_ZH.md) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
-[![Checks](https://github.com/ruiwang20010702/ai-employee/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/ai-employee/actions/workflows/check.yml)
-[![Security](https://github.com/ruiwang20010702/ai-employee/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/ai-employee/actions/workflows/security.yml)
+[![Checks](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
+[![Security](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
 </div>
 
-## Why AI Employee?
+## Why Foursday?
 
-Chatbots can produce text, but real work requires stronger guarantees. AI Employee treats office automation like production software:
+Most AI assistants help you write. Foursday is being built to help you hand off
+real work and reclaim time. The north-star outcome is **verified hours returned
+per user each week**, with eight hours as the milestone for a four-day workweek.
+
+Real work needs stronger guarantees than a chatbot. Foursday treats workplace
+automation like production software:
 
 - **Decide before replying** with allowlists, bounded message bundling, deterministic no-reply rules, and model review.
 - **Authorize before executing** with project manifests, scoped capabilities, expiry, run budgets, and risk policies.
@@ -33,24 +45,24 @@ Chatbots can produce text, but real work requires stronger guarantees. AI Employ
 
 ```mermaid
 flowchart LR
-    A["DingTalk message"] --> B["Scope, deduplication, bounded bundling"]
+    A["DingTalk / Feishu / demo message"] --> B["MessageAdapter: scope, deduplication, bounded bundling"]
     B --> C{"Ignore, ask, reply, or plan work"}
     C -->|"Ask or reply"| D["Draft awaiting approval"]
     C -->|"Work request"| E["Project plan and capability gateway"]
     E --> F{"Allow, approve, or reject"}
-    F -->|"Allowed"| G["Codex / DWS / Git / office tools"]
+    F -->|"Allowed"| G["Codex / Claude Code / Git / office tools"]
     G --> H["Read back and verify target state"]
     H --> I["Result draft, memory candidate, audit trail"]
     D --> J["Final manual-takeover check"]
-    J --> K["DWS send with receipt verification"]
+    J --> K["Channel-native send with receipt verification"]
 ```
 
 ## Highlights
 
 | Area | What is implemented | Default boundary |
 |---|---|---|
-| Messaging | DWS ingestion, allowlists, group mentions, deduplication, reconciliation | No access outside configured conversations |
-| Drafting | No-reply, clarification, reply, capability summaries, controlled concurrency | Draft-only by default |
+| Messaging | DingTalk/DWS and Feishu event adapters, allowlists, group mentions, deduplication | No access outside configured conversations |
+| Drafting | Codex, Claude Code, provider runtimes, no-reply and clarification | Draft-only by default |
 | Human control | Approval, rejection, pause, cancellation, takeover, dead-task handling | No automatic anomaly resolution |
 | Project work | Project manifests, plan hashes, leases, persistent run budgets | Global execution disabled by default |
 | Tools | Research, docs, code, tests, Git, release, DingTalk office actions | Explicit per-project authorization |
@@ -60,11 +72,32 @@ flowchart LR
 
 ## Quick Start
 
+### Run the five-minute local demo
+
+The demo needs only Node.js. It does not require DingTalk, DWS, PostgreSQL,
+Codex, Claude Code, or an API key:
+
+```bash
+git clone https://github.com/ruiwang20010702/foursday.git
+cd foursday
+npm ci
+npm run demo
+```
+
+Enter a message, review the draft, and choose whether to approve the local
+simulation. Before approval, the effect ledger and evidence list remain empty.
+After approval, the demo records intent, performs only an in-memory action, and
+reads the simulated target back. For a non-interactive reproducible run:
+
+```bash
+npm run demo -- --message "Prepare a launch checklist" --approve --json
+```
+
 ### Validate the repository without external access
 
 ```bash
-git clone https://github.com/ruiwang20010702/ai-employee.git
-cd ai-employee
+git clone https://github.com/ruiwang20010702/foursday.git
+cd foursday
 npm ci
 npm run check
 ```
@@ -73,7 +106,9 @@ This does not read DingTalk messages or connect to your production database or C
 
 ### Check a macOS runtime
 
-AI Employee currently targets a logged-in macOS session and requires Node.js 22.5+, PostgreSQL 16/17, authenticated DWS, and Codex CLI:
+The production DingTalk profile currently targets a logged-in macOS session and
+requires Node.js 22.5+, PostgreSQL 16/17, authenticated DWS, and either Codex
+or Claude Code:
 
 ```bash
 npm run setup:check
@@ -83,24 +118,40 @@ npm run setup:check
 
 ```bash
 npm init -y
-npm install "github:ruiwang20010702/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA"
-npx --no-install ai-employee check
-npx --no-install ai-employee init
-npx --no-install ai-employee init --apply
-npx --no-install ai-employee secrets
-npx --no-install ai-employee secrets --apply
+npm install "github:ruiwang20010702/foursday#REPLACE_WITH_APPROVED_FULL_SHA"
+npx --no-install foursday check
+npx --no-install foursday init
+npx --no-install foursday init --apply
+npx --no-install foursday secrets
+npx --no-install foursday secrets --apply
 ```
 
-Replace the placeholder with a reviewed 40-character commit SHA. Initialization writes only workspace-specific Keychain references to a `600` configuration file. Mutating commands are preview-only unless `--apply` is explicitly supplied.
+Replace the placeholder with a reviewed 40-character commit SHA. Initialization writes only workspace-specific Keychain references to a `600` configuration file. Mutating commands are preview-only unless `--apply` is explicitly supplied. The former `ai-employee` command remains available as a compatibility alias in the `0.x` line.
+
+### Compatibility during the rename
+
+Foursday is the public product, package, plugin, service, repository, and CLI
+name. Existing installations remain readable and upgradeable: the
+`ai-employee` CLI alias, `AI_EMPLOYEE_*` environment keys, encrypted database
+sentinels, schema identifiers, HTTP compatibility headers, Prometheus metric
+aliases, and legacy Keychain references remain supported throughout the `0.x`
+line. New installations use `foursday`, `com.foursday.*`, and
+`foursday-production`. These stable protocol identifiers are retained on
+purpose; they are not the public brand and will not be silently broken by a
+cosmetic rename.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    DT["DingTalk"] --> DWS["DWS source of truth"]
-    DWS --> DB[("PostgreSQL")]
+    DT["DingTalk"] --> DWS["DWS adapter"]
+    FS["Feishu events"] --> FSA["Feishu Open Platform adapter"]
+    DEMO["Local demo"] --> MA["MessageAdapter contract"]
+    DWS --> MA
+    FSA --> MA
+    MA --> DB[("PostgreSQL")]
     DB --> W["Draft worker"]
-    W --> C["Codex"]
+    W --> C["Codex / Claude Code / ModelProvider"]
     DB --> E["Plan executor"]
     E --> T["DWS / Git / Tests / Release"]
     T --> V["Target read-back verification"]
@@ -130,6 +181,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 |---|---|
 | [Overview](./docs/en/overview.md) | Product model, principles, lifecycle, and non-goals |
 | [Architecture](./docs/en/architecture.md) | Components, states, side effects, security, and readiness |
+| [Integrations](./docs/en/integrations.md) | DingTalk/DWS, Feishu events, Codex, Claude Code, and provider contracts |
 | [Capabilities and Memory](./docs/en/capabilities.md) | Project authorization, plans, formal memory, and takeover |
 | [Deployment](./docs/en/deployment.md) | Safe setup, exact-SHA releases, verification, and forward-only boundaries |
 | [Security Policy](./SECURITY.md) | Private reporting and supported security boundaries |
@@ -139,9 +191,12 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [x] Reliable DingTalk ingestion, draft decisions, and human approval
 - [x] Project capability gateway, work plans, execution evidence, and result reporting
 - [x] Formal memory, takeover controls, SLOs, and immutable production releases
-- [ ] Interactive demo mode without a real DingTalk account
+- [x] Interactive local demo without enterprise accounts or model credentials
+- [x] Versioned MessageAdapter, AgentRuntime, and ModelProvider contracts
 - [ ] Easier desktop distribution
-- [ ] Generic message adapter interface and additional collaboration platforms
+- [x] Feishu Open Platform adapter without a DWS dependency
+- [x] Claude Code and direct model-provider runtime contracts
+- [ ] Production Feishu credential wizard and managed long-connection service
 - [ ] More message adapters and a community example library
 
 ## Contributing

@@ -13,6 +13,8 @@
   "AI_EMPLOYEE_PROJECTS_DIRECTORY": "/absolute/path/to/ai员工/.runtime/projects",
   "DWS_PATH": "dws",
   "CODEX_PATH": "codex",
+  "CLAUDE_CODE_PATH": "claude",
+  "AI_EMPLOYEE_AGENT_RUNTIME": "codex",
   "GBRAIN_PATH": "gbrain",
   "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply,work_plan_proposal",
   "AI_EMPLOYEE_WORKER_CONCURRENCY": 2,

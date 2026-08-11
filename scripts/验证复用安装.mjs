@@ -80,6 +80,7 @@ async function packageFileGate(files, root) {
     "scripts/初始化生产配置.mjs",
     "scripts/初始化钥匙串密钥.mjs",
     "scripts/新环境向导.mjs",
+    "scripts/交互式演示.mjs",
     "scripts/运行代码检查.mjs",
     "scripts/创建项目配置.mjs",
     "scripts/校验项目能力.mjs",
@@ -87,15 +88,19 @@ async function packageFileGate(files, root) {
     "scripts/验证复用安装.mjs",
     ...migrationFiles,
     "src/capability-policy.mjs",
+    "src/adapter-contracts.mjs",
+    "src/agent-runtime.mjs",
+    "src/demo.mjs",
+    "src/feishu.mjs",
     "src/control-access.mjs",
     "src/privacy-erasure.mjs",
     "src/reuse-readiness.mjs",
     "src/production-config-file.mjs",
-    "plugins/ai-employee/.codex-plugin/plugin.json",
-    "plugins/ai-employee/.mcp.json",
-    "plugins/ai-employee/scripts/mcp-server.mjs",
-    "plugins/ai-employee/skills/ai-employee/SKILL.md",
-    "plugins/ai-employee/说明.md",
+    "plugins/foursday/.codex-plugin/plugin.json",
+    "plugins/foursday/.mcp.json",
+    "plugins/foursday/scripts/mcp-server.mjs",
+    "plugins/foursday/skills/foursday/SKILL.md",
+    "plugins/foursday/说明.md",
   ];
   for (const path of required) {
     assert(paths.includes(path), `Release package is missing required file: ${path}`);
@@ -149,15 +154,15 @@ async function verifyInstalledPlugin(packageDirectory) {
     packageValidation.checkedDistributionFiles === 6 && packageValidation.personalConfigurationWrite === false,
     "Installed Codex plugin distribution validation is incomplete",
   );
-  const pluginDirectory = join(packageDirectory, "plugins", "ai-employee");
+  const pluginDirectory = join(packageDirectory, "plugins", "foursday");
   const [manifest, mcp] = await Promise.all([
     readFile(join(pluginDirectory, ".codex-plugin", "plugin.json"), "utf8")
       .then(JSON.parse),
     readFile(join(pluginDirectory, ".mcp.json"), "utf8").then(JSON.parse),
   ]);
-  assert(manifest.name === "ai-employee", "Installed Codex plugin identity changed");
+  assert(manifest.name === "foursday", "Installed Codex plugin identity changed");
   assert(manifest.mcpServers === "./.mcp.json", "Installed Codex plugin lost MCP mapping");
-  const server = mcp.mcpServers?.["ai-employee"];
+  const server = mcp.mcpServers?.foursday;
   assert(
     server?.type === "stdio" &&
     server.command === "node" &&
@@ -168,7 +173,7 @@ async function verifyInstalledPlugin(packageDirectory) {
   const script = join(pluginDirectory, "scripts", "mcp-server.mjs");
   await run(process.execPath, ["--check", script]);
   const skill = await readFile(
-    join(pluginDirectory, "skills", "ai-employee", "SKILL.md"),
+    join(pluginDirectory, "skills", "foursday", "SKILL.md"),
     "utf8",
   );
   assert(
@@ -246,8 +251,12 @@ export async function verifyReusableInstallation({
     assert(installedMetadata.name === packageName, "Installed package identity changed");
     assert(installedMetadata.version === packResult[0].version, "Installed package version changed");
     assert(
+      installedMetadata.bin?.foursday === "scripts/新环境向导.mjs",
+      "Installed package is missing the Foursday environment guide",
+    );
+    assert(
       installedMetadata.bin?.["ai-employee"] === "scripts/新环境向导.mjs",
-      "Installed package is missing the reusable environment guide",
+      "Installed package is missing the legacy environment guide alias",
     );
     const [sourceCount, pluginValidation, portableContentFiles] = await Promise.all([
       verifyInstalledSources(packageDirectory),
@@ -270,6 +279,28 @@ export async function verifyReusableInstallation({
       installedCheck.sourceModules === sourceCount,
       "Installed package code check is unavailable or misleading",
     );
+    const installedDemo = JSON.parse((await run(
+      npmPath,
+      [
+        "run",
+        "demo",
+        "--silent",
+        "--",
+        "--message",
+        "Prepare a launch checklist",
+        "--approve",
+        "--json",
+      ],
+      { cwd: packageDirectory },
+    )).stdout);
+    assert(
+      installedDemo.mode === "local-simulation" &&
+      installedDemo.outcome === "completed" &&
+      installedDemo.externalSystemsTouched === false &&
+      installedDemo.sideEffects.length === 2 &&
+      installedDemo.evidence.every((item) => item.verified !== false),
+      "Installed package demo did not complete with local read-back evidence",
+    );
 
     const configPath = join(runtimeDirectory, "production.json");
     const guideScript = join(packageDirectory, "scripts", "新环境向导.mjs");
@@ -281,9 +312,16 @@ export async function verifyReusableInstallation({
       installDirectory,
       "node_modules",
       ".bin",
-      process.platform === "win32" ? "ai-employee.cmd" : "ai-employee",
+      process.platform === "win32" ? "foursday.cmd" : "foursday",
     );
     await access(installedGuide, constants.X_OK);
+    const legacyInstalledGuide = join(
+      installDirectory,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "ai-employee.cmd" : "ai-employee",
+    );
+    await access(legacyInstalledGuide, constants.X_OK);
     const guideHelp = JSON.parse((await run(
       installedGuide,
       ["help"],
@@ -291,7 +329,7 @@ export async function verifyReusableInstallation({
     )).stdout);
     assert(
       Array.isArray(guideHelp.usage) &&
-      guideHelp.boundary.includes("不连接钉钉、Codex 或数据库"),
+      guideHelp.boundary.includes("不连接钉钉、AgentRuntime 或数据库"),
       "Installed reusable environment guide lost its read-only boundary",
     );
     const workspaceConfigA = join(workspaceA, ".runtime", "production.json");
@@ -349,8 +387,8 @@ export async function verifyReusableInstallation({
       "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
     ]) {
       assert(
-        /^keychain:\/\/ai-employee-[a-f0-9]{16}\//u.test(workspaceValuesA[key]) &&
-        /^keychain:\/\/ai-employee-[a-f0-9]{16}\//u.test(workspaceValuesB[key]) &&
+        /^keychain:\/\/foursday-[a-f0-9]{16}\//u.test(workspaceValuesA[key]) &&
+        /^keychain:\/\/foursday-[a-f0-9]{16}\//u.test(workspaceValuesB[key]) &&
         workspaceValuesA[key] !== workspaceValuesB[key],
         `Independent workspaces reused or exposed secret storage: ${key}`,
       );
@@ -413,7 +451,7 @@ export async function verifyReusableInstallation({
         config.AI_EMPLOYEE_BACKUP_KEY,
         config.AI_EMPLOYEE_ADMIN_READ_TOKEN,
         config.AI_EMPLOYEE_ADMIN_WRITE_TOKEN,
-      ].every((value) => /^keychain:\/\/ai-employee-[a-f0-9]{16}\//u.test(value)),
+      ].every((value) => /^keychain:\/\/foursday-[a-f0-9]{16}\//u.test(value)),
       "Generated configuration contains inline secrets or invalid Keychain references",
     );
     const secretPreview = JSON.parse((await run(
@@ -583,6 +621,7 @@ export async function verifyReusableInstallation({
       versionAligned: true,
       reusableGuide: true,
       installedCodeCheck: true,
+      installedDemo: true,
       isolatedWorkspaces: 2,
       configMode: "600",
       projectMode: "600",

@@ -69,7 +69,7 @@ test("应用迁移后逐项回读并原子替换为钥匙串引用", async () =>
   assert.equal(keychain.entries.size, 5);
   const next = JSON.parse(await readFile(configPath, "utf8"));
   for (const [key, account] of keychainMigrationEntries) {
-    assert.equal(next[key], `keychain://ai-employee-production/${account}`);
+    assert.equal(next[key], `keychain://foursday-production/${account}`);
   }
   assert.equal(next.AI_EMPLOYEE_ALLOWED_CAPABILITIES, "draft_reply");
   assert.equal(result.rollbackSnapshot, null);
@@ -174,7 +174,7 @@ test("配置提交前崩溃后重试可复用完全匹配的既有钥匙串项",
   const { configPath } = await fixture();
   const keychain = memoryKeychain();
   for (const [key, account] of keychainMigrationEntries) {
-    await keychain.writer("ai-employee-production", account, sourceValues[key]);
+    await keychain.writer("foursday-production", account, sourceValues[key]);
   }
   let writes = 0;
   const result = await migrateProductionSecretsToKeychain({
@@ -193,7 +193,7 @@ test("配置提交前崩溃后重试可复用完全匹配的既有钥匙串项",
 test("迁移目标存在冲突值时在写入配置和钥匙串前停止", async () => {
   const { configPath } = await fixture();
   const keychain = memoryKeychain();
-  await keychain.writer("ai-employee-production", "data-key", "different-value");
+  await keychain.writer("foursday-production", "data-key", "different-value");
   let writes = 0;
   await assert.rejects(
     migrateProductionSecretsToKeychain({

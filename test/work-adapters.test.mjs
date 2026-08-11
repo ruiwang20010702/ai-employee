@@ -426,7 +426,7 @@ test("代码补丁只应用到隔离分支且不覆盖原工作区", async (t) =
         timeoutMs: 30_000,
         remote: "origin",
         expectedRemoteUrl: remote,
-        branchPrefix: "ai-employee/",
+        branchPrefix: "foursday/",
       },
       production_deploy: {
         mode: "approval_required",

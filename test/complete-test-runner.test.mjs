@@ -38,6 +38,8 @@ test("完整测试子进程不继承生产连接和业务密钥", () => {
     AI_EMPLOYEE_CONFIG_FILE: "production-config",
     DINGTALK_SELF_USER_ID: "production-user",
     DWS_PATH: "/production/dws",
+    CLAUDE_CODE_PATH: "/production/claude",
+    ANTHROPIC_API_KEY: "production-anthropic-key",
     PGPASSWORD: "production-password",
     TEST_DATABASE_URL: "old-test-database",
   }, "postgresql://test@127.0.0.1:55433/ai_employee_test");
@@ -54,6 +56,8 @@ test("完整测试子进程不继承生产连接和业务密钥", () => {
     "AI_EMPLOYEE_CONFIG_FILE",
     "DINGTALK_SELF_USER_ID",
     "DWS_PATH",
+    "CLAUDE_CODE_PATH",
+    "ANTHROPIC_API_KEY",
     "PGPASSWORD",
   ]) assert.equal(Object.hasOwn(environment, key), false);
 });

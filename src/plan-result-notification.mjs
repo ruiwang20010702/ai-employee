@@ -17,7 +17,7 @@ export function buildPlanResultDraft({ plan, steps, now = new Date() }) {
   const completedText = completed.length > 0
     ? `已完成：${completed.map((step) => step.capability).join("、")}。`
     : "尚无可确认的已完成步骤。";
-  const reply = `${title}${completedText}详细执行证据已保存在 AI 员工管理台，确认后可以发送本条结果。`;
+  const reply = `${title}${completedText}详细执行证据已保存在 Foursday 管理台，确认后可以发送本条结果。`;
   return {
     id: planResultTaskId(plan.id),
     sourceTaskId: plan.plan.sourceTaskId,

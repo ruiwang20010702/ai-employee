@@ -3,7 +3,7 @@ export const adminHtml = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>AI 员工管理台</title>
+  <title>Foursday 管理台</title>
   <style nonce="__NONCE__">
     :root{color-scheme:light;--bg:#f4f5f3;--panel:#fff;--ink:#17201d;--muted:#65706c;--line:#dce1de;--accent:#176b51;--accent-soft:#e5f1ec;--danger:#a33939;--warn:#9a6414;--radius:12px;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-size:14px}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.5}
@@ -16,14 +16,14 @@ export const adminHtml = `<!doctype html>
 </head>
 <body>
   <main id="login" class="login">
-    <h1>AI 员工管理台</h1><p class="sub">仅限本机访问。令牌只保存在当前标签页。</p>
+    <h1>Foursday 管理台</h1><p class="sub">仅限本机访问。令牌只保存在当前标签页。</p>
     <label class="field"><span>只读令牌</span><input id="read-token" type="password" autocomplete="off"></label>
     <label class="field"><span>写入令牌（可选）</span><input id="write-token" type="password" autocomplete="off"></label>
     <button id="login-button" class="btn primary">进入管理台</button>
     <p id="login-error" class="error hidden" role="alert"></p><p class="hint">写入令牌用于暂停、恢复、审批、拒绝和撤销；不填写时仍可安全查看。管理台不提供执行工作计划或发送钉钉消息的入口。</p>
   </main>
   <div id="app" class="shell hidden">
-    <aside class="rail"><div class="brand">AI 员工<small>本机管理台</small></div><nav class="nav" aria-label="管理栏目"><button data-view="overview" class="active">总览</button><button data-view="tasks">消息草稿</button><button data-view="plans">工作计划</button><button data-view="takeover">人工接管</button><button data-view="quality">判断质量</button><button data-view="operations">运营指标</button><button data-view="targets">监听范围</button><button data-view="capabilities">项目能力</button><button data-view="scoped-pauses">局部暂停</button><button data-view="memories">正式记忆</button><button data-view="privacy">数据删除预览</button><button data-view="health">运行状态</button></nav></aside>
+    <aside class="rail"><div class="brand">Foursday<small>本机管理台</small></div><nav class="nav" aria-label="管理栏目"><button data-view="overview" class="active">总览</button><button data-view="tasks">消息草稿</button><button data-view="plans">工作计划</button><button data-view="takeover">人工接管</button><button data-view="quality">判断质量</button><button data-view="operations">运营指标</button><button data-view="targets">监听范围</button><button data-view="capabilities">项目能力</button><button data-view="scoped-pauses">局部暂停</button><button data-view="memories">正式记忆</button><button data-view="privacy">数据删除预览</button><button data-view="health">运行状态</button></nav></aside>
     <section class="main"><header class="top"><div><h1 id="title">总览</h1><div class="sub" id="updated">尚未刷新</div></div><div class="actions"><button id="refresh" class="btn">刷新</button><button id="pause" class="btn danger">暂停系统</button><button id="logout" class="btn">退出</button></div></header><div class="notice">真实发送默认关闭；这里仅管理草稿、审批、记忆和运行状态。</div><div id="content" aria-live="polite"><div class="skeleton"></div><div class="skeleton"></div></div></section>
   </div>
   <script nonce="__NONCE__">

@@ -5,6 +5,7 @@ import {
 } from "./capability-summary.mjs";
 import { loadConfig } from "./config.mjs";
 import { generateReplyDraft } from "./draft.mjs";
+import { ClaudeCodeAgentRuntime } from "./agent-runtime.mjs";
 import {
   assertSuccessfulSendReceipt,
   DwsAdapter,
@@ -20,6 +21,74 @@ import { isMainModule } from "./main-module.mjs";
 
 function log(type, fields = {}) {
   console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
+}
+
+function runtimeForConfig(config) {
+  if (config.agentRuntime !== "claude-code") return undefined;
+  return new ClaudeCodeAgentRuntime({ executable: config.claudeCodePath });
+}
+
+async function findManualReply(dws, {
+  conversationId,
+  selfUserId,
+  after,
+  now,
+  automatedSendEvidence: evidence,
+}) {
+  if (typeof dws.findManualReply === "function") {
+    return dws.findManualReply({
+      conversationId,
+      selfIdentityId: selfUserId,
+      after,
+      now,
+      automatedSendEvidence: evidence,
+    });
+  }
+  return dws.hasManualReply({
+    conversationId,
+    selfUserId,
+    after,
+    now,
+    automatedSendEvidence: evidence,
+  });
+}
+
+async function conversationForTask(dws, task) {
+  if (typeof dws.getConversation === "function") {
+    return dws.getConversation({
+      conversationId: task.conversation_id,
+      participantId: task.sender_user_id,
+      limit: 50,
+    });
+  }
+  return dws.fetchDirect({ userId: task.sender_user_id, limit: 50 });
+}
+
+async function sendThroughAdapter(dws, task, { isGroup, text }) {
+  if (typeof dws.sendMessage === "function") {
+    const receipt = await dws.sendMessage({
+      conversationId: task.conversation_id,
+      recipientId: task.sender_user_id,
+      chatType: isGroup ? "group" : "direct",
+      text,
+      idempotencyKey: task.id,
+    });
+    await dws.verifySendReceipt(receipt);
+    return receipt;
+  }
+  const receipt = isGroup
+    ? await dws.sendGroupText({
+        groupId: task.conversation_id,
+        text,
+        idempotencyKey: task.id,
+      })
+    : await dws.sendText({
+        userId: task.sender_user_id,
+        text,
+        idempotencyKey: task.id,
+      });
+  assertSuccessfulSendReceipt(receipt);
+  return receipt;
 }
 
 async function automatedSendEvidence(store, after, now = new Date()) {
@@ -127,11 +196,13 @@ export async function reconcileManualReplies({
     .map((task) => new Date(manualReplyCheckStart(task)).getTime())
     .filter(Number.isFinite);
   if (times.length === 0) return 0;
-  const messages = await dws.fetchBySenderAll({
-    senderUserId: config.selfUserId,
-    start: new Date(Math.min(...times)),
-    end: now,
-  });
+  const messages = typeof dws.fetchBySenderAll === "function"
+    ? await dws.fetchBySenderAll({
+        senderUserId: config.selfUserId,
+        start: new Date(Math.min(...times)),
+        end: now,
+      })
+    : null;
   const automatedEvidence = await automatedSendEvidence(
     store,
     new Date(Math.min(...times)),
@@ -141,15 +212,23 @@ export async function reconcileManualReplies({
   for (const task of tasks) {
     const sourceTime = new Date(manualReplyCheckStart(task)).getTime();
     if (!Number.isFinite(sourceTime)) continue;
-    const replied = messages.some((message) => {
-      const messageTime = new Date(message.createTime).getTime();
-      return (
-        message.conversationId === task.conversation_id &&
-        Number.isFinite(messageTime) &&
-        messageTime > sourceTime &&
-        !isAutomatedSelfMessage(message, automatedEvidence)
-      );
-    });
+    const replied = messages
+      ? messages.some((message) => {
+          const messageTime = new Date(message.createTime).getTime();
+          return (
+            message.conversationId === task.conversation_id &&
+            Number.isFinite(messageTime) &&
+            messageTime > sourceTime &&
+            !isAutomatedSelfMessage(message, automatedEvidence)
+          );
+        })
+      : (await findManualReply(dws, {
+          conversationId: task.conversation_id,
+          selfUserId: config.selfUserId,
+          after: new Date(sourceTime),
+          now,
+          automatedSendEvidence: automatedEvidence,
+        })).replied;
     if (!replied) continue;
     const taskCancelled = await store.cancelDraftForManualReply(task.id, now);
     if (taskCancelled || activePlanTaskIds.has(task.id)) {
@@ -320,7 +399,7 @@ export async function processDraftTask({
     }
     if (config.selfUserId) {
       try {
-        const manual = await dws.hasManualReply({
+        const manual = await findManualReply(dws, {
           conversationId: task.conversation_id,
           selfUserId: config.selfUserId,
           after: task.payload.waitingTask?.waitingAt ??
@@ -368,10 +447,7 @@ export async function processDraftTask({
     let conversation = [];
     if (!isGroup) {
       try {
-        conversation = await dws.fetchDirect({
-          userId: task.sender_user_id,
-          limit: 50,
-        });
+        conversation = await conversationForTask(dws, task);
       } catch (error) {
         log("worker.direct_context_unavailable", {
           taskId: task.id,
@@ -408,6 +484,7 @@ export async function processDraftTask({
       },
       {
         codexPath: config.codexPath,
+        runtime: runtimeForConfig(config),
         conversation,
         memories,
       },
@@ -415,7 +492,7 @@ export async function processDraftTask({
     if (config.selfUserId) {
       let manual;
       try {
-        manual = await dws.hasManualReply({
+        manual = await findManualReply(dws, {
           conversationId: task.conversation_id,
           selfUserId: config.selfUserId,
           after: task.payload.waitingTask?.waitingAt ??
@@ -485,7 +562,7 @@ export async function processDraftTask({
           ? async () => {
               let manual;
               try {
-                manual = await dws.hasManualReply({
+                manual = await findManualReply(dws, {
                   conversationId: task.conversation_id,
                   selfUserId: config.selfUserId,
                   after: task.payload.waitingTask?.waitingAt ??
@@ -603,7 +680,7 @@ export async function processApprovedTask({ store, dws, config }) {
 
   let manual;
   try {
-    manual = await dws.hasManualReply({
+    manual = await findManualReply(dws, {
       conversationId: task.conversation_id,
       selfUserId: config.selfUserId,
       after: task.payload.latestCreateTime,
@@ -636,7 +713,11 @@ export async function processApprovedTask({ store, dws, config }) {
     const effect = await store.beginSideEffect(task.id, "send_message");
     if (effect.status === "completed") {
       const receipt = JSON.parse(effect.receipt_json ?? "{}");
-      assertSuccessfulSendReceipt(receipt);
+      if (typeof dws.verifySendReceipt === "function") {
+        await dws.verifySendReceipt(receipt);
+      } else {
+        assertSuccessfulSendReceipt(receipt);
+      }
       await store.completeSideEffect(
         task.id,
         "send_message",
@@ -649,21 +730,13 @@ export async function processApprovedTask({ store, dws, config }) {
       Date.now() - new Date(effect.updated_at).getTime() > 23 * 60 * 60 * 1000
     ) {
       throw new Error(
-        "Previous send result is older than the DWS idempotency window",
+        "Previous send result is older than the adapter idempotency window",
       );
     }
-    const receipt = isGroup
-      ? await dws.sendGroupText({
-          groupId: task.conversation_id,
-          text: reply,
-          idempotencyKey: task.id,
-        })
-      : await dws.sendText({
-          userId: task.sender_user_id,
-          text: reply,
-          idempotencyKey: task.id,
-        });
-    assertSuccessfulSendReceipt(receipt);
+    const receipt = await sendThroughAdapter(dws, task, {
+      isGroup,
+      text: reply,
+    });
     await store.completeSideEffect(task.id, "send_message", receipt);
     log("worker.send_completed", { taskId: task.id });
   } catch (error) {

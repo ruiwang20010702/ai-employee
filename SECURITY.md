@@ -2,7 +2,7 @@
 
 [中文版安全说明](./安全说明.md)
 
-AI Employee can process workplace messages and execute approved external actions. Please report security issues privately and avoid exposing real users or business data.
+Foursday can process workplace messages and execute approved external actions. Please report security issues privately and avoid exposing real users or business data.
 
 ## Reporting a vulnerability
 

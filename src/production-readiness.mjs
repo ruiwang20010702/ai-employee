@@ -74,6 +74,27 @@ export async function checkCodexRuntime(
   };
 }
 
+export async function checkClaudeCodeRuntime(
+  claudeCodePath,
+  run = execFileAsync,
+) {
+  let version;
+  try {
+    const { stdout } = await run(claudeCodePath, ["--version"], {
+      timeout: 20_000,
+      maxBuffer: 512 * 1024,
+      env: safeCodexEnvironment(claudeCodePath),
+    });
+    version = String(stdout).trim().match(/^(\d+\.\d+\.\d+)/u)?.[1] ?? null;
+  } catch {
+    throw new Error("Claude Code runtime version check failed");
+  }
+  if (!version) {
+    throw new Error("Claude Code runtime returned an invalid version");
+  }
+  return { status: "ok", version, advisories: [] };
+}
+
 export async function checkDwsRuntime(
   dwsPath,
   run = execFileAsync,
@@ -180,6 +201,7 @@ export async function checkProductionReadiness({
   manifestLoader = loadProjectManifests,
   executableChecker = requireExecutable,
   codexChecker = checkCodexRuntime,
+  claudeCodeChecker = checkClaudeCodeRuntime,
   dwsChecker = checkDwsRuntime,
   gbrainChecker = checkGbrainRuntime,
   migrationInspector = inspectMigrationStatus,
@@ -201,9 +223,13 @@ export async function checkProductionReadiness({
     (project) => project.capabilities.knowledge_read != null &&
       project.capabilities.knowledge_read.mode !== "disabled",
   );
+  const selectedAgentRuntime = config.agentRuntime ?? "codex";
+  const agentExecutable = selectedAgentRuntime === "claude-code"
+    ? ["Claude Code", config.claudeCodePath]
+    : ["Codex", config.codexPath];
   const executableChecks = [
     executableChecker("DWS", config.dwsPath),
-    executableChecker("Codex", config.codexPath),
+    executableChecker(...agentExecutable),
     executableChecker("pg_dump", environment.PG_DUMP_PATH ?? "pg_dump"),
     executableChecker("pg_restore", environment.PG_RESTORE_PATH ?? "pg_restore"),
   ];
@@ -211,8 +237,10 @@ export async function checkProductionReadiness({
     executableChecks.push(executableChecker("gbrain", config.gbrainPath));
   }
   await Promise.all(executableChecks);
-  const [codexRuntime, dwsRuntime, gbrainRuntime] = await Promise.all([
-    codexChecker(config.codexPath),
+  const [agentRuntime, dwsRuntime, gbrainRuntime] = await Promise.all([
+    selectedAgentRuntime === "claude-code"
+      ? claudeCodeChecker(config.claudeCodePath)
+      : codexChecker(config.codexPath),
     dwsChecker(config.dwsPath),
     gbrainRequired
       ? gbrainChecker(config.gbrainPath)
@@ -230,7 +258,8 @@ export async function checkProductionReadiness({
       migrations,
       targets: config.targetUserIds.length + config.targetGroupIds.length,
       capabilities: [...config.capabilities],
-      codexRuntime,
+      agentRuntime: { id: selectedAgentRuntime, ...agentRuntime },
+      codexRuntime: selectedAgentRuntime === "codex" ? agentRuntime : null,
       dwsRuntime,
       gbrainRuntime,
     };

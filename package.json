@@ -1,7 +1,9 @@
 {
-  "name": "ai-employee-dingtalk-listener",
-  "version": "0.3.0",
+  "name": "foursday-runtime",
+  "version": "0.4.0",
+  "description": "Foursday is an open-source work twin for authorized, verifiable workplace automation.",
   "bin": {
+    "foursday": "scripts/新环境向导.mjs",
     "ai-employee": "scripts/新环境向导.mjs"
   },
   "private": true,
@@ -16,7 +18,7 @@
     "schemas/",
     "scripts/",
     "src/*.mjs",
-    "plugins/ai-employee/",
+    "plugins/foursday/",
     "!src/store.mjs",
     "CHANGELOG.md",
     "CHANGELOG_ZH.md",
@@ -35,6 +37,7 @@
     "node": ">=22.5"
   },
   "scripts": {
+    "demo": "node scripts/交互式演示.mjs",
     "listen": "node src/listener.mjs",
     "worker": "node src/worker.mjs",
     "worker:once": "node src/worker.mjs --once",
@@ -67,6 +70,7 @@
     "config:rotate-admin": "node scripts/轮换管理令牌.mjs",
     "production:doctor": "node scripts/只读生产诊断.mjs",
     "production:codex-probe": "node scripts/验证草稿生成.mjs",
+    "production:agent-probe": "node scripts/验证草稿生成.mjs",
     "production:preflight": "node scripts/生产预检.mjs",
     "production:service-verify": "node scripts/验证服务部署.mjs",
     "production:verify": "node scripts/验证生产服务.mjs",
@@ -84,6 +88,7 @@
     "check:dws": "node src/listener.mjs --once"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.73.0",
     "pg": "8.22.0"
   }
 }

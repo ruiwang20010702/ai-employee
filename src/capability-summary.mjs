@@ -30,7 +30,7 @@ export function isCapabilityQuestion(content) {
     .trim()
     .replaceAll(/\s+/gu, " ");
   if (!text || text.length > 120) return false;
-  return /(?:你|ai\s*员工|这个\s*ai(?:\s*员工)?|机器人)[，,：:\s]{0,4}(?:自己)?(?:目前|现在|到底|究竟)?(?:都)?(?:能做什么|能帮我做什么|能干什么|能干嘛|能干啥|会做什么|可以做什么|可以帮我做什么|可以干什么|可以干嘛|可以做哪些事|擅长什么|有(?:什么|哪些)(?:能力|功能)|支持(?:什么|哪些)(?:能力|功能)?|的?(?:能力|功能)清单)/iu.test(
+  return /(?:你|foursday|ai\s*员工|这个\s*ai(?:\s*员工)?|机器人)[，,：:\s]{0,4}(?:自己)?(?:目前|现在|到底|究竟)?(?:都)?(?:能做什么|能帮我做什么|能干什么|能干嘛|能干啥|会做什么|可以做什么|可以帮我做什么|可以干什么|可以干嘛|可以做哪些事|擅长什么|有(?:什么|哪些)(?:能力|功能)|支持(?:什么|哪些)(?:能力|功能)?|的?(?:能力|功能)清单)/iu.test(
     text,
   );
 }
@@ -128,7 +128,7 @@ export async function createCapabilityDraft({
     reply: lines.join("\n"),
     confidence: 1,
     riskLevel: "low",
-    reason: "对方询问 AI 员工能力，依据当前全局开关和请求人项目授权生成确定性说明。",
+    reason: "对方询问 Foursday 能力，依据当前全局开关和请求人项目授权生成确定性说明。",
     needsInformation: false,
     relatedToWaitingTask: false,
     decisionSource: "capability_catalog",

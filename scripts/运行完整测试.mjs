@@ -42,6 +42,7 @@ export function isolatedTestEnvironment(environment, databaseUrl) {
     "DATABASE_SSL",
     "DWS_PATH",
     "CODEX_PATH",
+    "CLAUDE_CODE_PATH",
     "GBRAIN_PATH",
     "TEST_DATABASE_URL",
     "TEST_DATABASE_TEMP",
@@ -51,6 +52,7 @@ export function isolatedTestEnvironment(environment, databaseUrl) {
       exactBlocked.has(key) ||
       key.startsWith("AI_EMPLOYEE_") ||
       key.startsWith("DINGTALK_") ||
+      key.startsWith("ANTHROPIC_") ||
       key.startsWith("PG")
     ) continue;
     result[key] = value;

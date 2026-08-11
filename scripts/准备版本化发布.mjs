@@ -14,6 +14,8 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, parse, relative, resolve, join } from "node:path";
 import { isMainModule } from "../src/main-module.mjs";
 
+const deploymentRootNames = new Set(["foursday-production", "ai-employee-production"]);
+
 function cleanScalar(value, name, pattern) {
   const normalized = String(value ?? "");
   if (!pattern.test(normalized) || /[\0\r\n]/u.test(normalized)) {
@@ -54,7 +56,7 @@ async function deploymentRoot(rootInput, { create = false } = {}) {
   if (
     normalized === parse(normalized).root ||
     normalized === resolve(homedir()) ||
-    basename(normalized) !== "ai-employee-production"
+    !deploymentRootNames.has(basename(normalized))
   ) {
     throw new Error("Deployment root is too broad");
   }
@@ -63,7 +65,7 @@ async function deploymentRoot(rootInput, { create = false } = {}) {
   if (
     root === parse(root).root ||
     root === resolve(homedir()) ||
-    basename(root) !== "ai-employee-production"
+    !deploymentRootNames.has(basename(root))
   ) {
     throw new Error("Resolved deployment root is too broad");
   }

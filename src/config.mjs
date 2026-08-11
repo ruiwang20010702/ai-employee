@@ -59,6 +59,14 @@ function assertConfiguredIdentifier(name, value, { required = true } = {}) {
   }
 }
 
+function choice(name, fallback, allowed) {
+  const value = String(process.env[name] ?? fallback).trim();
+  if (!allowed.includes(value)) {
+    throw new Error(name + " must be one of: " + allowed.join(", "));
+  }
+  return value;
+}
+
 export function loadConfig({
   requireTargets = true,
   production = false,
@@ -254,6 +262,12 @@ export function loadConfig({
     // for Homebrew on both Apple Silicon and Intel, npm global installs, and
     // managed installations. Production can still pin an absolute path.
     codexPath: process.env.CODEX_PATH ?? "codex",
+    claudeCodePath: process.env.CLAUDE_CODE_PATH ?? "claude",
+    agentRuntime: choice(
+      "AI_EMPLOYEE_AGENT_RUNTIME",
+      "codex",
+      ["codex", "claude-code"],
+    ),
     gbrainPath: process.env.GBRAIN_PATH ?? "gbrain",
     dingtalkRoot:
       process.env.DINGTALK_DATA_ROOT ??

@@ -15,6 +15,15 @@ import { isMainModule } from "../src/main-module.mjs";
 const execFileAsync = promisify(execFile);
 const launchDomain = `gui/${process.getuid()}`;
 const managedPlistNames = new Set([
+  "com.foursday.listener.plist",
+  "com.foursday.worker.plist",
+  "com.foursday.executor.plist",
+  "com.foursday.health.plist",
+  "com.foursday.admin.plist",
+  "com.foursday.alert.plist",
+  "com.foursday.reconciliation.plist",
+  "com.foursday.memory-source.plist",
+  "com.foursday.backup.plist",
   "com.ai-employee.listener.plist",
   "com.ai-employee.worker.plist",
   "com.ai-employee.executor.plist",

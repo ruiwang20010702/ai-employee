@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="640" viewBox="0 0 1440 640" role="img" aria-labelledby="title desc">
-  <title id="title">AI 员工</title>
-  <desc id="desc">一个安全、可审批、会执行、能验证结果的钉钉 AI 员工运行时</desc>
+  <title id="title">Foursday</title>
+  <desc id="desc">Your open-source work twin. One more you, one less workday.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#07111f"/>
@@ -24,24 +24,24 @@
     <circle cx="111" cy="93" r="6" fill="#53e3c2"/>
     <text x="129" y="100" fill="#b8d4ea" font-size="18" font-weight="600">Safety-first</text>
 
-    <text x="84" y="220" fill="#ffffff" font-size="78" font-weight="760" letter-spacing="2">AI 员工</text>
-    <text x="86" y="276" fill="#9fc2df" font-size="26">DingTalk work, governed like production software.</text>
-    <text x="86" y="332" fill="#dcebf7" font-size="26">消息 → 判断 → 审批 → 执行 → 验证 → 记忆</text>
+    <text x="84" y="220" fill="#ffffff" font-size="78" font-weight="760" letter-spacing="2">Foursday</text>
+    <text x="86" y="276" fill="#9fc2df" font-size="26">Your open-source work twin.</text>
+    <text x="86" y="332" fill="#dcebf7" font-size="26">One more you. One less workday.</text>
 
     <g transform="translate(86 396)">
       <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
-      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">DWS</text>
-      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">真实钉钉入口</text>
+      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">Context</text>
+      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">消息与项目记忆</text>
     </g>
     <g transform="translate(316 396)">
       <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
-      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">Codex</text>
-      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">方案、文档与代码</text>
+      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">Judgment</text>
+      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">判断、计划与审批</text>
     </g>
     <g transform="translate(546 396)">
       <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
-      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">PostgreSQL</text>
-      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">状态、证据与审计</text>
+      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">Verified work</text>
+      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">执行、回读与证据</text>
     </g>
 
     <g transform="translate(890 142)">

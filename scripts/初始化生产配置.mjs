@@ -13,7 +13,7 @@ function keychainReference(service, account) {
 }
 
 function uniqueKeychainService() {
-  return `ai-employee-${randomBytes(8).toString("hex")}`;
+  return `foursday-${randomBytes(8).toString("hex")}`;
 }
 
 export async function initializeProductionConfig({
@@ -42,6 +42,8 @@ export async function initializeProductionConfig({
   );
   values.DWS_PATH = "dws";
   values.CODEX_PATH = "codex";
+  values.CLAUDE_CODE_PATH = "claude";
+  values.AI_EMPLOYEE_AGENT_RUNTIME = "codex";
   values.GBRAIN_PATH = "gbrain";
   values.AI_EMPLOYEE_TENANT_ID = "";
   values.AI_EMPLOYEE_APPROVER = "";

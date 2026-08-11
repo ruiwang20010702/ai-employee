@@ -41,7 +41,7 @@ test("首次部署文档统一使用安全上线顺序", async () => {
     "npm run db:backup",
     "npm run db:migrate",
     "npm run production:doctor",
-    "npm run production:codex-probe",
+    "npm run production:agent-probe",
     "npm run service:install",
     "npm run production:service-verify",
     "npm run production:verify",
@@ -141,12 +141,46 @@ test("公开仓库安装说明固定到已审核完整提交", async () => {
   for (const text of [readme, chinese]) {
     assert.match(
       text,
-      /github:ruiwang20010702\/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA/u,
+      /github:ruiwang20010702\/foursday#REPLACE_WITH_APPROVED_FULL_SHA/u,
     );
     assert.doesNotMatch(text, /npm install[^\n]+#main/u);
   }
   assert.match(readme, /reviewed 40-character commit SHA/u);
   assert.match(chinese, /完整 40 位提交编号/u);
+});
+
+test("五分钟演示和三类扩展契约在中英文入口保持一致", async () => {
+  const [
+    readme,
+    chinese,
+    overview,
+    architecture,
+    integrations,
+    packageJson,
+    feishuSource,
+  ] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/overview.md"),
+    projectText("docs/en/architecture.md"),
+    projectText("docs/en/integrations.md"),
+    projectText("package.json"),
+    projectText("src/feishu.mjs"),
+  ]);
+  for (const text of [readme, chinese, overview]) {
+    assert.match(text, /npm run demo/u);
+  }
+  for (const text of [readme, chinese, architecture]) {
+    assert.match(text, /MessageAdapter/u);
+    assert.match(text, /AgentRuntime/u);
+    assert.match(text, /ModelProvider/u);
+  }
+  assert.match(architecture, /Feishu adapter.+no DWS dependency/su);
+  assert.match(integrations, /Feishu.+Official WebSocket.+No/su);
+  assert.doesNotMatch(feishuSource, /from ["'][^"']*dws\.mjs["']/u);
+  const manifest = JSON.parse(packageJson);
+  assert.equal(manifest.scripts.demo, "node scripts/交互式演示.mjs");
+  assert.equal(manifest.dependencies["@larksuiteoapi/node-sdk"], "1.73.0");
 });
 
 test("核心流程图覆盖业务、状态、执行、记忆和发布异常分支", async () => {
@@ -211,7 +245,7 @@ test("中英文项目首页提供产品定位、快速开始和双语开源治�
       projectText("LICENSE"),
     ]);
   for (const text of [english, chinese]) {
-    assert.match(text, /assets\/ai-employee-hero\.svg/u);
+    assert.match(text, /assets\/foursday-hero\.svg/u);
     assert.match(text, /actions\/workflows\/check\.yml\/badge\.svg/u);
     assert.match(text, /npm run check/u);
     assert.match(text, /SECURITY\.md/u);
@@ -220,10 +254,10 @@ test("中英文项目首页提供产品定位、快速开始和双语开源治�
   assert.match(english, /CODE_OF_CONDUCT\.md/u);
   assert.match(chinese, /CONTRIBUTING_ZH\.md/u);
   assert.match(chinese, /CODE_OF_CONDUCT_ZH\.md/u);
-  assert.match(english, /Why AI Employee\?/u);
+  assert.match(english, /Why Foursday\?/u);
   assert.match(english, /Quick Start/u);
   assert.match(english, /简体中文.*README_ZH\.md/u);
-  assert.match(chinese, /为什么做 AI 员工/u);
+  assert.match(chinese, /为什么做 Foursday/u);
   assert.match(chinese, /与普通机器人的区别/u);
   assert.match(chinese, /English.*README\.md/u);
   assert.match(contributing, /denied path/u);

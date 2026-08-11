@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   checkCodexRuntime,
+  checkClaudeCodeRuntime,
   checkDwsRuntime,
   checkGbrainRuntime,
   checkProductionReadiness,
@@ -36,6 +37,8 @@ function validConfig(overrides = {}) {
     capabilities: new Set(),
     dwsPath: "dws",
     codexPath: "codex",
+    claudeCodePath: "claude",
+    agentRuntime: "codex",
     gbrainPath: "gbrain",
     projectsDirectory: "/projects",
     targetUserIds: [],
@@ -136,6 +139,58 @@ test("Codex runtime doctor must return valid redacted ok JSON", async () => {
     () => checkCodexRuntime("codex", async () => ({ stdout: "not-json" })),
     /runtime doctor failed/u,
   );
+});
+
+test("Claude Code runtime check returns only a validated version", async () => {
+  const result = await checkClaudeCodeRuntime(
+    "claude",
+    async (path, args, options) => {
+      assert.equal(path, "claude");
+      assert.deepEqual(args, ["--version"]);
+      assert.equal(options.env.DATABASE_URL, undefined);
+      return { stdout: "2.1.170 (Claude Code)\n" };
+    },
+  );
+  assert.deepEqual(result, {
+    status: "ok",
+    version: "2.1.170",
+    advisories: [],
+  });
+  await assert.rejects(
+    () => checkClaudeCodeRuntime("claude", async () => ({ stdout: "unknown" })),
+    /invalid version/u,
+  );
+});
+
+test("生产预检只要求选中的 Claude Code 而不强制 Codex", async () => {
+  const calls = [];
+  const result = await checkProductionReadiness({
+    config: validConfig({
+      agentRuntime: "claude-code",
+      claudeCodePath: "/trusted/claude",
+    }),
+    environment: { AI_EMPLOYEE_BACKUP_KEY: backupKey },
+    executableChecker: async (name, path) => calls.push([name, path]),
+    codexChecker: async () => { throw new Error("must not run"); },
+    claudeCodeChecker: async () => ({
+      status: "ok",
+      version: "2.1.170",
+      advisories: [],
+    }),
+    dwsChecker: async () => ({ authenticated: true }),
+    createPool: () => ({ async end() {} }),
+    checkDatabase: async () => ({ database: "employee" }),
+    migrationInspector: currentMigrations,
+  });
+  assert.equal(calls.some(([name]) => name === "Claude Code"), true);
+  assert.equal(calls.some(([name]) => name === "Codex"), false);
+  assert.deepEqual(result.agentRuntime, {
+    id: "claude-code",
+    status: "ok",
+    version: "2.1.170",
+    advisories: [],
+  });
+  assert.equal(result.codexRuntime, null);
 });
 
 test("DWS runtime check uses JSON auth status and returns no identity", async () => {

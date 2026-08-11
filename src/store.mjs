@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { chmod, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,7 +46,11 @@ import {
 } from "./privacy-erasure.mjs";
 
 const projectRoot = new URL("../", import.meta.url);
-const defaultDatabaseUrl = new URL(".runtime/ai-employee.sqlite", projectRoot);
+const foursdayDatabaseUrl = new URL(".runtime/foursday.sqlite", projectRoot);
+const legacyDatabaseUrl = new URL(".runtime/ai-employee.sqlite", projectRoot);
+const defaultDatabaseUrl = existsSync(fileURLToPath(legacyDatabaseUrl))
+  ? legacyDatabaseUrl
+  : foursdayDatabaseUrl;
 
 function nowIso(now = new Date()) {
   return now.toISOString();

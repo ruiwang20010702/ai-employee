@@ -48,3 +48,22 @@ test("structured draft probe rejects a non-Codex or work-request result", async 
     /unexpected shape/u,
   );
 });
+
+test("structured draft probe accepts the selected Claude Code runtime", async () => {
+  const runtime = { id: "claude-code", decisionSource: "claude-code" };
+  const result = await runStructuredDraftProbe({
+    runtime,
+    expectedDecisionSource: "claude-code",
+    generateDraft: async (_event, options) => {
+      assert.equal(options.runtime, runtime);
+      return {
+        shouldReply: true,
+        reply: "收到。",
+        riskLevel: "low",
+        decisionSource: "claude-code",
+        workRequest: null,
+      };
+    },
+  });
+  assert.equal(result.passed, true);
+});

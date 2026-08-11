@@ -38,7 +38,7 @@ test("缺少配置时只读检查给出初始化动作且不假装可预检", as
   assert.equal(result.readOnly, true);
   assert.equal(result.config.exists, false);
   assert.equal(result.readyForPreflight, false);
-  assert.ok(result.nextActions.includes("运行 ai-employee init --apply 创建受保护配置"));
+  assert.ok(result.nextActions.includes("运行 foursday init --apply 创建受保护配置"));
 });
 
 test("完整安全配置通过本地复用门禁但不会执行联网预检", async (t) => {
@@ -69,8 +69,37 @@ test("完整安全配置通过本地复用门禁但不会执行联网预检", as
   assert.equal(result.config.inlineSecretValues, 0);
   assert.equal(result.config.externalSecretReferences, 5);
   assert.deepEqual(checked, ["dws", "codex", "pg_dump", "pg_restore", "/usr/bin/git"]);
-  assert.deepEqual(result.nextActions, ["运行 ai-employee preflight 进行联网只读预检"]);
+  assert.deepEqual(result.nextActions, ["运行 foursday preflight 进行联网只读预检"]);
   assert.doesNotMatch(JSON.stringify(result), /AI_EMPLOYEE_DATABASE_URL|target-1|self-1/u);
+});
+
+test("复用检查按配置选择 Claude Code 而不再强制 Codex", async (t) => {
+  const { configPath } = await fixture(t);
+  await initializeProductionConfig({ outputPath: configPath });
+  const values = JSON.parse(await readFile(configPath, "utf8"));
+  Object.assign(values, {
+    DATABASE_URL: "env://AI_EMPLOYEE_DATABASE_URL",
+    AI_EMPLOYEE_TENANT_ID: "tenant-1",
+    AI_EMPLOYEE_APPROVER: "operator-1",
+    DINGTALK_TARGET_USER_IDS: "target-1",
+    DINGTALK_SELF_USER_ID: "self-1",
+    AI_EMPLOYEE_AGENT_RUNTIME: "claude-code",
+    CLAUDE_CODE_PATH: "/trusted/claude",
+  });
+  await writeFile(configPath, JSON.stringify(values, null, 2) + "\n", { mode: 0o600 });
+  const checked = [];
+  const result = await inspectReuseReadiness({
+    configPath,
+    platform: "darwin",
+    nodeVersion: "v22.5.0",
+    executableChecker: async (path) => {
+      checked.push(path);
+      return true;
+    },
+  });
+  assert.equal(result.readyForPreflight, true);
+  assert.equal(checked.includes("/trusted/claude"), true);
+  assert.equal(checked.includes("codex"), false);
 });
 
 test("危险能力、宽权限、旧 Node 和缺失工具都会明确阻断", async (t) => {

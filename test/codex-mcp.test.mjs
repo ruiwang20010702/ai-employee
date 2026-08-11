@@ -13,7 +13,7 @@ import {
   createMcpHandler,
   pluginVersion,
   runStdioServer,
-} from "../plugins/ai-employee/scripts/mcp-server.mjs";
+} from "../plugins/foursday/scripts/mcp-server.mjs";
 
 test("仓库市场以显式安装方式发布只读 Codex 插件", async () => {
   const result = await validateCodexPluginPackage({
@@ -21,9 +21,9 @@ test("仓库市场以显式安装方式发布只读 Codex 插件", async () => {
   });
   assert.deepEqual(result, {
     valid: true,
-    marketplace: "ai-employee-local",
-    plugin: "ai-employee",
-    version: "0.3.0",
+    marketplace: "foursday-local",
+    plugin: "foursday",
+    version: "0.4.0",
     installation: "AVAILABLE",
     authentication: "ON_INSTALL",
     readOnly: true,
@@ -36,11 +36,11 @@ test("应用包、插件清单和 MCP 服务版本保持一致", async () => {
   const [application, plugin] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
     readFile(
-      new URL("../plugins/ai-employee/.codex-plugin/plugin.json", import.meta.url),
+      new URL("../plugins/foursday/.codex-plugin/plugin.json", import.meta.url),
       "utf8",
     ).then(JSON.parse),
   ]);
-  assert.equal(application.version, "0.3.0");
+  assert.equal(application.version, "0.4.0");
   assert.equal(plugin.version, application.version);
   assert.equal(pluginVersion, application.version);
 });
@@ -51,15 +51,15 @@ test("仓库市场不能通过符号链接把插件来源指向仓库外", async
   await mkdir(join(root, ".agents", "plugins"), { recursive: true });
   await mkdir(join(root, "plugins"), { recursive: true });
   await symlink(
-    fileURLToPath(new URL("../plugins/ai-employee", import.meta.url)),
-    join(root, "plugins", "ai-employee"),
+    fileURLToPath(new URL("../plugins/foursday", import.meta.url)),
+    join(root, "plugins", "foursday"),
   );
   await writeFile(join(root, ".agents", "plugins", "marketplace.json"), JSON.stringify({
-    name: "ai-employee-local",
-    interface: { displayName: "AI 员工（本仓库）" },
+    name: "foursday-local",
+    interface: { displayName: "Foursday（本仓库）" },
     plugins: [{
-      name: "ai-employee",
-      source: { source: "local", path: "./plugins/ai-employee" },
+      name: "foursday",
+      source: { source: "local", path: "./plugins/foursday" },
       policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
       category: "Productivity",
     }],
@@ -100,7 +100,7 @@ test("Codex MCP 只提供只读工具且状态卡片具备无界面降级结果"
   assert.ok(listed.tools.every((tool) => tool.annotations.readOnlyHint));
   assert.ok(listed.tools.every((tool) => !/approve|send|execute/u.test(tool.name)));
   const panelTool = listed.tools.find((tool) => tool.name === "show_status_panel");
-  assert.equal(panelTool._meta.ui.resourceUri, "ui://ai-employee/status.html");
+  assert.equal(panelTool._meta.ui.resourceUri, "ui://foursday/status.html");
 
   const result = await handler({ method: "tools/call", params: { name: "show_status_panel", arguments: {} } });
   assert.equal(result.structuredContent.ready, true);
@@ -167,9 +167,9 @@ test("管理客户端只访问本机只读接口且不泄露钥匙串令牌", as
   assert.equal(captured[1].url, "http://127.0.0.1:9465/api/overview");
   assert.equal(captured[1].init.method, "GET");
   assert.equal(captured[1].init.headers.authorization, undefined);
-  assert.equal(captured[1].init.headers["x-ai-employee-challenge"], nonce);
+  assert.equal(captured[1].init.headers["x-foursday-challenge"], nonce);
   assert.equal(
-    captured[1].init.headers["x-ai-employee-proof"],
+    captured[1].init.headers["x-foursday-proof"],
     createHmac("sha256", "private-read-token")
       .update(`${nonce}\nGET\n/api/overview`)
       .digest("hex"),
@@ -195,7 +195,7 @@ test("stdio 传输完成初始化、工具枚举并稳定返回协议错误", as
   ].join("\n"));
   await running;
   const messages = text.trim().split("\n").map(JSON.parse);
-  assert.equal(messages[0].result.serverInfo.name, "ai-employee");
+  assert.equal(messages[0].result.serverInfo.name, "foursday");
   assert.equal(messages[0].result.serverInfo.version, pluginVersion);
   assert.equal(messages[1].result.tools.length, 7);
   assert.equal(messages[2].error.code, -32601);
@@ -203,7 +203,7 @@ test("stdio 传输完成初始化、工具枚举并稳定返回协议错误", as
 
 test("状态 UI 资源符合 MCP Apps 类型且不含写入动作", async () => {
   const handler = createMcpHandler({ readAdmin: async () => ({}) });
-  const result = await handler({ method: "resources/read", params: { uri: "ui://ai-employee/status.html" } });
+  const result = await handler({ method: "resources/read", params: { uri: "ui://foursday/status.html" } });
   assert.equal(result.contents[0].mimeType, "text/html;profile=mcp-app");
   assert.match(result.contents[0].text, /ui\/notifications\/tool-result/u);
   assert.match(result.contents[0].text, /等待补充信息/u);

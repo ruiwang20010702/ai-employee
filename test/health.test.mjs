@@ -63,6 +63,7 @@ test("深度健康检查要求数据库、工具和所有组件心跳正常", as
   });
   assert.equal(health.ready, true);
   assert.match(prometheusMetrics(health), /ai_employee_ready 1/);
+  assert.match(prometheusMetrics(health), /foursday_ready 1/);
 });
 
 test("过期心跳、死信或未知发送会阻断就绪状态", async () => {

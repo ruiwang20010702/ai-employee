@@ -45,6 +45,10 @@ test("异常告警只发送脱敏状态并执行冷却", async () => {
   assert.equal(payload.counts.deadTasks, 2);
   assert.doesNotMatch(requests[0].init.body, /signing-secret|alerts\.invalid/u);
   assert.match(requests[0].init.headers["x-ai-employee-signature"], /^sha256=[a-f0-9]{64}$/u);
+  assert.equal(
+    requests[0].init.headers["x-foursday-signature"],
+    requests[0].init.headers["x-ai-employee-signature"],
+  );
   assert.deepEqual(availabilitySamples[0], {
     ready: false,
     options: { now, intervalMs: undefined, retentionMs: undefined },

@@ -1,14 +1,14 @@
 {
-  "name": "ai-employee-local",
+  "name": "foursday-local",
   "interface": {
-    "displayName": "AI 员工（本仓库）"
+    "displayName": "Foursday（本仓库）"
   },
   "plugins": [
     {
-      "name": "ai-employee",
+      "name": "foursday",
       "source": {
         "source": "local",
-        "path": "./plugins/ai-employee"
+        "path": "./plugins/foursday"
       },
       "policy": {
         "installation": "AVAILABLE",

@@ -29,7 +29,7 @@ export const keychainMigrationEntries = Object.freeze([
   ["AI_EMPLOYEE_ADMIN_WRITE_TOKEN", "admin-write-token"],
 ]);
 
-const defaultService = "ai-employee-production";
+const defaultService = "foursday-production";
 const keychainWriterPath = fileURLToPath(
   new URL("./写入钥匙串.exp", import.meta.url),
 );
@@ -153,8 +153,12 @@ export async function migrateProductionSecretsToKeychain({
 
   for (const [key, account] of keychainMigrationEntries) {
     const targetReference = `keychain://${service}/${account}`;
+    const legacyReference = `keychain://ai-employee-production/${account}`;
     const current = values[key];
-    if (current === targetReference) {
+    if (
+      current === targetReference ||
+      (service === "foursday-production" && current === legacyReference)
+    ) {
       alreadyExternalKeys.push(key);
       continue;
     }
@@ -192,8 +196,10 @@ export async function migrateProductionSecretsToKeychain({
 
   if (plannedKeys.length === 0) {
     for (const [key, account] of keychainMigrationEntries) {
-      const resolved = await reader(service, account);
-      if (typeof resolved !== "string" || resolved.length === 0) {
+      const resolved = await resolveSecretReference(values[key], {
+        keychainReader: reader,
+      });
+      if (typeof resolved.value !== "string" || resolved.value.length === 0) {
         throw new Error(`Keychain readback failed: ${key}`);
       }
     }

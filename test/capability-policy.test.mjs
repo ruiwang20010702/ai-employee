@@ -193,7 +193,7 @@ test("L3 推送即使标记自动也必须单次审批并绑定远端", () => {
     mode: "automatic",
     remote: "origin",
     expectedRemoteUrl: "https://github.com/example/project.git",
-    branchPrefix: "ai-employee/",
+    branchPrefix: "foursday/",
   };
   const result = evaluatePlan({
     manifest: value,
@@ -204,6 +204,8 @@ test("L3 推送即使标记自动也必须单次审批并绑定远端", () => {
     }],
   });
   assert.equal(result.decision, "REQUIRE_APPROVAL");
+  value.capabilities.git_push.branchPrefix = "ai-employee/";
+  assert.doesNotThrow(() => validateProjectManifest(value));
   value.capabilities.git_push.expectedRemoteUrl =
     "https://user:secret@github.com/example/project.git";
   assert.throws(() => validateProjectManifest(value), /must not contain credentials/u);

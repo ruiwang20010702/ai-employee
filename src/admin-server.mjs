@@ -390,8 +390,16 @@ export async function startAdminServer({
       config.adminReadToken,
     );
   const challengeAuthorized = (request, url, now = Date.now()) => {
-    const nonce = String(request.headers["x-ai-employee-challenge"] ?? "");
-    const proof = String(request.headers["x-ai-employee-proof"] ?? "");
+    const nonce = String(
+      request.headers["x-foursday-challenge"] ??
+        request.headers["x-ai-employee-challenge"] ??
+        "",
+    );
+    const proof = String(
+      request.headers["x-foursday-proof"] ??
+        request.headers["x-ai-employee-proof"] ??
+        "",
+    );
     const expiresAt = readChallenges.get(nonce);
     if (!expiresAt || expiresAt < now || request.method !== "GET") return false;
     readChallenges.delete(nonce);
@@ -403,7 +411,8 @@ export async function startAdminServer({
   const writeAuthorized = (request) =>
     bearerAuthorized(request) &&
     equalToken(
-      request.headers["x-ai-employee-write-token"],
+      request.headers["x-foursday-write-token"] ??
+        request.headers["x-ai-employee-write-token"],
       config.adminWriteToken,
     );
 

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { adapterContractVersion, assertNormalizedMessage } from "./adapter-contracts.mjs";
 import { safeCodexEnvironment } from "./codex-environment.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -97,6 +98,31 @@ export function bindMessagesToSender(messages, senderUserId) {
     }
     return { ...message, senderUserId: expectedSenderUserId };
   });
+}
+
+export function normalizeDwsMessage(message, { mentionedSelf = false } = {}) {
+  const chatType = message.singleChat === false ? "group" : "direct";
+  const occurredAt = new Date(message.createTime).toISOString();
+  const normalized = {
+    id: String(message.id ?? ""),
+    senderId: normalizeDwsIdentity(message.senderUserId) ?? "",
+    conversationId: String(message.conversationId ?? ""),
+    content: String(message.content ?? ""),
+    occurredAt,
+    chatType,
+    mentionedSelf: chatType === "group" ? mentionedSelf : undefined,
+    isSelf: message.isSelf === true,
+    platform: "dingtalk",
+    raw: message.raw,
+  };
+  assertNormalizedMessage(normalized);
+  return {
+    ...message,
+    ...normalized,
+    senderUserId: normalized.senderId,
+    createTime: normalized.occurredAt,
+    singleChat: normalized.chatType === "direct",
+  };
 }
 
 export function assertSuccessfulSendReceipt(receipt) {
@@ -244,6 +270,10 @@ export class DwsAdapter {
     commandRunner = execFileAsync,
     environment = process.env,
   }) {
+    this.id = "dingtalk-dws";
+    this.platform = "dingtalk";
+    this.deliveryMode = "pull";
+    this.contractVersion = adapterContractVersion;
     this.dwsPath = dwsPath;
     this.dwsMock = dwsMock;
     this.commandRunner = commandRunner;
@@ -436,7 +466,7 @@ export class DwsAdapter {
       identityFlag,
       userId,
       "--title",
-      "AI 员工回复",
+      "Foursday 回复",
       "--text",
       text,
       "--uuid",
@@ -454,7 +484,7 @@ export class DwsAdapter {
       "--group",
       groupId,
       "--title",
-      "AI 员工回复",
+      "Foursday 回复",
       "--text",
       text,
       "--uuid",
@@ -462,5 +492,75 @@ export class DwsAdapter {
       "--ai-tag",
       "-y",
     ]);
+  }
+
+  async listMessages({ scope, start, end }) {
+    if (scope?.type === "direct") {
+      return (await this.fetchBySender({
+        senderUserId: scope.participantId,
+        start,
+        end,
+      })).map((message) => normalizeDwsMessage(message));
+    }
+    if (scope?.type === "group") {
+      return (await this.fetchGroupMentions({
+        groupIds: [scope.conversationId],
+        start,
+        end,
+      })).map((message) => normalizeDwsMessage(message, { mentionedSelf: true }));
+    }
+    throw new Error("DWS message scope must be direct or group");
+  }
+
+  async getConversation({ participantId, before, limit }) {
+    return (await this.fetchDirect({
+      userId: participantId,
+      before,
+      limit,
+    })).map((message) => normalizeDwsMessage(message));
+  }
+
+  async findManualReply({
+    conversationId,
+    selfIdentityId,
+    after,
+    now,
+    automatedSendEvidence,
+  }) {
+    return this.hasManualReply({
+      conversationId,
+      selfUserId: selfIdentityId,
+      after,
+      now,
+      automatedSendEvidence,
+    });
+  }
+
+  async sendMessage({
+    conversationId,
+    recipientId,
+    chatType,
+    text,
+    idempotencyKey,
+  }) {
+    if (chatType === "group") {
+      return this.sendGroupText({
+        groupId: conversationId,
+        text,
+        idempotencyKey,
+      });
+    }
+    if (chatType !== "direct") {
+      throw new Error("DWS send chatType must be direct or group");
+    }
+    return this.sendText({
+      userId: recipientId,
+      text,
+      idempotencyKey,
+    });
+  }
+
+  verifySendReceipt(receipt) {
+    return assertSuccessfulSendReceipt(receipt);
   }
 }

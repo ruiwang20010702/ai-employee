@@ -14,8 +14,8 @@ test("production config initializer writes protected isolated references and ref
 
   assert.equal(result.path, destination);
   assert.equal(metadata.mode & 0o777, 0o600);
-  assert.match(config.AI_EMPLOYEE_DATA_KEY, /^keychain:\/\/ai-employee-[a-f0-9]{16}\/data-key$/u);
-  assert.match(config.AI_EMPLOYEE_BACKUP_KEY, /^keychain:\/\/ai-employee-[a-f0-9]{16}\/backup-key$/u);
+  assert.match(config.AI_EMPLOYEE_DATA_KEY, /^keychain:\/\/foursday-[a-f0-9]{16}\/data-key$/u);
+  assert.match(config.AI_EMPLOYEE_BACKUP_KEY, /^keychain:\/\/foursday-[a-f0-9]{16}\/backup-key$/u);
   assert.notEqual(config.AI_EMPLOYEE_DATA_KEY, config.AI_EMPLOYEE_BACKUP_KEY);
   assert.notEqual(
     config.AI_EMPLOYEE_ADMIN_READ_TOKEN,
@@ -23,6 +23,8 @@ test("production config initializer writes protected isolated references and ref
   );
   assert.equal(config.DWS_PATH, "dws");
   assert.equal(config.CODEX_PATH, "codex");
+  assert.equal(config.CLAUDE_CODE_PATH, "claude");
+  assert.equal(config.AI_EMPLOYEE_AGENT_RUNTIME, "codex");
   assert.equal(config.GBRAIN_PATH, "gbrain");
   assert.equal(config.AI_EMPLOYEE_TENANT_ID, "");
   assert.equal(config.AI_EMPLOYEE_APPROVER, "");

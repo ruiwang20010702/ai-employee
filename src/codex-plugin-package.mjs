@@ -41,14 +41,14 @@ export async function validateCodexPluginPackage({ root }) {
   const rootPath = await realpath(root);
   const marketplacePath = join(rootPath, marketplaceRelativePath);
   const marketplace = await readJson(marketplacePath, "Codex marketplace manifest");
-  assert(marketplace.name === "ai-employee-local", "Codex marketplace identity changed");
-  assert(marketplace.interface?.displayName === "AI 员工（本仓库）", "Codex marketplace display name changed");
+  assert(marketplace.name === "foursday-local", "Codex marketplace identity changed");
+  assert(marketplace.interface?.displayName === "Foursday（本仓库）", "Codex marketplace display name changed");
   assert(Array.isArray(marketplace.plugins), "Codex marketplace plugins must be an array");
-  const matches = marketplace.plugins.filter((item) => item?.name === "ai-employee");
-  assert(matches.length === 1, "Codex marketplace must contain exactly one AI employee entry");
+  const matches = marketplace.plugins.filter((item) => item?.name === "foursday");
+  assert(matches.length === 1, "Codex marketplace must contain exactly one Foursday compatibility entry");
   const entry = matches[0];
   assert(entry.source?.source === "local", "Codex plugin source must remain local");
-  assert(entry.source.path === "./plugins/ai-employee", "Codex plugin source path changed");
+  assert(entry.source.path === "./plugins/foursday", "Codex plugin source path changed");
   assert(entry.policy?.installation === "AVAILABLE", "Codex plugin must require an explicit install");
   assert(entry.policy?.authentication === "ON_INSTALL", "Codex plugin authentication policy changed");
   assert(entry.category === "Productivity", "Codex plugin category changed");
@@ -65,14 +65,14 @@ export async function validateCodexPluginPackage({ root }) {
   validateInterface(manifest);
 
   const mcp = await readJson(join(pluginPath, ".mcp.json"), "Codex plugin MCP manifest");
-  const server = mcp.mcpServers?.["ai-employee"];
+  const server = mcp.mcpServers?.foursday;
   assert(server?.type === "stdio", "Codex plugin MCP transport must remain stdio");
   assert(server.command === "node" && server.cwd === ".", "Codex plugin MCP process configuration changed");
   assert(JSON.stringify(server.args) === JSON.stringify(["scripts/mcp-server.mjs"]), "Codex plugin MCP arguments changed");
 
-  const skill = await readFile(join(pluginPath, "skills", "ai-employee", "SKILL.md"), "utf8");
+  const skill = await readFile(join(pluginPath, "skills", "foursday", "SKILL.md"), "utf8");
   const frontmatter = skill.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/u)?.[1];
-  assert(frontmatter && /(?:^|\n)name:\s*ai-employee\s*(?:\n|$)/u.test(frontmatter), "Codex plugin skill metadata is invalid");
+  assert(frontmatter && /(?:^|\n)name:\s*foursday\s*(?:\n|$)/u.test(frontmatter), "Codex plugin skill metadata is invalid");
   assert(skill.includes("本插件只读") && skill.includes("不批准、拒绝、发送、执行"), "Codex plugin lost its read-only skill boundary");
   const serverScriptPath = join(pluginPath, "scripts", "mcp-server.mjs");
   const [, serverScript] = await Promise.all([

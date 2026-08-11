@@ -39,7 +39,7 @@ test("项目交付从补丁到发布形成完整审批和证据闭环", async (t
 
   await execFileAsync("/usr/bin/git", ["-C", remote, "init", "--bare"]);
   await execFileAsync("/usr/bin/git", ["-C", root, "init"]);
-  await execFileAsync("/usr/bin/git", ["-C", root, "config", "user.name", "AI Employee Test"]);
+  await execFileAsync("/usr/bin/git", ["-C", root, "config", "user.name", "Foursday Test"]);
   await execFileAsync("/usr/bin/git", ["-C", root, "config", "user.email", "ai-test@example.invalid"]);
   await writeFile(join(root, "file.txt"), "old\n");
   await execFileAsync("/usr/bin/git", ["-C", root, "add", "file.txt"]);
@@ -107,7 +107,7 @@ test("项目交付从补丁到发布形成完整审批和证据闭环", async (t
         timeoutMs: 30_000,
         remote: "origin",
         expectedRemoteUrl: remote,
-        branchPrefix: "ai-employee/",
+        branchPrefix: "foursday/",
       },
       production_deploy: {
         mode: "approval_required",

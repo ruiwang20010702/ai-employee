@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Store } from "../src/store.mjs";
+import { FeishuAdapter } from "../src/feishu.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 import {
   processApprovedTask,
@@ -138,6 +139,36 @@ test("Worker 失败后任务保留并可重试", async (t) => {
   assert.equal(store.getTask(taskId).attempts, 1);
 });
 
+test("Worker 可选择 Claude Code 且仍只走统一草稿契约", async (t) => {
+  const store = await fixture(t);
+  enqueue(store, "claude-runtime", "请整理方案");
+  let selectedRuntime;
+  await processDraftTask({
+    store,
+    dws: { async fetchDirect() { return []; } },
+    config: {
+      ...baseConfig,
+      agentRuntime: "claude-code",
+      claudeCodePath: "/trusted/claude",
+    },
+    generator: async (_event, options) => {
+      selectedRuntime = options.runtime;
+      return {
+        shouldReply: false,
+        reply: "",
+        confidence: 0.9,
+        riskLevel: "low",
+        reason: "无需回复",
+        needsInformation: false,
+        relatedToWaitingTask: false,
+        memoryCandidates: [],
+      };
+    },
+  });
+  assert.equal(selectedRuntime.id, "claude-code");
+  assert.equal(selectedRuntime.executable, "/trusted/claude");
+});
+
 test("Worker 只生成草稿并进入待审批", async (t) => {
   const store = await fixture(t);
   const taskId = enqueue(store);
@@ -167,7 +198,7 @@ test("Worker 只生成草稿并进入待审批", async (t) => {
 
 test("询问能力时依据当前授权确定性回答且不调用 Codex", async (t) => {
   const store = await fixture(t);
-  const taskId = enqueue(store, "capability-question", "你这个 AI 员工能做什么？");
+  const taskId = enqueue(store, "capability-question", "Foursday 能做什么？");
   let generated = false;
   await processDraftTask({
     store,
@@ -467,6 +498,63 @@ test("审批、人工回复检查和幂等键全部满足后才发送", async (t
     },
   });
   assert.equal(sent.idempotencyKey, taskId);
+  assert.equal(store.getTask(taskId).status, "completed");
+});
+
+test("飞书适配器复用同一审批、人工接管和精确回读发送链", async (t) => {
+  const store = await fixture(t);
+  const taskId = enqueue(store, "feishu-approved", "请确认");
+  store.claimTask({ now: new Date("2026-07-31T10:00:00.010Z") });
+  store.completeDraft(taskId, {
+    shouldReply: true,
+    reply: "已确认。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "需要回复",
+  });
+  store.decideTask(taskId, { decision: "approved", actor: "tester" });
+  const calls = [];
+  const adapter = new FeishuAdapter({
+    selfOpenId: "self",
+    client: {
+      im: {
+        v1: {
+          message: {
+            async list() {
+              return { code: 0, data: { items: [] } };
+            },
+            async create(payload) {
+              calls.push(payload);
+              return { code: 0, data: { message_id: "om_sent", chat_id: "c1" } };
+            },
+            async get() {
+              return {
+                code: 0,
+                data: {
+                  items: [{
+                    message_id: "om_sent",
+                    chat_id: "c1",
+                    body: { content: JSON.stringify({ text: "已确认。" }) },
+                  }],
+                },
+              };
+            },
+          },
+        },
+      },
+    },
+  });
+  await processApprovedTask({
+    store,
+    dws: adapter,
+    config: {
+      ...baseConfig,
+      selfUserId: "self",
+      capabilities: new Set(["draft_reply", "send_message"]),
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].data.uuid, taskId);
   assert.equal(store.getTask(taskId).status, "completed");
 });
 

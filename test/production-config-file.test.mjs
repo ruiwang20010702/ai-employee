@@ -59,7 +59,7 @@ test("GitHub 生产示例的五项密钥统一使用正式钥匙串服务", asyn
   for (const [key, account] of Object.entries(expectedAccounts)) {
     assert.equal(
       values[key],
-      `keychain://ai-employee-production/${account}`,
+      `keychain://foursday-production/${account}`,
     );
   }
 });
@@ -352,6 +352,32 @@ test("草稿 Worker 并发默认保守且有硬上限", () => {
   } finally {
     if (previous == null) delete process.env[name];
     else process.env[name] = previous;
+  }
+});
+
+test("AgentRuntime 只接受 Codex 或 Claude Code", () => {
+  const runtimeName = "AI_EMPLOYEE_AGENT_RUNTIME";
+  const claudePathName = "CLAUDE_CODE_PATH";
+  const previousRuntime = process.env[runtimeName];
+  const previousPath = process.env[claudePathName];
+  try {
+    delete process.env[runtimeName];
+    assert.equal(loadConfig({ requireTargets: false }).agentRuntime, "codex");
+    process.env[runtimeName] = "claude-code";
+    process.env[claudePathName] = "/trusted/claude";
+    const config = loadConfig({ requireTargets: false });
+    assert.equal(config.agentRuntime, "claude-code");
+    assert.equal(config.claudeCodePath, "/trusted/claude");
+    process.env[runtimeName] = "unknown-runtime";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must be one of: codex, claude-code/u,
+    );
+  } finally {
+    if (previousRuntime == null) delete process.env[runtimeName];
+    else process.env[runtimeName] = previousRuntime;
+    if (previousPath == null) delete process.env[claudePathName];
+    else process.env[claudePathName] = previousPath;
   }
 });
 

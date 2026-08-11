@@ -2164,9 +2164,9 @@ test("目标自检运行目录拒绝额外内容、非空目录和符号链接",
 
 test("GitHub 仓库地址归一化后只接受官方仓库且 gh 显式绑定", () => {
   for (const remote of [
-    "https://github.com/ruiwang20010702/ai-employee.git",
-    "git@github.com:ruiwang20010702/ai-employee.git",
-    "ssh://git@github.com/ruiwang20010702/ai-employee",
+    "https://github.com/ruiwang20010702/foursday.git",
+    "git@github.com:ruiwang20010702/foursday.git",
+    "ssh://git@github.com/ruiwang20010702/foursday",
   ]) {
     assert.equal(normalizeGitHubRepository(remote), productionRepository);
   }

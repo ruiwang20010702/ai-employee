@@ -2,7 +2,7 @@
 
 [English](./CONTRIBUTING.md) · **简体中文**
 
-感谢你愿意改进 AI 员工。这个项目把消息处理和真实工作执行视为生产系统，因此我们尤其重视权限边界、失败路径和可验证证据。
+感谢你愿意改进 Foursday。这个项目把消息处理和真实工作执行视为生产系统，因此我们尤其重视权限边界、失败路径和可验证证据。
 
 ## 可以贡献什么
 
@@ -18,8 +18,8 @@
 要求 Node.js 22.5 或更高版本：
 
 ```bash
-git clone https://github.com/ruiwang20010702/ai-employee.git
-cd ai-employee
+git clone https://github.com/ruiwang20010702/foursday.git
+cd foursday
 npm ci
 npm run check
 ```

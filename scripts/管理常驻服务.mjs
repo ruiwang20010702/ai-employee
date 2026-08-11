@@ -37,25 +37,25 @@ const launchAgentsDirectory = join(homedir(), "Library", "LaunchAgents");
 const domain = `gui/${process.getuid()}`;
 
 export const serviceDefinitions = [
-  { component: "listener", label: "com.ai-employee.listener" },
-  { component: "worker", label: "com.ai-employee.worker" },
-  { component: "executor", label: "com.ai-employee.executor" },
-  { component: "health", label: "com.ai-employee.health" },
-  { component: "admin", label: "com.ai-employee.admin" },
-  { component: "alert", label: "com.ai-employee.alert" },
+  { component: "listener", label: "com.foursday.listener" },
+  { component: "worker", label: "com.foursday.worker" },
+  { component: "executor", label: "com.foursday.executor" },
+  { component: "health", label: "com.foursday.health" },
+  { component: "admin", label: "com.foursday.admin" },
+  { component: "alert", label: "com.foursday.alert" },
   {
     component: "reconciliation",
-    label: "com.ai-employee.reconciliation",
+    label: "com.foursday.reconciliation",
     intervalSeconds: 3_600,
   },
   {
     component: "memory-source",
-    label: "com.ai-employee.memory-source",
+    label: "com.foursday.memory-source",
     intervalSeconds: 300,
   },
   {
     component: "backup",
-    label: "com.ai-employee.backup",
+    label: "com.foursday.backup",
     schedule: { Hour: 2, Minute: 15 },
   },
 ];

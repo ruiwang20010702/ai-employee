@@ -1,28 +1,30 @@
 <div align="center">
 
-![AI 员工](./assets/ai-employee-hero.svg)
+![Foursday](./assets/foursday-hero.svg)
 
-# AI 员工
+# Foursday
 
-**一个安全、可审批、会执行、能验证结果的钉钉 AI 员工运行时。**
+**你的开源工作分身。多一个你，少上一天班。**
 
-把钉钉消息转化为草稿、项目计划和经过验证的工作结果；默认不自动发送，也不会从聊天内容中获得新权限。
+Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为可审阅回复、项目计划和经过验证的工作结果，长期目标是每周替每位用户拿回一个工作日。
+
+钉钉使用 DWS，飞书直接使用开放平台事件与消息 API。默认不自动发送，也不会从聊天内容中获得新权限。它在能力上成为你的分身，但不会在身份上偷偷冒充你。
 
 [English](./README.md) · **简体中文** · [快速开始](#快速开始) · [设计总览](./docs/设计总览.md) · [产品需求](./docs/产品需求文档.md) · [安全说明](./安全说明.md)
 
-[![检查](https://github.com/ruiwang20010702/ai-employee/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/ai-employee/actions/workflows/check.yml)
-[![安全扫描](https://github.com/ruiwang20010702/ai-employee/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/ai-employee/actions/workflows/security.yml)
+[![检查](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
+[![安全扫描](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
 </div>
 
-## 为什么做 AI 员工
+## 为什么做 Foursday
 
 普通聊天机器人擅长回答问题，却很难可靠地完成真实工作：它可能不清楚什么时候应该沉默，不知道自己是否有权执行，也无法证明外部动作真的成功。
 
-AI 员工把这些问题当作生产系统来处理：
+Foursday 不只追求“做了多少任务”，而是衡量**每位用户每周经过验证拿回的工作时间**；当它稳定返还 8 小时，才真正接近“上四休三”。为此，Foursday 把工作分身必须面对的问题当作生产系统来处理：
 
 - **先判断，再回应**：白名单、群聊 `@我`、连续消息合并和“不回复”规则共同控制入口。
 - **先授权，再执行**：能力清单、项目范围、次数预算、风险策略和计划哈希共同决定是否允许执行。
@@ -35,24 +37,24 @@ AI 员工把这些问题当作生产系统来处理：
 
 ```mermaid
 flowchart LR
-    A["钉钉消息"] --> B["范围、去重与连续消息合并"]
+    A["钉钉 / 飞书 / 演示消息"] --> B["消息适配器：范围、去重与连续消息合并"]
     B --> C{"不回复、追问、回复或工作请求"}
     C -->|"不回复"| D["记录原因"]
     C -->|"追问或回复"| E["待审批草稿"]
     C -->|"工作请求"| F["项目计划与能力网关"]
     F --> G{"允许、审批或拒绝"}
-    G -->|"允许或批准"| H["Codex / DWS / Git / 办公工具"]
+    G -->|"允许或批准"| H["Codex / Claude Code / Git / 办公工具"]
     H --> I["目标系统回读验证"]
     I --> J["结果草稿、记忆候选与审计"]
     E --> K["发送前人工接管复查"]
-    K --> L["DWS 发送并核对回执"]
+    K --> L["渠道原生发送并核对回执"]
 ```
 
 完整业务分支、状态机、项目执行泳道、记忆生命周期和发布恢复流程见[设计总览](./docs/设计总览.md)。
 
 ## 适合什么场景
 
-| 场景 | AI 员工的处理方式 |
+| 场景 | Foursday 的处理方式 |
 |---|---|
 | 同事询问项目状态 | 检索已确认事实，生成可审阅回复草稿 |
 | 需求或方案请求 | 使用 Codex 完成分析、文档草稿和风险说明 |
@@ -65,7 +67,7 @@ flowchart LR
 
 ## 与普通机器人的区别
 
-| 能力 | 普通聊天机器人 | AI 员工 |
+| 能力 | 普通聊天机器人 | Foursday |
 |---|---:|---:|
 | 判断什么时候不回复 | 通常依赖提示词 | 硬规则、模型复核与人工标注门禁 |
 | 连续消息理解 | 常按单条处理 | 3～8 秒有界合并窗口 |
@@ -82,8 +84,8 @@ flowchart LR
 
 | 模块 | 已实现 | 默认边界 |
 |---|---|---|
-| 消息入口 | DWS 拉取、白名单、群聊 `@我`、去重、补漏 | 不读取未授权会话 |
-| 草稿决策 | 不回复、追问、回复、能力自述、受控并发 | 只生成草稿 |
+| 消息入口 | 钉钉 DWS、飞书事件、白名单、群聊 `@我`、去重 | 不读取未授权会话 |
+| 草稿决策 | Codex、Claude Code、模型提供方、不回复与追问 | 只生成草稿 |
 | 人工控制 | 审批、拒绝、暂停、取消、人工接管、死亡任务处置 | 不自动处理异常任务 |
 | 项目执行 | 项目清单、计划、审批哈希、租约、次数预算 | 全局执行默认关闭 |
 | 工作适配器 | 研究、文档、代码、测试、Git、发布、钉钉办公动作 | 真实项目逐项授权 |
@@ -95,20 +97,37 @@ flowchart LR
 
 ## 快速开始
 
-### 1. 本地验证代码
+### 1. 五分钟本地演示
+
+演示只需要 Node.js，不需要钉钉、DWS、PostgreSQL、Codex、Claude Code 或任何 API Key：
+
+```bash
+git clone https://github.com/ruiwang20010702/foursday.git
+cd foursday
+npm ci
+npm run demo
+```
+
+输入一条消息、查看草稿，再选择是否批准本地模拟。批准前副作用和证据列表必须为空；批准后也只会执行内存中的模拟动作，并回读模拟目标。需要稳定复现时可运行：
+
+```bash
+npm run demo -- --message "帮我准备一份上线检查清单" --approve --json
+```
+
+### 2. 本地验证代码
 
 这条路径不会连接你的钉钉、生产数据库或 Codex 账号：
 
 ```bash
-git clone https://github.com/ruiwang20010702/ai-employee.git
-cd ai-employee
+git clone https://github.com/ruiwang20010702/foursday.git
+cd foursday
 npm ci
 npm run check
 ```
 
-### 2. 检查运行环境
+### 3. 检查运行环境
 
-AI 员工当前面向 macOS 登录会话，需要 Node.js 22.5+、PostgreSQL 16/17、已授权的 DWS 与 Codex CLI：
+钉钉生产配置当前面向 macOS 登录会话，需要 Node.js 22.5+、PostgreSQL 16/17、已授权的 DWS，以及 Codex 或 Claude Code：
 
 ```bash
 npm run setup:check
@@ -116,28 +135,32 @@ npm run setup:check
 
 `setup:check` 只检查依赖、配置权限和危险能力开关，不读取钉钉消息，不连接生产数据库，也不修改系统。
 
-### 3. 从固定版本复用
+### 4. 从固定版本复用
 
 在新的空白工作目录中固定到已经审核的完整提交：
 
 ```bash
 npm init -y
-npm install "github:ruiwang20010702/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA"
-npx --no-install ai-employee check
-npx --no-install ai-employee init
-npx --no-install ai-employee init --apply
-npx --no-install ai-employee secrets
-npx --no-install ai-employee secrets --apply
+npm install "github:ruiwang20010702/foursday#REPLACE_WITH_APPROVED_FULL_SHA"
+npx --no-install foursday check
+npx --no-install foursday init
+npx --no-install foursday init --apply
+npx --no-install foursday secrets
+npx --no-install foursday secrets --apply
 ```
 
-必须把占位内容替换为经过检查的完整 40 位提交编号。初始化只把当前工作区独有的钥匙串引用写入权限为 `600` 的配置，不保存生成的生产密钥；已有配置绝不覆盖。所有写操作默认只预览，必须显式使用 `--apply`。
+必须把占位内容替换为经过检查的完整 40 位提交编号。初始化只把当前工作区独有的钥匙串引用写入权限为 `600` 的配置，不保存生成的生产密钥；已有配置绝不覆盖。所有写操作默认只预览，必须显式使用 `--apply`。`0.x` 版本继续保留旧的 `ai-employee` 命令作为兼容别名。
+
+### 改名兼容口径
+
+Foursday 是统一的公开产品名、包名、插件名、服务名、仓库名和主命令名。已有安装仍可安全升级：`0.x` 期间继续兼容 `ai-employee` 命令别名、`AI_EMPLOYEE_*` 环境变量、加密数据库哨兵、协议结构名、旧 HTTP 请求头、Prometheus 指标别名和既有钥匙串引用。新安装统一使用 `foursday`、`com.foursday.*` 和 `foursday-production`。这些旧标识属于稳定兼容协议，不是对外品牌，也不会因为视觉改名而被静默破坏。
 
 ## 生产要求
 
 - macOS 登录用户会话和钉钉桌面端。
 - Node.js 22.5 或更高版本。
 - PostgreSQL 16 或 17。
-- DWS、Codex CLI、`pg_dump` 和 `pg_restore`；使用知识页时还需要 gbrain。
+- DWS、Codex CLI 或 Claude Code、`pg_dump` 和 `pg_restore`；使用知识页时还需要 gbrain。
 - 独立生产配置、macOS 钥匙串或受控环境变量，以及经过核实的监听范围。
 
 ## 首次部署
@@ -151,7 +174,7 @@ npm run production:preflight
 npm run db:backup
 npm run db:migrate
 npm run production:doctor
-npm run production:codex-probe
+npm run production:agent-probe
 npm run service:install
 npm run production:service-verify
 npm run production:verify
@@ -188,11 +211,13 @@ npm run admin:serve
 
 ```mermaid
 flowchart LR
-    DT["DingTalk"] --> SIG["活动信号"]
-    SIG --> DWS["DWS 消息事实"]
-    DWS --> DB[("PostgreSQL")]
+    DT["钉钉"] --> DWS["DWS 适配器"]
+    FS["飞书事件"] --> FSA["飞书开放平台适配器"]
+    DWS --> MSG["MessageAdapter"]
+    FSA --> MSG
+    MSG --> DB[("PostgreSQL")]
     DB --> WORKER["草稿 Worker"]
-    WORKER --> CODEX["Codex"]
+    WORKER --> CODEX["Codex / Claude Code / ModelProvider"]
     DB --> EXEC["计划执行器"]
     EXEC --> TOOLS["DWS / Git / 测试 / 发布"]
     TOOLS --> VERIFY["目标回读验证"]
@@ -220,9 +245,11 @@ flowchart LR
 - [x] 可靠钉钉消息入口、草稿决策与人工审批
 - [x] 项目能力网关、工作计划、执行证据与结果回传
 - [x] 正式记忆、人工接管、SLO 和不可变生产发布
-- [ ] 无需真实钉钉账号的交互式演示模式
+- [x] 无需企业账号或模型凭据的交互式本地演示
+- [x] 带版本的 MessageAdapter、AgentRuntime 和 ModelProvider 契约
 - [ ] 更易安装的桌面发行包
-- [ ] 通用消息适配器接口与更多协作平台
+- [ ] 飞书及更多企业协作平台适配器
+- [ ] Claude Code 和直接模型提供方适配器
 - [ ] 更多消息适配器和社区案例库
 
 路线图不构成已发布能力承诺；当前状态以[完成度矩阵](./docs/完成度矩阵.md)为准。

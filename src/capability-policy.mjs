@@ -266,11 +266,18 @@ export function validateProjectManifest(input) {
         }
       }
       const branchPrefix = assertString(
-        rule.branchPrefix ?? "ai-employee/",
+        rule.branchPrefix ?? "foursday/",
         "git_push.branchPrefix",
       );
-      if (!branchPrefix.startsWith("ai-employee/") || branchPrefix.length > 80) {
-        throw new Error("git_push.branchPrefix must remain under ai-employee/");
+      if (
+        !["foursday/", "ai-employee/"].some((prefix) =>
+          branchPrefix.startsWith(prefix)
+        ) ||
+        branchPrefix.length > 80
+      ) {
+        throw new Error(
+          "git_push.branchPrefix must remain under foursday/ (legacy ai-employee/ is accepted during 0.x)",
+        );
       }
       capabilities[name].remote = remote;
       capabilities[name].expectedRemoteUrl = expectedRemoteUrl;
