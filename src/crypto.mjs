@@ -4,7 +4,7 @@ import {
   createHmac,
   randomBytes,
 } from "node:crypto";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const prefix = "enc:v1:";
@@ -35,14 +35,21 @@ export class DataCipher {
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       key = randomBytes(32);
+      const temporaryKeyPath = `${keyPath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
       try {
-        await writeFile(keyPath, `${key.toString("base64")}\n`, {
+        await writeFile(temporaryKeyPath, `${key.toString("base64")}\n`, {
           mode: 0o600,
           flag: "wx",
         });
-      } catch (writeError) {
-        if (writeError.code !== "EEXIST") throw writeError;
-        key = decodeKey((await readFile(keyPath, "utf8")).trim());
+        await chmod(temporaryKeyPath, 0o600);
+        try {
+          await link(temporaryKeyPath, keyPath);
+        } catch (linkError) {
+          if (linkError.code !== "EEXIST") throw linkError;
+          key = decodeKey((await readFile(keyPath, "utf8")).trim());
+        }
+      } finally {
+        await rm(temporaryKeyPath, { force: true });
       }
     }
     await chmod(keyPath, 0o600);

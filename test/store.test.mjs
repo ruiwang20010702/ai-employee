@@ -867,14 +867,13 @@ test("保留期清理只删除已经结束的旧任务", async (t) => {
 test("监听器和 Worker 并发启动时共享同一密钥和数据库", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "ai-concurrent-test-"));
   const databasePath = join(directory, "shared.sqlite");
-  const first = new Store(databasePath);
-  const second = new Store(databasePath);
+  const stores = Array.from({ length: 8 }, () => new Store(databasePath));
+  const [first, second] = stores;
   t.after(async () => {
-    first.close();
-    second.close();
+    for (const store of stores) store.close();
     await rm(directory, { recursive: true, force: true });
   });
-  await Promise.all([first.open(), second.open()]);
+  await Promise.all(stores.map((store) => store.open()));
   const base = new Date("2026-07-31T10:00:00.000Z");
   first.ingestMessages(messages().slice(0, 1), base);
   const [taskId] = first.createReadyTasks({
