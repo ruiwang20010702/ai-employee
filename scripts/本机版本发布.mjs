@@ -90,6 +90,11 @@ const runtimeIdentityKeys = Object.freeze([
   "AI_EMPLOYEE_DATA_KEY",
   "AI_EMPLOYEE_TENANT_ID",
 ]);
+const permittedPreexistingRuntimeDirectories = new Set([
+  "drafts",
+  "work-plan-temp",
+  "worktrees",
+]);
 const systemGitPath = "/usr/bin/git";
 const systemGitSafetyArguments = Object.freeze([
   "-c",
@@ -1724,10 +1729,38 @@ export async function validateAndCopyProductionConfig({
       throw error;
     });
   if (runtimeExists) {
-    throw new Error("目标检查提前创建了运行目录，拒绝注入生产配置");
+    const runtimeMetadata = await lstat(runtime);
+    if (
+      !runtimeMetadata.isDirectory() ||
+      runtimeMetadata.isSymbolicLink() ||
+      (runtimeMetadata.mode & 0o077) !== 0 ||
+      (await realpath(runtime)) !== runtime
+    ) {
+      throw new Error("目标检查创建的运行目录不满足受保护目录约束");
+    }
+    const entries = await readdir(runtime);
+    for (const entry of entries) {
+      if (!permittedPreexistingRuntimeDirectories.has(entry)) {
+        throw new Error("目标检查在运行目录中创建了非预期内容");
+      }
+      const entryPath = join(runtime, entry);
+      const entryMetadata = await lstat(entryPath);
+      if (
+        !entryMetadata.isDirectory() ||
+        entryMetadata.isSymbolicLink() ||
+        (entryMetadata.mode & 0o077) !== 0 ||
+        (await realpath(entryPath)) !== entryPath
+      ) {
+        throw new Error("目标检查创建的运行子目录不满足受保护目录约束");
+      }
+      if ((await readdir(entryPath)).length !== 0) {
+        throw new Error("目标检查创建的运行子目录必须为空");
+      }
+    }
+  } else {
+    await mkdir(runtime, { mode: 0o700 });
   }
   const destination = join(runtime, "production.json");
-  await mkdir(runtime, { mode: 0o700 });
   await chmod(runtime, 0o700);
   await copyFile(configPath, destination, fsConstants.COPYFILE_EXCL);
   await chmod(destination, 0o600);
@@ -2215,6 +2248,7 @@ export async function runLocalAtomicRelease({
   let serviceSwitchAttempted = false;
   let currentActivated = false;
   let pendingRelease = null;
+  let maintenancePaused = false;
   let releaseLock = null;
   const completedSteps = [];
   const complete = (step) => completedSteps.push(step);
@@ -2362,6 +2396,7 @@ export async function runLocalAtomicRelease({
         configPath: previousConfigPath,
       };
       await dependencies.pauseSystem(previousContext);
+      maintenancePaused = true;
       await dependencies.inspectForwardMaintenanceState(releaseContext);
       await dependencies.verifyPreviousReleaseIntegrity({
         releaseDirectory: previousRelease,
@@ -2500,7 +2535,9 @@ export async function runLocalAtomicRelease({
         [error],
         pendingRelease
           ? "维护前滚发布未完成；已保留中断记录，生产必须保持暂停并只允许继续前滚"
-          : "维护前滚发布在建立中断记录前停止；生产保持暂停，未执行数据库回退",
+          : maintenancePaused
+            ? "维护前滚发布在建立中断记录前停止；生产已暂停，未执行数据库回退"
+            : "维护前滚发布在进入维护暂停前停止；未执行数据库迁移或回退",
       );
     }
     if (serviceSwitchAttempted && previousRelease && releaseConfigPath) {

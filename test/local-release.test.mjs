@@ -574,7 +574,7 @@ test("维护前滚在暂停生产前拒绝不安全的备份根目录", async (t
       forwardConfirmation: `I_ACCEPT_FORWARD_ONLY:${sha}`,
       dependencies,
     }),
-    /建立中断记录前停止/u,
+    /进入维护暂停前停止；未执行数据库迁移或回退/u,
   );
   assert.equal(events.includes("validate-backup-root"), true);
   assert.equal(events.includes("pause"), false);
@@ -1962,13 +1962,83 @@ test("可选健康和告警密钥出现时也必须使用钥匙串引用", async
     );
   }
 
-  const releaseDirectory = join(directory, "release-with-runtime");
-  await mkdir(join(releaseDirectory, ".runtime"), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(base)}\n`, { mode: 0o600 });
-  await assert.rejects(
-    validateAndCopyProductionConfig({ configPath, releaseDirectory }),
-    /提前创建了运行目录/u,
+});
+
+test("目标自检创建的受保护空运行子目录可以保留并注入配置", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-release-runtime-")),
   );
+  const releaseDirectory = join(directory, "release");
+  const runtime = join(releaseDirectory, ".runtime");
+  const configPath = join(directory, "production.json");
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(runtime, { recursive: true, mode: 0o700 });
+  await chmod(runtime, 0o700);
+  for (const entry of ["drafts", "work-plan-temp", "worktrees"]) {
+    await mkdir(join(runtime, entry), { mode: 0o700 });
+    await chmod(join(runtime, entry), 0o700);
+  }
+  await writeFile(
+    configPath,
+    `${JSON.stringify({
+      DATABASE_URL: "keychain://ai-employee/database",
+      AI_EMPLOYEE_DATA_KEY: "keychain://ai-employee/data",
+      AI_EMPLOYEE_BACKUP_KEY: "keychain://ai-employee/backup",
+      AI_EMPLOYEE_ADMIN_READ_TOKEN: "keychain://ai-employee/admin-read",
+      AI_EMPLOYEE_ADMIN_WRITE_TOKEN: "keychain://ai-employee/admin-write",
+    })}\n`,
+    { mode: 0o600 },
+  );
+  await chmod(configPath, 0o600);
+
+  const destination = await validateAndCopyProductionConfig({
+    configPath,
+    releaseDirectory,
+  });
+  assert.equal(destination, join(runtime, "production.json"));
+  assert.equal((await lstat(destination)).mode & 0o777, 0o600);
+});
+
+test("目标自检运行目录拒绝额外内容、非空目录和符号链接", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-release-runtime-invalid-")),
+  );
+  const configPath = join(directory, "production.json");
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(
+    configPath,
+    `${JSON.stringify({
+      DATABASE_URL: "keychain://ai-employee/database",
+      AI_EMPLOYEE_DATA_KEY: "keychain://ai-employee/data",
+      AI_EMPLOYEE_BACKUP_KEY: "keychain://ai-employee/backup",
+      AI_EMPLOYEE_ADMIN_READ_TOKEN: "keychain://ai-employee/admin-read",
+      AI_EMPLOYEE_ADMIN_WRITE_TOKEN: "keychain://ai-employee/admin-write",
+    })}\n`,
+    { mode: 0o600 },
+  );
+  await chmod(configPath, 0o600);
+
+  for (const scenario of ["unexpected", "nonempty", "symlink"]) {
+    const releaseDirectory = join(directory, scenario);
+    const runtime = join(releaseDirectory, ".runtime");
+    await mkdir(runtime, { recursive: true, mode: 0o700 });
+    await chmod(runtime, 0o700);
+    if (scenario === "unexpected") {
+      await writeFile(join(runtime, "unexpected"), "x");
+    } else if (scenario === "nonempty") {
+      await mkdir(join(runtime, "drafts"), { mode: 0o700 });
+      await chmod(join(runtime, "drafts"), 0o700);
+      await writeFile(join(runtime, "drafts", "artifact"), "x");
+    } else {
+      const outside = join(directory, "outside");
+      await mkdir(outside, { mode: 0o700 });
+      await symlink(outside, join(runtime, "drafts"));
+    }
+    await assert.rejects(
+      validateAndCopyProductionConfig({ configPath, releaseDirectory }),
+      /非预期内容|必须为空|受保护目录约束/u,
+    );
+  }
 });
 
 test("GitHub 仓库地址归一化后只接受官方仓库且 gh 显式绑定", () => {
