@@ -9,6 +9,7 @@
   "type": "module",
   "files": [
     ".agents/plugins/marketplace.json",
+    "assets/",
     "db/",
     "deploy/",
     "docs/",
@@ -17,7 +18,13 @@
     "src/*.mjs",
     "plugins/ai-employee/",
     "!src/store.mjs",
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
     "README.md",
+    "README_EN.md",
+    "SECURITY.md",
     "许可证.md",
     "安全说明.md"
   ],

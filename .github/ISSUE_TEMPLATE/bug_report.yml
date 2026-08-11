@@ -1,0 +1,65 @@
+name: Bug 报告
+description: 提交可复现的软件缺陷，不要包含真实消息或凭据
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。安全漏洞请使用 GitHub Security Advisory 私下报告。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 请填写版本号或完整提交 SHA。
+      placeholder: 0.3.0 / 40-character SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: storage
+    attributes:
+      label: 存储
+      options:
+        - PostgreSQL
+        - SQLite（开发测试）
+        - 不确定或不相关
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么？请使用合成或脱敏数据。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 最小复现步骤
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 已脱敏证据
+      description: 可附日志、截图或测试结果，但不要提交真实人员、消息、令牌、数据库 URL 或内部资料。
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 安全确认
+      options:
+        - label: 我已删除真实消息、个人信息、凭据和公司内部资料。
+          required: true
+        - label: 这不是需要私密报告的安全漏洞。
+          required: true

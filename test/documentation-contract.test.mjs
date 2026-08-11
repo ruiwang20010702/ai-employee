@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 async function projectText(path) {
@@ -137,4 +137,86 @@ test("公开仓库安装说明固定到已审核完整提交", async () => {
   );
   assert.match(readme, /完整 40 位提交编号/u);
   assert.doesNotMatch(readme, /npm install[^\n]+#main/u);
+});
+
+test("核心流程图覆盖业务、状态、执行、记忆和发布异常分支", async () => {
+  const [requirements, technical, memory, operations, overview] = await Promise.all([
+    projectText("docs/产品需求文档.md"),
+    projectText("docs/技术设计文档.md"),
+    projectText("docs/能力清单与正式记忆.md"),
+    projectText("docs/生产运维手册.md"),
+    projectText("docs/设计总览.md"),
+  ]);
+  for (const text of [requirements, technical, memory, operations, overview]) {
+    assert.match(text, /```mermaid/u);
+  }
+  for (const value of [
+    "是否在联系人或群聊范围内",
+    "期限内唯一关联的补充消息",
+    "禁止自动重试副作用",
+  ]) assert.match(requirements, new RegExp(value, "u"));
+  for (const value of [
+    "stateDiagram-v2",
+    "send_unknown",
+    "sequenceDiagram",
+    "副作用账本和验证证据",
+  ]) assert.match(technical, new RegExp(value, "u"));
+  for (const value of [
+    "唯一匹配请求人有权使用的项目",
+    "凭据、PII、敏感评价或越权内容检查",
+    "负责人明确选择替代旧记忆",
+    "检索时仍满足项目、来源、权限和期限吗",
+  ]) assert.match(memory, new RegExp(value, "u"));
+  for (const value of [
+    "018 前滚边界",
+    "写入 pending journal",
+    "失败且不能安全回退",
+    "另行申请业务放量审批",
+  ]) assert.match(operations, new RegExp(value, "u"));
+});
+
+test("中英文项目首页提供产品定位、快速开始和开源治理入口", async () => {
+  const [readme, english, contributing, security, conduct, changelog, license] =
+    await Promise.all([
+      projectText("README.md"),
+      projectText("README_EN.md"),
+      projectText("CONTRIBUTING.md"),
+      projectText("SECURITY.md"),
+      projectText("CODE_OF_CONDUCT.md"),
+      projectText("CHANGELOG.md"),
+      projectText("LICENSE"),
+    ]);
+  for (const text of [readme, english]) {
+    assert.match(text, /assets\/ai-employee-hero\.svg/u);
+    assert.match(text, /actions\/workflows\/check\.yml\/badge\.svg/u);
+    assert.match(text, /npm run check/u);
+    assert.match(text, /CONTRIBUTING\.md/u);
+    assert.match(text, /CODE_OF_CONDUCT\.md/u);
+    assert.match(text, /SECURITY\.md/u);
+  }
+  assert.match(readme, /为什么做 AI 员工/u);
+  assert.match(readme, /与普通机器人的区别/u);
+  assert.match(english, /Why AI Employee\?/u);
+  assert.match(english, /Quick Start/u);
+  assert.match(contributing, /拒绝路径/u);
+  assert.match(security, /GitHub Security Advisory/u);
+  assert.match(conduct, /尊重隐私/u);
+  assert.match(changelog, /\[0\.3\.0\] - 2026-08-11/u);
+  assert.match(license, /MIT License/u);
+});
+
+test("项目首页的本地文件链接全部存在", async () => {
+  for (const file of ["README.md", "README_EN.md"]) {
+    const text = await projectText(file);
+    const targets = [...text.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/gu)]
+      .map((match) => match[1])
+      .filter((target) => target.startsWith("./"))
+      .map((target) => target.split("#", 1)[0]);
+    for (const target of new Set(targets)) {
+      await assert.doesNotReject(
+        access(new URL(`../${target.slice(2)}`, import.meta.url)),
+        `${file} 的本地链接不存在：${target}`,
+      );
+    }
+  }
 });

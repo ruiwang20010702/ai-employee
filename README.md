@@ -1,86 +1,124 @@
+<div align="center">
+
+![AI 员工](./assets/ai-employee-hero.svg)
+
 # AI 员工
 
-基于 DWS、Codex 和 PostgreSQL 的钉钉 AI 员工。它实时发现白名单联系人的新消息，合并连续消息，判断是否需要回复，生成草稿，并在逐任务审批后受控发送。
+**一个安全、可审批、会执行、能验证结果的钉钉 AI 员工运行时。**
 
-生产默认是“草稿模式”：可以监听、判断和生成草稿，不能自行外发。开启发送仍必须同时满足能力开关、人工审批、发送前人工回复复查和幂等账本。
+把钉钉消息转化为草稿、项目计划和经过验证的工作结果；默认不自动发送，也不会从聊天内容中获得新权限。
 
-## 已实现能力
+[English](./README_EN.md) · [快速开始](#快速开始) · [设计总览](./docs/设计总览.md) · [产品需求](./docs/产品需求文档.md) · [安全说明](./安全说明.md)
 
-| 能力 | 生产状态 | 边界 |
-|---|---|---|
-| 钉钉消息监听 | 可用 | 只读取白名单单聊和白名单群中的 `@我` 消息 |
-| 实时唤醒与补漏 | 可用 | 本地活动信号唤醒，5 分钟增量检查兜底 |
-| 消息与任务可靠性 | 可用 | PostgreSQL 去重、事务、租约、重试和死信 |
-| 连续消息合并 | 可用 | 默认安静 3 秒；明确“紧急/发完”可提前处理，连续输入总等待不超过 8 秒；相隔超过 2 分钟或超过 20 条会拆分任务 |
-| 判断是否回复 | 可用 | 明确闭环走硬规则，其余由 Codex 结合上下文复核 |
-| 基于授权的能力自述 | 可用 | 被问“能做什么”时不调用模型；只按当前开关和请求人的有效项目授权回答，群聊隐藏项目名称 |
-| 影子质量评估 | 可用 | 回应必要性与草稿质量分开标注并保留不可变历史；至少 100 条有效回应判断、30 条草稿评价、分层覆盖和双向准确率达标，且高风险错误回复建议为 0 才通过 |
-| 草稿生成 | 可用 | 独立 Worker、只读 Codex 沙箱；默认 2 路受控并发、上限 4 |
-| 信息不足任务闭环 | 已部署、发送仍关闭 | 追问需审批并确认送达；只关联同发送人同会话的唯一候选，歧义、超时、失败和人工接管安全收敛 |
-| 人工审批与发送 | 可用、默认关闭 | 每条消息单次批准；未知结果不自动重发 |
-| 健康与指标 | 可用 | 进程心跳、真实 DWS 读取检查点、24 小时 SLO、管理台运营视图和 Prometheus 指标 |
-| 本机管理台 | 可用 | 总览、草稿、计划、监听范围、局部暂停、记忆与健康；监听对象仅显示 HMAC 指纹，读写令牌分离，不提供扩权、执行和发送入口 |
-| Codex 插件入口 | 可用；按主机安装 | 7 个只读 MCP 工具和可选状态卡片；从钥匙串取只读令牌，只访问本机管理接口，不批准、发送或执行；每个新环境均需单独安装并验收 |
-| 异常告警 | 可用、默认仅本机 | 脱敏状态、签名 Webhook 和 15 分钟冷却；未配置网址时不对外发送 |
-| 常驻与恢复 | 可用 | macOS LaunchAgent、独立消息源对账、数据库迁移、加密备份和恢复 |
-| 项目能力与任务计划 | 可用 | 项目清单、完整计划风险、审批哈希和默认拒绝 |
-| 钉钉工作请求转计划 | 可用、默认只提案 | 明确工作请求只在请求人授权项目中起草计划；不自动执行 |
-| 常驻计划执行器 | 可用、默认关闭 | 仅在全局执行开关开启后领取已授权计划；持续租约，崩溃后停止且不重放副作用 |
-| 任务级取消 | 可用 | 未执行计划立即取消；只读 Codex 和本地测试可确认中断进程组；外部副作用步骤完成回读或回滚后停止后续步骤 |
-| 死亡任务处置 | 可用、需负责人操作 | 可选择重试或审计关闭；关闭不会生成草稿、发送消息或再次调用 Codex |
-| 项目结果回传 | 可用 | 完成、失败或取消后在原会话生成幂等的待审批结果草稿，不直接发送 |
-| 正式记忆 | 已部署、当前正式记忆为 0 | AI 只能形成有精确消息来源的待确认候选；敏感内容在入库前拒绝，人工确认后才成为正式记忆；支持过期、冲突替代、gbrain 来源租约、受控导出与擦除 |
-| gbrain 知识页读取 | 可用、默认关闭 | 只读取项目白名单前缀内的精确 slug；限页数、限正文，后续步骤必须显式引用 |
-| 研究、文档与代码补丁 | 可用 | 只读 Codex；补丁先通过 `git apply --check`；AI 不具备代码合并权限，合并仍由人完成 |
-| 隔离修改与本地测试 | 可用、按项目授权 | 补丁只进入独立 worktree 和分支；应用前校准索引并预检，失败会清理本次分支与目录；测试仅运行清单登记的精确命令 |
-| Git 推送 | 可用、强制审批 | 只推 `ai-employee/` 前缀分支，远端 URL 固定，推后回读提交哈希 |
-| 生产发布 | 可用、L4 强审批 | 发布、验收和回退命令同时绑定计划；兼容迁移失败时只回退服务并复验，第 018 号前滚边界失败时保持暂停并只允许继续前滚 |
-| 共享文档创建 | 可用、强制审批 | 只写项目固定文件夹或知识库，创建后 DWS 回读内容哈希 |
-| 钉钉待办创建 | 可用、强制审批 | 执行人和优先级由项目清单固定，创建后按任务 ID 回读 |
-| 钉钉日程创建 | 可用、强制审批 | 固定参与人与时长；会议室按白名单名称实时搜索唯一 ID；循环仅限有次数上限的按日/按周规则，创建后回读 |
-| 钉钉日志提交 | 可用、强制审批 | 固定模板编号、名称和完整字段结构；提交前核对模板漂移，提交后按日志 ID 回读 |
-| OA 审批决策 | 禁止自动执行 | 可以读取并整理待审批信息；同意、拒绝和转交必须由负责人本人操作 |
-| 生产数据修改 | 仅登记、无适配器 | 不允许通用执行，必须按具体系统另建能力和回滚方案 |
+[![检查](https://github.com/ruiwang20010702/ai-employee/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/ai-employee/actions/workflows/check.yml)
+[![安全扫描](https://github.com/ruiwang20010702/ai-employee/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/ai-employee/actions/workflows/security.yml)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-这些限制是能力边界，不是故障：消息里的文字不能自行扩大 AI 权限。gbrain、待办、日程、日志、共享文档、代码、测试、推送和发布只有在项目清单显式登记知识路径、人员、模板、目标、目录、精确命令、远端、审批、验收和回滚后才能执行；示例清单本身不构成任何真实项目授权。
+</div>
 
-当白名单联系人询问“你能做什么”“有哪些能力”时，Worker 不把问题交给 Codex 自由发挥，而是直接读取当前全局能力开关和该请求人的项目清单。私聊可以列出请求人已获授权的项目名称和仍在有效期内的能力；群聊只展示授权项目数量，不暴露名称。回复不会包含项目路径、命令、人员编号或其他项目的授权，并明确发送、计划执行和禁止区边界。
+## 为什么做 AI 员工
 
-计划执行还受独立的全局开关 `work_plan_execution` 控制。项目清单授权、计划审批和全局执行开关三者缺一不可。影子模式强制要求该开关关闭。
+普通聊天机器人擅长回答问题，却很难可靠地完成真实工作：它可能不清楚什么时候应该沉默，不知道自己是否有权执行，也无法证明外部动作真的成功。
 
-项目复用与正式记忆的简明说明见[能力清单与正式记忆](./docs/能力清单与正式记忆.md)；当前“已完成、未完成、还差什么”统一查看[完成度矩阵](./docs/完成度矩阵.md)。
+AI 员工把这些问题当作生产系统来处理：
 
-仓库同时提供[AI 员工 Codex 插件](./plugins/ai-employee/说明.md)和仓库级插件市场。安装后可以在 Codex 中查看实时健康、待审批草稿、工作计划、人工接管状态和授权能力，并可打开本机完整管理台。插件以 MCP stdio 运行，默认从 macOS 钥匙串读取管理只读令牌，只允许 5 个固定 GET 端点；没有审批、发送、执行、部署或扩权工具。状态卡片遵循 MCP Apps 标准，宿主不渲染组件时仍返回同一份结构化结果。`npm run codex:verify` 会在安装前验证市场路径、插件身份、MCP 配置和只读边界，不写个人 Codex 配置；安装和启用仍需单独确认。
+- **先判断，再回应**：白名单、群聊 `@我`、连续消息合并和“不回复”规则共同控制入口。
+- **先授权，再执行**：能力清单、项目范围、次数预算、风险策略和计划哈希共同决定是否允许执行。
+- **先审批，再产生副作用**：高风险动作必须由负责人批准当前完整计划。
+- **执行后必须回读**：不相信模型自述，必须从钉钉、Git 或目标系统重新读取结果。
+- **记忆必须可追溯**：AI 只生成候选，负责人确认后才成为正式记忆；冲突需要明确替代。
+- **人可以随时接管**：人工回复、暂停和取消会阻止草稿发送或后续计划步骤。
 
-新项目先生成安全默认配置草案。默认只自动开放研究和文档草稿，代码补丁与隔离分支需要审批，gbrain、测试、待办、日程、日志、共享文档、推送和发布保持禁用：
+## 它如何工作
 
-```bash
-npm run projects:create -- \
-  --project-id example_project \
-  --name "示例项目" \
-  --root /absolute/path/to/project \
-  --requester replace_with_dingtalk_user_id
+```mermaid
+flowchart LR
+    A["钉钉消息"] --> B["范围、去重与连续消息合并"]
+    B --> C{"不回复、追问、回复或工作请求"}
+    C -->|"不回复"| D["记录原因"]
+    C -->|"追问或回复"| E["待审批草稿"]
+    C -->|"工作请求"| F["项目计划与能力网关"]
+    F --> G{"允许、审批或拒绝"}
+    G -->|"允许或批准"| H["Codex / DWS / Git / 办公工具"]
+    H --> I["目标系统回读验证"]
+    I --> J["结果草稿、记忆候选与审计"]
+    E --> K["发送前人工接管复查"]
+    K --> L["DWS 发送并核对回执"]
 ```
 
-审查输出后，显式增加 `--write` 才会以 `600` 权限写入项目目录。后续按项目补充 gbrain slug 前缀、待办执行人、日程参与人、固定文档目标、精确测试命令、Git 远端和发布三联命令，再运行 `npm run projects:validate`。项目创建脚本不会自动授予这些能力。
+完整业务分支、状态机、项目执行泳道、记忆生命周期和发布恢复流程见[设计总览](./docs/设计总览.md)。
 
-## 生产要求
+## 适合什么场景
 
-- macOS，已登录钉钉桌面端。
-- Node.js 22.5 或更高版本。
-- DWS、Codex CLI、gbrain、`pg_dump` 和 `pg_restore`。默认从 `PATH` 查找 Codex 与 gbrain，也可以用 `CODEX_PATH`、`GBRAIN_PATH` 固定路径。gbrain 能力在新项目中默认关闭。
-- PostgreSQL 16 或 17。
-- DWS 和 Codex 的有效本机授权。
+| 场景 | AI 员工的处理方式 |
+|---|---|
+| 同事询问项目状态 | 检索已确认事实，生成可审阅回复草稿 |
+| 需求或方案请求 | 使用 Codex 完成分析、文档草稿和风险说明 |
+| 信息不完整 | 先生成追问草稿，确认发送后等待唯一相关补充消息 |
+| 项目执行 | 绑定项目能力清单，形成完整计划并按风险审批 |
+| 代码工作 | 在隔离 worktree 中应用补丁和运行固定测试，不直接合并 |
+| 钉钉办公动作 | 在固定人员、模板和目标范围内创建待办、日程、日志或文档 |
+| 生产发布 | 绑定完整提交、检查、安全扫描、备份、迁移、服务验证和回退边界 |
+| 长期项目协作 | 形成带来源和有效期的记忆候选，人工确认后按项目使用 |
 
-## 新环境向导
+## 与普通机器人的区别
 
-从仓库运行时，先执行本地只读检查：
+| 能力 | 普通聊天机器人 | AI 员工 |
+|---|---:|---:|
+| 判断什么时候不回复 | 通常依赖提示词 | 硬规则、模型复核与人工标注门禁 |
+| 连续消息理解 | 常按单条处理 | 3～8 秒有界合并窗口 |
+| 项目级权限 | 通常没有 | 项目、请求人、能力、范围、期限和预算 |
+| 高风险审批 | 简单确认 | 审批绑定完整计划哈希和授权快照 |
+| 外部动作可靠性 | 相信工具返回 | 副作用账本、幂等键和目标回读 |
+| 人工接管 | 容易与自动流程竞争 | 草稿、等待链和活动计划统一停止 |
+| 长期记忆 | 自动写入上下文 | 来源校验、候选确认、冲突替代和过期撤销 |
+| 生产发布 | 通常不覆盖 | 精确 SHA、云端门禁、备份、迁移和不可变版本 |
+
+## 当前能力
+
+当前版本已完成从消息监听到计划结果回传的技术闭环，但生产默认只开放 `draft_reply`。能力存在不等于当前环境已授权。
+
+| 模块 | 已实现 | 默认边界 |
+|---|---|---|
+| 消息入口 | DWS 拉取、白名单、群聊 `@我`、去重、补漏 | 不读取未授权会话 |
+| 草稿决策 | 不回复、追问、回复、能力自述、受控并发 | 只生成草稿 |
+| 人工控制 | 审批、拒绝、暂停、取消、人工接管、死亡任务处置 | 不自动处理异常任务 |
+| 项目执行 | 项目清单、计划、审批哈希、租约、次数预算 | 全局执行默认关闭 |
+| 工作适配器 | 研究、文档、代码、测试、Git、发布、钉钉办公动作 | 真实项目逐项授权 |
+| 正式记忆 | 自动候选、人工确认、冲突替代、过期、撤销、导出和擦除 | 不自动确认正式记忆 |
+| 可观测性 | 健康、告警、对账、人工质量、24 小时与 30 天 SLO | 未知值和样本不足均失败关闭 |
+| 生产运行 | PostgreSQL、9 个 LaunchAgent、加密备份、不可变发布 | 自动发送和计划执行单独放量 |
+
+详细能力、当前生产状态和未完成事项分别查看[能力清单与正式记忆](./docs/能力清单与正式记忆.md)与[完成度矩阵](./docs/完成度矩阵.md)。
+
+## 快速开始
+
+### 1. 本地验证代码
+
+这条路径不会连接你的钉钉、生产数据库或 Codex 账号：
+
+```bash
+git clone https://github.com/ruiwang20010702/ai-employee.git
+cd ai-employee
+npm ci
+npm run check
+```
+
+### 2. 检查运行环境
+
+AI 员工当前面向 macOS 登录会话，需要 Node.js 22.5+、PostgreSQL 16/17、已授权的 DWS 与 Codex CLI：
 
 ```bash
 npm run setup:check
 ```
 
-从真实 tarball、GitHub 或其他 npm 安装方式复用时，可以在自己的工作目录运行：
+`setup:check` 只检查依赖、配置权限和危险能力开关，不读取钉钉消息，不连接生产数据库，也不修改系统。
+
+### 3. 从固定版本复用
+
+在新的空白工作目录中固定到已经审核的完整提交：
 
 ```bash
 npm init -y
@@ -92,399 +130,122 @@ npx --no-install ai-employee secrets
 npx --no-install ai-employee secrets --apply
 ```
 
-安装时必须把占位内容替换为经过检查的完整 40 位提交编号，不使用会漂移的 `main` 作为生产版本。`check` 只检查 macOS、Node.js、DWS、Codex、PostgreSQL 工具、配置权限、必填项和危险能力开关，不连接钉钉、Codex 服务或数据库，也不输出配置值。`init` 默认只预览；只有 `init --apply` 才在当前工作目录创建权限为 `600` 的 `.runtime/production.json`，已有文件绝不覆盖。配置只保存当前工作区独有的钥匙串引用，不保存生成的密钥值。`secrets` 同样默认只预览，只有显式增加 `--apply` 才把四项独立随机密钥直接写入对应 macOS 钥匙串并逐项回读。重复执行会复用全部有效的既有项；只存在部分条目、内容无效或冲突时会在新增写入前停止。写入或后续配置提交失败会清理由本次调用创建的条目，无法确认清理时明确要求人工核对。数据库连接仍由接入人单独安全配置。
+必须把占位内容替换为经过检查的完整 40 位提交编号。初始化只把当前工作区独有的钥匙串引用写入权限为 `600` 的配置，不保存生成的生产密钥；已有配置绝不覆盖。所有写操作默认只预览，必须显式使用 `--apply`。
 
-填写配置并再次通过 `check` 后，安装包本身即可提供完整上线入口，不需要进入 `node_modules` 或源码仓库。带写入或外部消费的命令默认只返回计划，必须显式增加 `--apply`；`--dry-run` 可以让联网只读命令只展示将调用的包内脚本，不实际连接外部系统：
+## 生产要求
 
-```bash
-npx --no-install ai-employee preflight
-npx --no-install ai-employee backup
-npx --no-install ai-employee backup --apply
-npx --no-install ai-employee migrate
-npx --no-install ai-employee migrate --apply
-npx --no-install ai-employee doctor
-npx --no-install ai-employee probe
-npx --no-install ai-employee probe --apply
-npx --no-install ai-employee service install
-npx --no-install ai-employee service install --apply
-npx --no-install ai-employee service verify
-npx --no-install ai-employee verify
-npx --no-install ai-employee shadow
-```
-
-顺序不能省略：先只读预检，再显式备份和迁移，随后严格诊断、合成草稿探针、服务安装与验证。`probe --apply` 会产生一次固定合成 Codex 调用；不读取钉钉或数据库。直接 `service install --apply` 从当前安装包目录加载服务，适合首次接入；生产升级、不可变版本切换和自动回退仍须使用受控发布流程，不能把直接安装冒充版本化发布。`verify` 和 `shadow` 失败时只报告业务阻塞，不会自动处理死亡任务、打开发送或开启计划执行。
+- macOS 登录用户会话和钉钉桌面端。
+- Node.js 22.5 或更高版本。
+- PostgreSQL 16 或 17。
+- DWS、Codex CLI、`pg_dump` 和 `pg_restore`；使用知识页时还需要 gbrain。
+- 独立生产配置、macOS 钥匙串或受控环境变量，以及经过核实的监听范围。
 
 ## 首次部署
 
-1. 安装依赖：
-
-```bash
-npm ci
-```
-
-2. 创建 PostgreSQL。仓库提供了只监听本机端口的 Compose 配置：
-
-```bash
-mkdir -p .runtime/secrets
-openssl rand -hex 32 > .runtime/secrets/postgres_password
-chmod 600 .runtime/secrets/postgres_password
-docker compose -f deploy/postgres.compose.yml up -d
-```
-
-3. 初始化生产配置。脚本只生成当前工作区独有的四项钥匙串引用，以 `600` 权限创建文件，且绝不覆盖已有配置；随后单独预览并显式批准钥匙串写入：
-
-```bash
-npm run config:init
-npm run config:provision-keychain
-npm run config:provision-keychain -- --apply
-```
-
-已有环境需要轮换管理台令牌时，使用原子轮换命令。它先生成 `600` 权限配置快照，再写入两枚独立新令牌，输出中不包含令牌值：
-
-```bash
-npm run config:rotate-admin -- --yes
-```
-
-然后安全配置数据库连接，并编辑 `.runtime/production.json` 中列出的业务项：租户编号、监听对象、自身用户编号和操作人编号。也可以从[生产配置示例](./deploy/生产配置.example.json)手工创建；正式环境仍应使用外部密钥引用，不把数据密钥、备份密钥或管理令牌写进配置文件。
-
-生产配置中的密钥字段也支持外部引用，参考[外部密钥生产配置示例](./deploy/外部密钥生产配置.example.json)：
-
-- `env://变量名`：适合 CI、容器或由进程管理器注入的环境变量。
-- `keychain://服务名/账号名`：适合 macOS 登录钥匙串。
-
-引用只允许用于已登记密钥字段。任一密钥不存在、格式错误或钥匙串不可用时，整份配置都不会注入，服务直接停止；不会回退到明文或占位值。外部托管的管理令牌必须在原密钥库轮换，配置文件轮换命令会拒绝覆盖。
-
-GitHub“生产发布门禁”只核对不可变提交及云端“检查/安全扫描”，不读取生产配置，也不接触 Runner 或生产主机。实际发布只允许在已登录的 macOS 用户会话运行 `release:local`；发布器会拒绝生产配置中的任何内联密钥，并要求使用外部引用。
-
-macOS 上可先预览再迁移固定的 5 项生产密钥；命令会在变更期间创建受保护的临时回滚快照，逐项回读成功后才替换配置，并在提交成功后删除临时明文快照。失败时保留快照供人工恢复，恢复完成后必须单独安全处置：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run config:migrate-keychain
-
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run config:migrate-keychain -- --apply
-```
-
-4. 先运行迁移前只读预检。它检查配置、密钥、远程数据库 TLS、所需工具、Codex 登录与网络运行状态、项目能力清单、数据库连接和全部迁移版本及校验和，但允许把待迁移项作为明确计划列出：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run production:preflight
-```
-
-预检通过后先创建加密备份，再显式迁移数据库：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run db:backup
-
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run db:migrate
-```
-
-迁移后运行严格只读诊断；此时任何待迁移项或校验和漂移都会在查询业务表前停止：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run production:doctor
-```
-
-`production:preflight` 允许列出待迁移项；运行时、`production:doctor` 和 `shadow:verify` 不允许待迁移状态。从迁移 015 起还必须在 `db/migrations/兼容性策略.json` 登记服务回退证据；声明仅回退服务版本的迁移如果包含删除、重命名、改变既有结构或新增无默认值必填列，会在数据库写入前失败。首次部署或升级草稿 Schema 后，迁移与诊断通过还应人工运行一次合成草稿探针。它会调用一次 Codex，只使用固定测试消息，不读取钉钉或数据库，也不展示和保存回复内容：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run production:codex-probe
-```
-
-5. 安装并启动监听、Worker、默认休眠的计划执行器、健康检查、本机管理台、异常监测和每日备份：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run service:install
-```
-
-6. 先验证新版服务已经部署成功。这个检查会逐一核对 9 个 LaunchAgent 实际加载的脚本、共享启动器组件参数、工作目录和生产配置都精确属于目标不可变版本，同时要求健康进程、管理台、数据库、DWS、Codex、组件心跳、外部检查和消息覆盖均可用，并继续拒绝未知发送和过期执行租约；既有死亡任务会被如实报告，但不会把服务升级误判为失败：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run production:service-verify
-```
-
-随后单独运行严格业务就绪检查。死亡任务、失败或执行中的计划、人工暂停及其他业务阻塞都会让它失败，不能用服务部署成功代替：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run production:verify
-```
-
-真实发送保持关闭时，还可以执行只读影子验收。它会统一检查健康、异常任务、人工质量、30 天可用性、消息发现与覆盖、低风险成功率和草稿耗时；任何指标未知、窗口不完整或未达标都失败关闭。它不会运行 Codex 或修改数据库：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-npm run shadow:verify
-```
-
-在管理台“判断质量”中可以连续处理优先人工复核队列，并按私聊/群聊、联系人或群、判断来源查看误判。所有标注选项都在页面内完成，不再依赖系统弹窗；“消息草稿”只展示已有标签，避免出现第二套标注入口。第一步只判断对方是否需要得到回应；如果需要回应且 AI 已生成非空草稿，页面进入第二步，再评价草稿能否直接使用。回应分歧和草稿问题分别选择原因，保存期间控件会禁用以防重复提交。回应标签绑定判断哈希，草稿评价另行绑定实际草稿哈希：草稿变化只会要求重新评价草稿，不会抹掉仍然有效的回应判断；没有实际草稿时不会要求虚构草稿评价。服务端拒绝旧页面或直接接口用自由文本 `note` 绕过结构化原因和草稿评价。历史自由文本分歧会重新进入队列，不参与准确率；未绑定草稿哈希的旧草稿评价也不会进入草稿质量门槛。优先队列用于先发现高风险问题，不能替代覆盖性抽样。也可以使用命令行：
-
-首次参与标注时先阅读[人工判断标注操作手册](./docs/人工判断标注操作手册.md)，统一“是否需要回应”和“草稿质量”的口径。命令行示例分别表示“AI 建议回应且草稿可直接使用”和“AI 建议回应但人工认为无需回应”；实际参数必须与当前 AI 判断匹配，日常标注优先使用管理台。
-
-```bash
-npm run control -- review-label <任务编号> reply --draft usable
-npm run control -- review-label <任务编号> no-reply --response-reason closed_loop
-npm run quality:report
-```
-
-没有足够回应判断或草稿评价、分层覆盖不足、草稿可用率未达标，标签已因判断/草稿变化而失效，或任一长期 SLO 未通过时，影子验收都会明确失败。`quality:report` 使用数据库强制只读会话；不能用进程健康、单一类型样本或 AI 自评代替人工质量判断。
-
-恢复演练使用随机命名的隔离数据库，验证后自动删除隔离库，不覆盖生产库：
-
-```bash
-AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json" \
-  npm run db:restore:drill
-```
-
-正式升级使用已登录的 macOS 用户会话执行固定提交发布。第一次命令只展示计划，不连接生产；人工核对后才在同一条命令末尾增加 `--apply`。目标必须是完整 40 位提交、属于最新 `origin/main` 历史（或清单固定回退基线），且该提交的 GitHub“检查”和“安全扫描”都已成功：
-
-```bash
-npm run release:local -- \
-  --sha REPLACE_WITH_APPROVED_FULL_SHA \
-  --root /absolute/path/ai-employee-production \
-  --config /absolute/path/production.json
-
-npm run release:local -- \
-  --sha REPLACE_WITH_APPROVED_FULL_SHA \
-  --root /absolute/path/ai-employee-production \
-  --config /absolute/path/production.json \
-  --apply
-```
-
-发布器先完成云端门禁，再准备不可变目录、备份和前向迁移；服务切换失败只在状态保护通过后恢复上一版本服务，绝不自动恢复数据库或执行反向迁移。发布成功也不会自动开启发送、计划执行或处理死亡任务。
-
-若目标包含第 018 号迁移而上一版本不包含，普通发布会在生产动作前阻断，因为迁移后不能恢复不支持持久次数预算的旧服务。此时只能在负责人明确接受“失败保持暂停、只向前修复”后，按[生产运维手册的维护前滚流程](./docs/生产运维手册.md#41-第-018-号迁移的维护前滚)执行。维护入口强制绑定完整目标 SHA，先暂停并核对零在途，再停旧服务、完成加密备份及隔离恢复演练，最后迁移和安装目标服务；成功后仍保持暂停，必须独立回验后再恢复。
-
-完整部署、升级、回滚、备份和恢复方法见[生产运维手册](./docs/生产运维手册.md)。
-
-## 日常操作
-
-以下命令都使用同一份生产配置：
+完整说明见[生产运维手册](./docs/生产运维手册.md)。安全顺序不能省略：
 
 ```bash
 export AI_EMPLOYEE_CONFIG_FILE="$PWD/.runtime/production.json"
+npm ci
+npm run production:preflight
+npm run db:backup
+npm run db:migrate
+npm run production:doctor
+npm run production:codex-probe
+npm run service:install
+npm run production:service-verify
+npm run production:verify
+npm run shadow:verify
 ```
 
-查看任务：
+- `production:preflight` 与 `production:doctor` 都是只读检查，只有 `db:migrate` 修改数据库结构。
+- `production:service-verify` 证明目标版本服务可以承载运行；`production:verify` 判断当前业务状态是否真正就绪。
+- `shadow:verify` 还要求人工质量、长期 SLO、副作用可靠性和记忆冲突全部达标。
+- 真实发送、计划执行和生产发布始终需要独立授权，技术部署成功不会自动放量。
+
+## 日常操作
 
 ```bash
-npm run control -- list
-npm run control -- list awaiting_approval
-npm run control -- show <任务ID>
-```
+# 查看系统状态
+npm run control -- status
 
-更新监听白名单（只显示数量，不输出联系人 ID）：
+# 查看待审批草稿
+npm run control -- drafts
 
-```bash
-# 先预览；省略的范围保持不变
-npm run targets:update -- --users "用户ID1,用户ID2" --dry-run
-
-# 正式更新；空字符串可明确清空群聊白名单
-npm run targets:update -- --users "用户ID1,用户ID2" --groups ""
-```
-
-更新配置后执行 `npm run service:install` 让常驻服务重新加载。
-
-管理台“监听范围”只展示已配置私聊联系人和群聊的数量、HMAC 指纹、触发规则、回复能力状态及暂停状态，不返回真实钉钉编号。它可以暂停或恢复现有对象，但不能新增、删除或替换白名单；范围变更仍只能使用上述受控命令并重载服务。
-
-批准、拒绝或重试：
-
-```bash
-npm run control -- approve <任务ID> "同意发送"
-npm run control -- reject <任务ID> "改为人工回复"
-npm run control -- retry <任务ID>
-```
-
-修订工作计划时，先用 `plan-show` 导出旧计划，修改目标或步骤后通过标准输入提交。旧计划只允许在“待审批”或“已拒绝”状态修订；成功后立即变为“已替代”，新计划获得新编号和新哈希，并强制重新审批：
-
-```bash
-npm run control -- plan-show <旧计划ID>
-npm run control -- plan-revise <旧计划ID> <项目能力清单路径> < 修订后的计划.json
-```
-
-也可以在本机管理台点击“修订”，编辑目标和完整步骤。计划来源、请求人和项目不能被修改；已经批准或开始执行的计划必须先按取消流程处理，不能原地改写。
-
-暂停和恢复：
-
-```bash
-npm run control -- pause
-npm run control -- resume
-npm run control -- scope-pause contact <联系人账号> <原因>
-npm run control -- scope-pause group <群聊编号> <原因>
-npm run control -- scope-pause project <项目编号> <原因>
-npm run control -- scope-pause capability <能力名称> <原因>
-npm run control -- scope-list
-npm run control -- scope-resume <contact|group|project|capability> <对象>
-```
-
-联系人或群聊暂停会延后草稿生成和已批准发送且不消耗重试次数；项目暂停会阻止新计划提案和领取；能力暂停会阻止包含该能力的计划开始。执行中的计划在当前外部副作用安全验收后停在下一步，恢复后继续，不自动重放已经发生的动作。
-
-管理台“人工接管”会把计划转换为可操作状态：可安全请求中断、正在请求中断、外部动作安全收尾、已确认中断、租约过期需核对。只有出现 `operator_interrupt_confirmed` 证据时才显示“已确认中断”；外部副作用没有确认前禁止重复执行或直接重试。
-
-发送结果未知时必须先人工核对钉钉：
-
-```bash
-# 已经发出
-npm run control -- resolve-sent <任务ID>
-
-# 确认没有发出，允许继续使用原幂等键
-npm run control -- resolve-not-sent <任务ID>
-```
-
-正式记忆的纠正、导出和删除：
-
-```bash
-# 用新事实替代旧事实
-npm run control -- memory-confirm <新记忆ID> <旧记忆ID>
-
-# 默认安全的元数据导出
-npm run control -- memory-export /绝对路径/记忆元数据.json all metadata
-
-# 包含正文时必须明确确认
-npm run control -- memory-export /绝对路径/项目记忆.json <项目编号> content EXPORT-CONTENT
-
-# 永久删除分为预览确认值和执行两步
-npm run control -- memory-delete-preview <记忆ID>
-npm run control -- memory-delete <记忆ID> <确认值>
-
-# 立即复核一条或全部 gbrain 记忆来源；后台默认每 5 分钟自动执行
-npm run control -- memory-source-check <记忆ID>
-npm run memory:sources
-```
-
-导出文件权限为 `600` 且不会覆盖已有文件。永久删除会擦除业务正文和来源等敏感字段，只保留无正文墓碑与审计事件，无法恢复；因此本机管理台只展示来源和支持撤销，不提供一键永久删除。
-
-完整业务数据可以按人、项目或绝对截止时间受控擦除。选择器经标准输入传递且每次只能选择一个范围；先预览数量并取得与当前数据快照绑定的确认值，再执行同一选择器。活动任务、活动计划、待处理消息或仍生效的暂停范围会阻止整批操作。项目范围不会删除项目能力清单、工作目录或外部系统数据：
-
-本机管理台的“数据删除预览”可选择人员、项目或本地截止时间，只返回脱敏指纹、分类数量、阻塞原因和快照确认值。预览也需要只读与写入双令牌，因为它会扫描敏感数据范围；范围值只存在于当前输入框，不写入页面状态，也不会出现在结果中。管理服务刻意不提供删除接口，复制确认值并不执行删除，生产擦除仍必须针对具体范围另行授权后使用命令行。
-
-```bash
-printf '%s' '{"projectId":"项目编号"}' |
-  npm run control -- privacy-delete-preview
-
-printf '%s' '{"projectId":"项目编号"}' |
-  npm run control -- privacy-delete 'ERASE-预览返回值'
-```
-
-执行不可恢复，生产环境必须另行取得针对具体范围的删除授权；数据库迁移或部署授权不等于数据删除授权。
-
-gbrain 来源的记忆只能使用 `project` 或 `knowledge` 类型并绑定明确项目。系统核对项目仍授权 `knowledge_read`、精确 slug 仍在白名单、页面仍可读取且来源版本未变化后，才签发最长 15 分钟且不超过项目授权期限的访问租约；租约到期会立即停止参与工作，授权移除、页面不可读或版本变化由 5 分钟复核传播。短暂故障不会删除记忆，权限恢复后可重新验证；版本变化必须创建新候选并显式替代旧事实。
-
-健康检查和指标：
-
-```bash
-npm run health
-curl http://127.0.0.1:9464/live
-curl http://127.0.0.1:9464/ready
-curl http://127.0.0.1:9464/metrics
-```
-
-管理台“运营指标”和 `/metrics` 使用最近 24 小时真实记录计算消息发现、真实漏检、任务和副作用指标，并使用分钟采样计算滚动 30 天入口可用性。入口同一分钟任一次异常或整分钟缺测都计为不可用，未积满 30 天只展示观察值，不能宣称达到 99.5%。独立对账每小时比较消息源与数据库，自动回补本地漏项且不发送钉钉消息；报告只保存数量、比例和时间窗。成功率、草稿产出、全流程和审批分别展示各自样本数；无样本明确显示未知。单次窗口超过 10,000 条时标记数据不完整，不能据此声称 SLO 达标。`/ready` 不执行需要解密任务的统计查询，但可将消息源对账作为生产门禁。
-
-本机管理台默认位于 `http://127.0.0.1:9465`。进入后输入生产配置里的只读令牌；需要暂停、审批、修订或撤销时再输入另一枚写入令牌。令牌仅保存在当前浏览器标签页的 `sessionStorage`，管理台固定只监听回环地址。“监听范围”只返回稳定 HMAC 指纹；私聊规则为白名单新消息，群聊规则为白名单群中结构化确认 `@我`，但 `@我` 仍会继续经过“不回复”判断。草稿审批会展示实际回复、风险与原因，并绑定草稿哈希；计划审批会展示全部步骤、输入、验收和回滚，L3/L4 还需输入计划哈希末 8 位。内容变化后旧页面不能继续批准，必须刷新重审。
-
-需要把异常发送到外部值班系统时，额外配置 HTTPS Webhook 和独立签名密钥：
-
-```json
-{
-  "AI_EMPLOYEE_ALERT_WEBHOOK_URL": "https://monitor.example/ai-employee",
-  "AI_EMPLOYEE_ALERT_WEBHOOK_SECRET": "keychain://ai-employee-production/alert-webhook-secret"
-}
-```
-
-Webhook 只包含健康状态码、时间和队列计数，不包含联系人、消息、草稿、任务 ID、数据库地址或项目内容。未配置网址时只写本机日志与检查点。
-
-校验项目能力清单和完整任务计划：
-
-```bash
+# 校验项目能力清单
 npm run projects:validate
-npm run plan:check -- .runtime/projects/项目.json < deploy/任务计划.example.json
+
+# 生成只读质量报告
+npm run quality:report
+
+# 打开本机管理台
+npm run admin:serve
 ```
 
-项目交付计划采用固定链路：补丁先在只读 Codex 中生成并校验，再进入隔离 worktree 创建本地提交。工作树创建后会对齐已批准的源提交、刷新索引并确认干净，再执行索引级补丁预检；失败时只清理本次操作创建的工作树、分支和空运行目录。测试命令不能由消息临时提供，只能引用项目清单中的 `commandId`。Git 推送固定远端地址和 `ai-employee/` 分支前缀，生产发布必须同时登记发布、验收和回滚命令。任何项目授权或命令定义变化都会改变计划哈希，使旧审批失效。
+也可以安装仓库内的只读 Codex 插件，在 Codex 中查看健康、待审批草稿、工作计划、人工接管和能力状态。插件不能批准、发送、执行、部署或扩大权限。
 
-当回复判断识别到“研究、写方案、改代码、测试、推送、上线”等明确工作请求，且生产能力包含 `work_plan_proposal` 时，Worker 会匹配请求人有权访问的项目，并用只读 Codex 生成计划提案。没有授权项目时拒绝；同时匹配多个项目且消息未明确项目时不猜测。计划只进入现有 `ready` 或 `awaiting_approval` 状态，不会被 Worker 自动执行。
+## 架构
 
-## 开启真实发送
-
-先在草稿模式验收，再把生产配置中的能力改为：
-
-```json
-{
-  "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply,send_message"
-}
+```mermaid
+flowchart LR
+    DT["DingTalk"] --> SIG["活动信号"]
+    SIG --> DWS["DWS 消息事实"]
+    DWS --> DB[("PostgreSQL")]
+    DB --> WORKER["草稿 Worker"]
+    WORKER --> CODEX["Codex"]
+    DB --> EXEC["计划执行器"]
+    EXEC --> TOOLS["DWS / Git / 测试 / 发布"]
+    TOOLS --> VERIFY["目标回读验证"]
+    VERIFY --> DB
+    DB --> ADMIN["本机管理台"]
+    ADMIN --> MCP["只读 Codex 插件"]
 ```
 
-并确保 `DINGTALK_SELF_USER_ID` 正确，然后重启服务。发送仍然必须逐任务批准；系统不会获得永久发送许可。
+系统采用默认拒绝、消息与慢任务解耦、至少一次接收和效果上恰好一次的设计。技术细节见[生产级技术设计](./docs/技术设计文档.md)。
 
-## 不回复规则
+## 安全模型
 
-- “收到”“好的”“谢谢”等确认或闭环。
-- 明确表示“不用回”“你先忙”“晚点再说”。
-- 只有表情或附件占位。
-- 可识别的自动通知和重复回执。
-- 合并后仍缺少语义的极短片段。
-- 负责人已经人工回复。
+- 生产默认只有草稿能力，发送和计划执行分别受全局开关控制。
+- 消息内容不能授予能力，模型输出不能直接调用高风险工具。
+- 正文、草稿、审批理由、任务载荷和发送回执使用 AES-256-GCM 字段级加密。
+- Codex 和工具子进程只获得最小环境，不继承数据库、数据密钥和管理令牌。
+- 外部副作用在调用前登记执行意图，结果未知时禁止自动重试。
+- 管理台只监听本机，读写令牌分离，不提供扩权入口。
+- 生产发布固定仓库身份、完整提交、云端门禁和不可变版本目录。
 
-Worker 每分钟复查待审批草稿：如果检测到当前账号已在同一会话中、原消息之后人工回复，会把草稿自动标记为“人工已回复并取消”，私聊和白名单群聊均适用。
+请通过 GitHub Security Advisory 私下报告漏洞，不要在公开 Issue 中提交凭据、真实联系人或消息正文。详见[安全策略](./SECURITY.md)。
 
-待审批草稿默认 2 小时后自动失效，避免旧草稿被误批准。人工回复复查会分页覆盖全部仍有效的待审批任务，不受前 100 条限制。
+## 路线图
 
-群聊采用更严格的边界：只读取 `DINGTALK_TARGET_GROUP_IDS` 白名单群中结构化的 `@我` 消息。被 @ 只代表进入判断，并不代表一定回复；仅抄送、公告、闲聊、别人已经回答或没有明确问题时仍不回复。群聊发送使用独立的 `send_group_message` 能力，默认关闭。
+- [x] 可靠钉钉消息入口、草稿决策与人工审批
+- [x] 项目能力网关、工作计划、执行证据与结果回传
+- [x] 正式记忆、人工接管、SLO 和不可变生产发布
+- [ ] 无需真实钉钉账号的交互式演示模式
+- [ ] 更易安装的桌面发行包
+- [ ] 通用消息适配器接口与更多协作平台
+- [ ] 英文使用文档和社区案例库
 
-为避免服务首次启动时对历史消息“补回复”，超过 `AI_EMPLOYEE_REPLY_MAX_AGE_MS`（默认 2 小时）的消息只归档为不回复。
-
-其他消息进入上下文复核，避免仅凭关键词漏掉真实任务。
-
-## 安全与可靠性
-
-- 生产代码只使用 PostgreSQL；SQLite 仅保留为快速单元测试适配器，不会被生产入口加载，也不会进入发布包。
-- 正文、任务载荷、草稿、审批原因和发送回执使用 AES-256-GCM 字段级加密。
-- 配置文件必须为 `600`；日志不输出正文和真实联系人 ID。
-- Codex 子进程只继承登录、网络和临时目录所需环境，不继承数据库、钉钉或管理密钥。
-- DWS 活动文件只作为唤醒信号，消息事实仍通过 DWS 获取。
-- 群聊不调用当前账号无权限的完整历史接口；草稿只使用本次 `@我` 消息，避免持续失败和越权读取。
-- 任务使用数据库租约和 `FOR UPDATE SKIP LOCKED`，进程崩溃后可恢复。
-- 外发使用稳定幂等键；结果未知时转人工核对。
-- 每日备份由不同密钥加密，恢复必须显式确认目标数据库。
-- 非本机健康端口必须配置 Bearer Token。
-- 管理台始终只监听本机，并强制使用相互独立的读、写令牌；页面没有执行计划和发送消息按钮。
-- 外部告警必须使用 HTTPS 和 HMAC-SHA256 签名，正文保持脱敏。
-
-更完整的边界见[安全说明](./安全说明.md)。
-
-## 验证
-
-```bash
-npm run check
-npm run check:full
-npm run check:security
-npm pack --dry-run
-npm run reuse:verify
-```
-
-`check:full` 会在本机创建仅监听回环地址的随机 PostgreSQL 临时实例，清除子进程中的生产连接和业务密钥，只把临时测试库注入测试进程，结束后停止实例并清理专用临时目录。默认通过 `pg_config` 或 Homebrew 查找 PostgreSQL；需要指定版本时使用 `PG_TEST_BIN=/绝对路径/bin npm run check:full`。`reuse:verify` 会真实生成 tarball、安装到两个空白工作区，验证初始化和 11 个上线入口的预览模式、全部迁移清单与零生命周期写入；它不会连接生产数据库、钉钉或 Codex。GitHub 检查会在 Node.js 22 和 24 上启动真实 PostgreSQL 16，执行仓库当前全部迁移、并发租约、审批、幂等和加密集成测试，并从固定 14 迁移基线验证旧服务兼容，证明服务回退不依赖反向修改数据库。
-
-`npm run rollback:verify` 只接受本机且名称带 `ai_employee_test` 边界的 PostgreSQL 测试库，拒绝生产地址；日常无需手工运行，云端检查会自动执行。
-
-推送完成后运行 `npm run ci:verify`。它先确认工作区干净、本地提交与远端当前分支一致；若当前提交已有“检查”和“安全扫描”则复用并等待，否则显式触发缺失工作流。最终结果必须同时是成功状态且提交编号完全一致，避免误用旧提交的绿色结果。
+路线图不构成已发布能力承诺；当前状态以[完成度矩阵](./docs/完成度矩阵.md)为准。
 
 ## 文档
 
-- [产品需求文档](./docs/产品需求文档.md)
-- [设计总览](./docs/设计总览.md)
-- [技术设计文档](./docs/技术设计文档.md)
-- [生产运维手册](./docs/生产运维手册.md)
-- [安全说明](./安全说明.md)
+| 文档 | 适合谁 | 内容 |
+|---|---|---|
+| [设计总览](./docs/设计总览.md) | 所有人 | 产品定位、能力、原则和当前状态 |
+| [产品需求文档](./docs/产品需求文档.md) | 产品与业务 | 场景、规则、边界和验收指标 |
+| [技术设计文档](./docs/技术设计文档.md) | 研发与测试 | 架构、状态机、可靠性和安全实现 |
+| [生产运维手册](./docs/生产运维手册.md) | 运维与负责人 | 配置、部署、监控、备份和恢复 |
+| [人工判断标注手册](./docs/人工判断标注操作手册.md) | 运营与标注人员 | 回应必要性和草稿质量口径 |
+| [安全说明](./安全说明.md) | 安全审查人员 | 数据边界、密钥、报告渠道和风险 |
+
+## 参与贡献
+
+欢迎提交问题、使用案例、文档改进和代码贡献。开始之前请阅读[贡献指南](./CONTRIBUTING.md)和[行为准则](./CODE_OF_CONDUCT.md)。
+
+- 不要在 Issue、PR、截图或测试夹具中包含真实消息、人员编号、令牌或公司内部资料。
+- 新能力必须有明确边界、反向测试、目标回读和失败处理。
+- 适合第一次贡献的任务会标记为 `good first issue`。
 
 ## 许可证
 
-本项目采用 [MIT 许可证](./许可证.md)，允许在保留版权和许可声明的前提下使用、修改和分发。`private: true` 仅用于防止误发布到 npm，不影响 Git 仓库代码复用。
+本项目采用 [MIT License](./LICENSE)。`private: true` 仅用于防止误发布到 npm，不影响 Git 仓库代码复用。

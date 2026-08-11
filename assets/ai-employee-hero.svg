@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="640" viewBox="0 0 1440 640" role="img" aria-labelledby="title desc">
+  <title id="title">AI 员工</title>
+  <desc id="desc">一个安全、可审批、会执行、能验证结果的钉钉 AI 员工运行时</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#0b1f38"/>
+      <stop offset="1" stop-color="#102c44"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#53a7ff"/>
+      <stop offset="1" stop-color="#53e3c2"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+  </defs>
+  <rect width="1440" height="640" rx="32" fill="url(#bg)"/>
+  <circle cx="1190" cy="96" r="220" fill="#1f7aff" opacity="0.12" filter="url(#glow)"/>
+  <circle cx="1060" cy="560" r="250" fill="#37d7b5" opacity="0.09" filter="url(#glow)"/>
+
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+    <rect x="86" y="72" width="170" height="42" rx="21" fill="#122d49" stroke="#2e6d9c"/>
+    <circle cx="111" cy="93" r="6" fill="#53e3c2"/>
+    <text x="129" y="100" fill="#b8d4ea" font-size="18" font-weight="600">Safety-first</text>
+
+    <text x="84" y="220" fill="#ffffff" font-size="78" font-weight="760" letter-spacing="2">AI 员工</text>
+    <text x="86" y="276" fill="#9fc2df" font-size="26">DingTalk work, governed like production software.</text>
+    <text x="86" y="332" fill="#dcebf7" font-size="26">消息 → 判断 → 审批 → 执行 → 验证 → 记忆</text>
+
+    <g transform="translate(86 396)">
+      <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
+      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">DWS</text>
+      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">真实钉钉入口</text>
+    </g>
+    <g transform="translate(316 396)">
+      <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
+      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">Codex</text>
+      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">方案、文档与代码</text>
+    </g>
+    <g transform="translate(546 396)">
+      <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
+      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">PostgreSQL</text>
+      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">状态、证据与审计</text>
+    </g>
+
+    <g transform="translate(890 142)">
+      <path d="M110 0L220 62v124l-110 62L0 186V62z" fill="#0e2943" stroke="url(#accent)" stroke-width="3"/>
+      <path d="M110 38l74 42v86l-74 42-74-42V80z" fill="#102f4d" stroke="#2f739e"/>
+      <circle cx="110" cy="123" r="44" fill="none" stroke="#53e3c2" stroke-width="8" stroke-dasharray="45 14"/>
+      <circle cx="110" cy="123" r="13" fill="#53a7ff"/>
+      <path d="M110 61v24M110 161v24M48 123h24M148 123h24" stroke="#d4edff" stroke-width="6" stroke-linecap="round"/>
+    </g>
+
+    <g transform="translate(840 454)">
+      <rect width="440" height="82" rx="20" fill="#0a2035" stroke="#235a7e"/>
+      <circle cx="42" cy="41" r="16" fill="#163852" stroke="#53e3c2" stroke-width="3"/>
+      <path d="M35 41l5 5 10-12" fill="none" stroke="#53e3c2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="76" y="35" fill="#ffffff" font-size="18" font-weight="700">Human approval before side effects</text>
+      <text x="76" y="59" fill="#8fb4d2" font-size="15">默认草稿模式 · 结果回读 · 可暂停 · 可审计</text>
+    </g>
+  </g>
+  <rect x="0" y="624" width="1440" height="16" fill="url(#accent)" opacity="0.85"/>
+</svg>
