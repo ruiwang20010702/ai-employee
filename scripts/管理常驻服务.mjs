@@ -165,7 +165,7 @@ export async function validateServiceConfig({
   });
 }
 
-async function generate() {
+async function generate({ report = true } = {}) {
   await validateServiceConfig();
   await mkdir(generatedDirectory, { recursive: true, mode: 0o700 });
   await mkdir(logsDirectory, { recursive: true, mode: 0o700 });
@@ -181,13 +181,15 @@ async function generate() {
     const destination = join(generatedDirectory, `${service.label}.plist`);
     await writeFile(destination, plist(service), { mode: 0o600 });
   }
-  console.log(
-    JSON.stringify({
-      generatedDirectory,
-      configPath,
-      services: serviceDefinitions.map((service) => service.label),
-    }),
-  );
+  if (report) {
+    console.log(
+      JSON.stringify({
+        generatedDirectory,
+        configPath,
+        services: serviceDefinitions.map((service) => service.label),
+      }),
+    );
+  }
 }
 
 export async function restoreLaunchAgents({
@@ -365,7 +367,7 @@ async function install() {
 }
 
 async function installForwardOnly() {
-  await generate();
+  await generate({ report: false });
   await mkdir(launchAgentsDirectory, { recursive: true });
   const forensicDirectory = join(
     runtimeDirectory,
