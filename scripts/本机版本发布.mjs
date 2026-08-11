@@ -654,7 +654,7 @@ async function syncDirectory(directory) {
   }
 }
 
-function releaseIntegrityDigest(entries) {
+export function releaseIntegrityDigest(entries) {
   return createHash("sha256")
     .update(JSON.stringify(entries))
     .digest("hex");
@@ -940,6 +940,51 @@ export async function updatePendingReleaseJournal({
       ...existing,
       phase,
       ...(backupEvidence ?? {}),
+    },
+    { replaceToken: token },
+  );
+}
+
+export async function retargetPendingForwardReleaseJournal({
+  root: rootInput,
+  token,
+  fromSha,
+  sha,
+  runId,
+  attempt,
+  targetRelease,
+  integrityDigest,
+  targetConfigDigest,
+  targetIdentityDigest,
+  now = () => new Date(),
+} = {}) {
+  const root = await realpath(deploymentRoot(rootInput)).catch(() => {
+    throw new Error("生产发布根目录不可读取");
+  });
+  const existing = await inspectPendingReleaseJournal({ root });
+  if (!existing || existing.token !== token) {
+    throw new Error("中断发布记录已变化，拒绝更换前滚目标");
+  }
+  if (
+    existing.mode !== "forward_only" ||
+    existing.phase !== "forward_migrated" ||
+    existing.sha !== validateCommitSha(fromSha) ||
+    existing.sha === validateCommitSha(sha)
+  ) {
+    throw new Error("只有迁移完成且目标失败的维护前滚记录可以更换目标");
+  }
+  return atomicWritePendingRelease(
+    root,
+    {
+      ...existing,
+      sha,
+      runId: String(runId),
+      attempt: String(attempt),
+      targetRelease,
+      integrityDigest,
+      targetConfigDigest,
+      targetIdentityDigest,
+      createdAt: now().toISOString(),
     },
     { replaceToken: token },
   );

@@ -11,11 +11,9 @@ test("draft schema is strict and models optional work requests as null", async (
     Object.keys(schema.properties).sort(),
   );
   assert.equal(schema.additionalProperties, false);
-  assert.equal(
-    schema.allOf[0].if.properties.workRequest.properties.requested.const,
-    true,
-  );
-  assert.equal(schema.allOf[0].then.properties.shouldReply.const, true);
+  assert.equal(Object.hasOwn(schema, "allOf"), false);
+  assert.equal(Object.hasOwn(schema, "if"), false);
+  assert.equal(Object.hasOwn(schema, "then"), false);
   assert.ok(schema.properties.workRequest.anyOf.some(
     (variant) => variant.type === "null",
   ));

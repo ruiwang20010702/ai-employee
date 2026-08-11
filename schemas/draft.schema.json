@@ -3,27 +3,6 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["shouldReply", "reply", "confidence", "riskLevel", "reason", "needsInformation", "relatedToWaitingTask", "workRequest", "memoryCandidates"],
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "workRequest": {
-            "type": "object",
-            "required": ["requested"],
-            "properties": {
-              "requested": { "const": true }
-            }
-          }
-        },
-        "required": ["workRequest"]
-      },
-      "then": {
-        "properties": {
-          "shouldReply": { "const": true }
-        }
-      }
-    }
-  ],
   "properties": {
     "shouldReply": {
       "type": "boolean"

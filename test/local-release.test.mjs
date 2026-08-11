@@ -34,6 +34,8 @@ import {
   productionGitHubArguments,
   productionRepository,
   releaseVerificationEnvironment,
+  releaseIntegrityDigest,
+  retargetPendingForwardReleaseJournal,
   reconcilePendingLocalRelease,
   resolveTrustedReleaseTool,
   runLocalAtomicRelease,
@@ -936,6 +938,94 @@ test("维护前滚 journal 绑定 600 权限备份与元数据摘要并拒绝篡
     /前滚备份证据已发生变化/u,
   );
   assert.equal((await lstat(join(root, ".pending-release.json"))).isFile(), true);
+});
+
+test("迁移完成后的维护前滚记录只能原子更换为新的不可变目标", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-forward-retarget-")),
+  );
+  const root = join(directory, "ai-employee-production");
+  await mkdir(join(root, "releases"), { recursive: true, mode: 0o700 });
+  const previousRelease = await createProtectedRelease(
+    root,
+    `${previousSha}-100-1`,
+  );
+  const oldTarget = await createProtectedRelease(root, `${sha}-101-1`);
+  const nextSha = "d".repeat(40);
+  const nextTarget = await createProtectedRelease(root, `${nextSha}-102-1`);
+  const backupDirectory = join(root, "backups");
+  await mkdir(backupDirectory, { mode: 0o700 });
+  const backupPath = join(backupDirectory, "forward.dump.enc");
+  const metadataPath = `${backupPath}.json`;
+  await writeFile(backupPath, "encrypted-backup", { mode: 0o600 });
+  await writeFile(metadataPath, "{}\n", { mode: 0o600 });
+  await chmod(backupPath, 0o600);
+  await chmod(metadataPath, 0o600);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  const created = await writePendingReleaseJournal({
+    root,
+    sha,
+    runId: "101",
+    attempt: "1",
+    previousRelease,
+    targetRelease: oldTarget,
+    previousSha,
+    ...pendingDigests,
+    mode: "forward_only",
+    phase: "forward_prepared",
+  });
+  const evidence = await captureForwardBackupEvidence({
+    root,
+    backupRoot: backupDirectory,
+    backupPath,
+    metadataPath,
+  });
+  const backedUp = await updatePendingReleaseJournal({
+    root,
+    token: created.token,
+    phase: "forward_backup_verified",
+    backupEvidence: evidence,
+  });
+  const migrated = await updatePendingReleaseJournal({
+    root,
+    token: backedUp.token,
+    phase: "forward_migrated",
+  });
+  const retargeted = await retargetPendingForwardReleaseJournal({
+    root,
+    token: migrated.token,
+    fromSha: sha,
+    sha: nextSha,
+    runId: "102",
+    attempt: "1",
+    targetRelease: nextTarget,
+    integrityDigest: "9".repeat(64),
+    targetConfigDigest: pendingDigests.targetConfigDigest,
+    targetIdentityDigest: pendingDigests.targetIdentityDigest,
+  });
+
+  assert.equal(retargeted.phase, "forward_migrated");
+  assert.equal(retargeted.sha, nextSha);
+  assert.equal(retargeted.targetRelease, nextTarget);
+  assert.equal(retargeted.backupDigest, evidence.backupDigest);
+  assert.equal(retargeted.previousRelease, previousRelease);
+  await assert.rejects(
+    retargetPendingForwardReleaseJournal({
+      root,
+      token: retargeted.token,
+      fromSha: "f".repeat(40),
+      sha: "e".repeat(40),
+      runId: "103",
+      attempt: "1",
+      targetRelease: nextTarget,
+      integrityDigest: "8".repeat(64),
+      targetConfigDigest: pendingDigests.targetConfigDigest,
+      targetIdentityDigest: pendingDigests.targetIdentityDigest,
+    }),
+    /只有迁移完成且目标失败/u,
+  );
+  assert.equal(releaseIntegrityDigest([]), createHash("sha256").update("[]").digest("hex"));
 });
 
 test("中断发布记录权限变宽后必须保留现场并拒绝读取", async (t) => {
