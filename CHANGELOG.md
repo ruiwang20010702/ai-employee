@@ -1,44 +1,46 @@
-# 更新日志
+# Changelog
 
-本项目的重要变化记录在此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。
+**English** · [简体中文](./CHANGELOG_ZH.md)
 
-## [未发布]
+Notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow Semantic Versioning.
 
-### 计划中
+## [Unreleased]
 
-- 无需真实钉钉账号的交互式演示模式。
-- 更易安装的桌面发行包和社区案例库。
+### Planned
+
+- An interactive demo that does not require a real DingTalk account.
+- Easier desktop distribution and a community example library.
 
 ## [0.3.0] - 2026-08-11
 
-### 新增
+### Added
 
-- 项目能力清单、工作计划、审批哈希、租约和持久次数预算。
-- 来源绑定的正式记忆候选、人工确认、冲突替代、有效期、撤销和隐私擦除。
-- 信息不足等待链、连续消息有界合并和跨状态人工接管。
-- 钉钉办公动作、代码工作和生产发布适配器的目标回读验证。
-- PostgreSQL 生产存储、字段级加密、备份恢复、健康告警和 SLO 验收。
-- 精确提交门禁、不可变版本目录、崩溃恢复日志和前滚迁移边界。
+- Project capability manifests, work plans, approval hashes, leases, and persistent run budgets.
+- Source-bound memory candidates, human confirmation, explicit conflict replacement, expiry, revocation, and privacy erasure.
+- Clarification waiting chains, bounded message bundling, and human takeover across task states.
+- Target read-back verification for DingTalk office actions, code work, and production release adapters.
+- PostgreSQL production storage, field encryption, backup recovery, health alerts, and SLO acceptance gates.
+- Exact-commit release gates, immutable release directories, crash journals, and forward-only migration boundaries.
 
-### 安全
+### Security
 
-- 子进程使用最小环境，避免把生产密钥传给 Codex、DWS 或候选代码。
-- 外部副作用在执行前登记；结果未知时禁止自动重试。
-- 能力预算由数据库持久约束保护，旧服务无法绕过第 018 号迁移。
+- Minimal child-process environments prevent production secrets from reaching Codex, DWS, or candidate code.
+- External effect intent is recorded before execution; unknown outcomes are never retried automatically.
+- Database constraints protect persistent capability budgets from older services.
 
-### 文档
+### Documentation
 
-- 重构中英文项目首页，补充架构、能力边界、快速开始与路线图。
-- 补齐贡献指南、安全策略、行为准则、Issue 和 PR 模板。
+- Rebuilt the Chinese and English project homepages around positioning, boundaries, quick start, architecture, and roadmap.
+- Added contribution, security, conduct, issue, and pull request guidance.
 
 ## [0.2.0] - 2026-08-05
 
-### 新增
+### Added
 
-- DWS 消息监听、草稿生成、人工审批和发送回执。
-- 本机管理台、只读 Codex 插件和 macOS 常驻服务。
-- SQLite 开发存储与基础生产诊断流程。
+- DWS message ingestion, draft generation, human approval, and send receipts.
+- A local admin console, read-only Codex plugin, and macOS background services.
+- SQLite development storage and the initial production diagnostic workflow.
 
-[未发布]: https://github.com/ruiwang20010702/ai-employee/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ruiwang20010702/ai-employee/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/ruiwang20010702/ai-employee/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ruiwang20010702/ai-employee/releases/tag/v0.2.0

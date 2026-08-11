@@ -1,23 +1,25 @@
-# 行为准则
+# Code of Conduct
 
-## 我们的承诺
+**English** · [简体中文](./CODE_OF_CONDUCT_ZH.md)
 
-我们致力于为所有参与者提供开放、友善、安全且不受骚扰的协作环境，不因年龄、身体特征、残障、民族、性别认同与表达、经验水平、教育程度、社会经济状况、国籍、外貌、种族、宗教或性取向而区别对待。
+## Our pledge
 
-## 期望行为
+We are committed to providing an open, welcoming, safe, and harassment-free collaboration environment for everyone, regardless of age, body characteristics, disability, ethnicity, gender identity and expression, experience, education, socioeconomic status, nationality, appearance, race, religion, or sexual orientation.
 
-- 以尊重、清晰和建设性的方式沟通。
-- 对不同经验和观点保持同理心。
-- 聚焦事实、复现证据和改进方案，不攻击个人。
-- 尊重隐私，不公开真实消息、个人信息、凭据或公司内部资料。
-- 对自己的错误负责，并帮助他人安全地参与项目。
+## Expected behavior
 
-不可接受的行为包括骚扰、侮辱、威胁、歧视、未经同意披露私人信息，以及其他在专业协作环境中不适当的行为。
+- Communicate respectfully, clearly, and constructively.
+- Show empathy toward different backgrounds and perspectives.
+- Focus criticism on facts, reproductions, and improvements rather than people.
+- Respect privacy. Never expose real messages, personal data, credentials, or internal company information.
+- Take responsibility for mistakes and help others participate safely.
 
-## 执行
+Harassment, insults, threats, discrimination, non-consensual disclosure of private information, and other unprofessional conduct are not acceptable.
 
-发现违反行为准则的情况，请通过仓库维护者的私密渠道或 GitHub Security Advisory 报告。维护者可以删除内容、关闭讨论、拒绝贡献或限制参与。处理过程中将尽可能保护报告者隐私。
+## Enforcement
 
-本准则适用于项目空间，以及任何代表项目参与公开活动的场景。
+Report violations through a private maintainer channel or GitHub Security Advisory. Maintainers may remove content, close discussions, reject contributions, or restrict participation. Reports will be handled with reasonable confidentiality.
 
-本文件参考 [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html)，并按本项目的隐私与安全边界进行了简化。
+This policy applies in project spaces and whenever someone publicly represents the project.
+
+This document is adapted from [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html) for this project's privacy and security boundaries.

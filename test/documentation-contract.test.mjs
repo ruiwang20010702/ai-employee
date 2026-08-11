@@ -26,7 +26,7 @@ test("产品需求文档元信息版本与最新变更记录一致", async () =>
 });
 
 test("首次部署文档统一使用安全上线顺序", async () => {
-  const readme = await projectText("README.md");
+  const readme = await projectText("README_ZH.md");
   const readmeSection = readme.slice(
     readme.indexOf("## 首次部署"),
     readme.indexOf("## 日常操作"),
@@ -51,12 +51,16 @@ test("首次部署文档统一使用安全上线顺序", async () => {
   assertOrdered(operationsSection, commands);
 });
 
-test("正式文档文件名保持中文统一口径", async () => {
-  const names = await readdir(new URL("../docs/", import.meta.url));
+test("中文权威文档在 docs 根目录保持中文统一口径", async () => {
+  const entries = await readdir(new URL("../docs/", import.meta.url), {
+    withFileTypes: true,
+  });
+  const names = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
   assert.ok(names.length > 0);
   for (const name of names) {
     assert.match(name, /^[\p{Script=Han}]+\.md$/u);
   }
+  assert.ok(entries.some((entry) => entry.isDirectory() && entry.name === "en"));
 });
 
 test("技术部署与业务自动化放量的状态口径不互相冒充", async () => {
@@ -90,7 +94,7 @@ test("完成度矩阵明确区分目标能力、当前授权和已部署闭环",
 test("权威文档共享同一生产版本且不保留已部署能力的候选口径", async () => {
   const [readme, requirements, matrix, acceptance, review, technical, overview, operations] =
     await Promise.all([
-      projectText("README.md"),
+      projectText("README_ZH.md"),
       projectText("docs/产品需求文档.md"),
       projectText("docs/完成度矩阵.md"),
       projectText("docs/验收报告.md"),
@@ -117,7 +121,7 @@ test("权威文档共享同一生产版本且不保留已部署能力的候选�
 
 test("新环境文档禁止把生成的生产密钥写入配置", async () => {
   const [readme, operations, requirements] = await Promise.all([
-    projectText("README.md"),
+    projectText("README_ZH.md"),
     projectText("docs/生产运维手册.md"),
     projectText("docs/产品需求文档.md"),
   ]);
@@ -130,13 +134,19 @@ test("新环境文档禁止把生成的生产密钥写入配置", async () => {
 });
 
 test("公开仓库安装说明固定到已审核完整提交", async () => {
-  const readme = await projectText("README.md");
-  assert.match(
-    readme,
-    /github:ruiwang20010702\/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA/u,
-  );
-  assert.match(readme, /完整 40 位提交编号/u);
-  assert.doesNotMatch(readme, /npm install[^\n]+#main/u);
+  const [readme, chinese] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+  ]);
+  for (const text of [readme, chinese]) {
+    assert.match(
+      text,
+      /github:ruiwang20010702\/ai-employee#REPLACE_WITH_APPROVED_FULL_SHA/u,
+    );
+    assert.doesNotMatch(text, /npm install[^\n]+#main/u);
+  }
+  assert.match(readme, /reviewed 40-character commit SHA/u);
+  assert.match(chinese, /完整 40 位提交编号/u);
 });
 
 test("核心流程图覆盖业务、状态、执行、记忆和发布异常分支", async () => {
@@ -175,48 +185,109 @@ test("核心流程图覆盖业务、状态、执行、记忆和发布异常分�
   ]) assert.match(operations, new RegExp(value, "u"));
 });
 
-test("中英文项目首页提供产品定位、快速开始和开源治理入口", async () => {
-  const [readme, english, contributing, security, conduct, changelog, license] =
+test("中英文项目首页提供产品定位、快速开始和双语开源治理入口", async () => {
+  const [
+    english,
+    chinese,
+    contributing,
+    contributingChinese,
+    security,
+    conduct,
+    conductChinese,
+    changelog,
+    changelogChinese,
+    license,
+  ] =
     await Promise.all([
       projectText("README.md"),
-      projectText("README_EN.md"),
+      projectText("README_ZH.md"),
       projectText("CONTRIBUTING.md"),
+      projectText("CONTRIBUTING_ZH.md"),
       projectText("SECURITY.md"),
       projectText("CODE_OF_CONDUCT.md"),
+      projectText("CODE_OF_CONDUCT_ZH.md"),
       projectText("CHANGELOG.md"),
+      projectText("CHANGELOG_ZH.md"),
       projectText("LICENSE"),
     ]);
-  for (const text of [readme, english]) {
+  for (const text of [english, chinese]) {
     assert.match(text, /assets\/ai-employee-hero\.svg/u);
     assert.match(text, /actions\/workflows\/check\.yml\/badge\.svg/u);
     assert.match(text, /npm run check/u);
-    assert.match(text, /CONTRIBUTING\.md/u);
-    assert.match(text, /CODE_OF_CONDUCT\.md/u);
     assert.match(text, /SECURITY\.md/u);
   }
-  assert.match(readme, /为什么做 AI 员工/u);
-  assert.match(readme, /与普通机器人的区别/u);
+  assert.match(english, /CONTRIBUTING\.md/u);
+  assert.match(english, /CODE_OF_CONDUCT\.md/u);
+  assert.match(chinese, /CONTRIBUTING_ZH\.md/u);
+  assert.match(chinese, /CODE_OF_CONDUCT_ZH\.md/u);
   assert.match(english, /Why AI Employee\?/u);
   assert.match(english, /Quick Start/u);
-  assert.match(contributing, /拒绝路径/u);
+  assert.match(english, /简体中文.*README_ZH\.md/u);
+  assert.match(chinese, /为什么做 AI 员工/u);
+  assert.match(chinese, /与普通机器人的区别/u);
+  assert.match(chinese, /English.*README\.md/u);
+  assert.match(contributing, /denied path/u);
+  assert.match(contributingChinese, /拒绝路径/u);
   assert.match(security, /GitHub Security Advisory/u);
-  assert.match(conduct, /尊重隐私/u);
+  assert.match(conduct, /Respect privacy/u);
+  assert.match(conductChinese, /尊重隐私/u);
   assert.match(changelog, /\[0\.3\.0\] - 2026-08-11/u);
+  assert.match(changelogChinese, /\[0\.3\.0\] - 2026-08-11/u);
   assert.match(license, /MIT License/u);
 });
 
-test("项目首页的本地文件链接全部存在", async () => {
-  for (const file of ["README.md", "README_EN.md"]) {
+test("中英文首页、治理文件和英文核心文档的本地链接全部存在", async () => {
+  for (const file of [
+    "README.md",
+    "README_ZH.md",
+    "CONTRIBUTING.md",
+    "CONTRIBUTING_ZH.md",
+    "CODE_OF_CONDUCT.md",
+    "CODE_OF_CONDUCT_ZH.md",
+    "CHANGELOG.md",
+    "CHANGELOG_ZH.md",
+    "SECURITY.md",
+    "docs/en/overview.md",
+    "docs/en/architecture.md",
+    "docs/en/capabilities.md",
+    "docs/en/deployment.md",
+  ]) {
     const text = await projectText(file);
+    const base = new URL(`../${file}`, import.meta.url);
     const targets = [...text.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/gu)]
       .map((match) => match[1])
-      .filter((target) => target.startsWith("./"))
+      .filter((target) => target.startsWith("."))
       .map((target) => target.split("#", 1)[0]);
     for (const target of new Set(targets)) {
       await assert.doesNotReject(
-        access(new URL(`../${target.slice(2)}`, import.meta.url)),
+        access(new URL(target, base)),
         `${file} 的本地链接不存在：${target}`,
       );
     }
+  }
+});
+
+test("英文核心文档覆盖产品、架构、能力记忆和部署边界", async () => {
+  const [readme, overview, architecture, capabilities, deployment] = await Promise.all([
+    projectText("README.md"),
+    projectText("docs/en/overview.md"),
+    projectText("docs/en/architecture.md"),
+    projectText("docs/en/capabilities.md"),
+    projectText("docs/en/deployment.md"),
+  ]);
+  for (const path of ["overview", "architecture", "capabilities", "deployment"]) {
+    assert.match(readme, new RegExp(`docs/en/${path}\\.md`, "u"));
+  }
+  for (const value of ["Default deny", "What it is not", "Implemented capability does not mean enabled capability"]) {
+    assert.match(overview, new RegExp(value, "u"));
+  }
+  for (const value of ["stateDiagram-v2", "Side-effect reliability", "Business ready"]) {
+    assert.match(architecture, new RegExp(value, "u"));
+  }
+  for (const value of ["Capability is not permission", "Formal memory", "Human takeover"]) {
+    assert.match(capabilities, new RegExp(value, "u"));
+  }
+  for (const value of ["Install an immutable revision", "Forward-only migration boundary", "Deployment never turns on real sending"]) {
+    assert.match(deployment, new RegExp(value, "u"));
   }
 });

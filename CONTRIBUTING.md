@@ -1,19 +1,21 @@
-# 贡献指南
+# Contributing to AI Employee
 
-感谢你愿意改进 AI 员工。这个项目把消息处理和真实工作执行视为生产系统，因此我们尤其重视权限边界、失败路径和可验证证据。
+**English** · [简体中文](./CONTRIBUTING_ZH.md)
 
-## 可以贡献什么
+Thank you for helping improve AI Employee. This project treats workplace messaging and external actions as production systems, so authorization boundaries, failure paths, and verifiable evidence are first-class requirements.
 
-- Bug 报告和可复现案例
-- 文档、示例和易用性改进
-- 消息适配器、工作适配器和验证器
-- 安全、可靠性、可观测性和测试改进
+## What you can contribute
 
-涉及真实钉钉账号、生产数据或公司内部信息的内容，请先脱敏；安全问题请按照 [SECURITY.md](./SECURITY.md) 私下报告。
+- reproducible bug reports;
+- documentation, examples, and usability improvements;
+- message adapters, work adapters, and target verifiers;
+- security, reliability, observability, and test improvements.
 
-## 本地开发
+Sanitize anything related to real DingTalk accounts, production data, or internal company information. Report security issues privately according to [SECURITY.md](./SECURITY.md).
 
-要求 Node.js 22.5 或更高版本：
+## Local development
+
+AI Employee requires Node.js 22.5 or later:
 
 ```bash
 git clone https://github.com/ruiwang20010702/ai-employee.git
@@ -22,22 +24,22 @@ npm ci
 npm run check
 ```
 
-`npm run check` 不应访问真实钉钉会话或生产数据库。需要 PostgreSQL 集成验证时，使用隔离的本机临时数据库运行：
+`npm run check` must not read real DingTalk conversations or connect to a production database. For PostgreSQL integration coverage, run the isolated test environment:
 
 ```bash
 npm run check:full
 ```
 
-## 提交改动
+## Making a change
 
-1. 先创建 Issue，说明问题、预期结果和能力边界；小型文档修正可直接提交 PR。
-2. 每个 PR 聚焦一个问题，避免混入无关重构。
-3. 保持默认拒绝：新增消息来源、执行能力、人员范围或外部写入都必须显式配置。
-4. 新能力至少覆盖：允许路径、拒绝路径、超时或异常路径、幂等与目标回读。
-5. 不要让模型文本直接授权工具，也不要用“工具返回成功”替代目标系统回读。
-6. 更新受影响的中文权威文档，并说明迁移、回退和兼容边界。
+1. Open an issue describing the problem, expected behavior, and capability boundary. Small documentation fixes may go directly to a pull request.
+2. Keep each pull request focused and avoid unrelated refactors.
+3. Preserve default-deny behavior. New message sources, execution capabilities, people, or external writes must be explicitly configured.
+4. Cover the allowed path, denied path, timeout or failure path, idempotency behavior, and target-system read-back.
+5. Never let model text authorize a tool, and never treat a tool's success response as proof of the final external state.
+6. Update the affected authoritative documentation and explain migration, rollback, and compatibility boundaries.
 
-提交前运行：
+Before submitting:
 
 ```bash
 npm run check
@@ -45,18 +47,18 @@ npm audit --audit-level=high
 git diff --check
 ```
 
-如果改动涉及 PostgreSQL、迁移、并发状态或 SQLite/PostgreSQL 对等性，还必须运行 `npm run check:full`。
+Run `npm run check:full` when the change affects PostgreSQL, migrations, concurrent state, or SQLite/PostgreSQL parity.
 
-## Pull Request 清单
+## Pull request checklist
 
-- 描述用户问题和最终行为，不只描述代码改动。
-- 列出实际运行的测试和结果。
-- 说明新增或变化的权限、数据、外部副作用和回退边界。
-- UI 或文档改动附截图或渲染结果；不得包含真实人员、消息或凭据。
-- 不提交 `.runtime/`、数据库、日志、备份、令牌、Cookie 或本机绝对路径。
+- Describe the user problem and final behavior, not only the edited files.
+- List the commands you actually ran and their results.
+- Explain changes to permissions, data access, external effects, migrations, and rollback behavior.
+- Include sanitized screenshots for UI or documentation changes when useful.
+- Do not commit `.runtime/`, databases, logs, backups, tokens, cookies, real messages, user identifiers, or machine-specific absolute paths.
 
-维护者会优先检查正确性、安全性、失败恢复、可读性和性能。合并代码不等于生产部署或业务能力放量。
+Maintainers prioritize correctness, security, failure recovery, readability, and performance. A merged change is not automatically deployed or enabled in production.
 
-## 许可证
+## License
 
-提交贡献即表示你同意按照项目的 [MIT License](./LICENSE) 提供该贡献。
+By contributing, you agree that your contribution is provided under the project's [MIT License](./LICENSE).
