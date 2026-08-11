@@ -39,6 +39,7 @@ import {
   verifyGitHubReleaseCommit,
 } from "../src/github-ci-verifier.mjs";
 import { isMainModule } from "../src/main-module.mjs";
+import { discoverCodeCheck } from "./运行代码检查.mjs";
 import {
   activateVersionedRelease,
   prepareVersionedRelease,
@@ -1767,6 +1768,31 @@ export async function validateAndCopyProductionConfig({
   return destination;
 }
 
+export async function checkMaterializedReleaseProductionModules({
+  releaseDirectory,
+  command = runQuiet,
+  nodePath = resolveTrustedReleaseTool("node"),
+  environmentSource = process.env,
+} = {}) {
+  const files = await discoverCodeCheck({ root: releaseDirectory });
+  const productionModules = [
+    ...files.sourceFiles,
+    ...files.scriptFiles,
+    ...files.pluginFiles,
+  ];
+  if (productionModules.length === 0) {
+    throw new Error("目标发布物没有可检查的生产模块");
+  }
+  for (const path of productionModules) {
+    await command(nodePath, ["--check", path], {
+      cwd: releaseDirectory,
+      env: minimalRuntimeEnvironment({ source: environmentSource }),
+      description: "检查目标发布物生产模块",
+    });
+  }
+  return { valid: true, productionModules: productionModules.length };
+}
+
 async function runReleaseScript({
   releaseDirectory,
   configPath,
@@ -1891,14 +1917,11 @@ export function createLocalReleaseDependencies({
       });
     },
     async checkRelease({ releaseDirectory }) {
-      await command(resolveTool("node"), [
-        resolveTool("npm"),
-        "run",
-        "check",
-      ], {
-        cwd: releaseDirectory,
-        env: minimalRuntimeEnvironment({ source: environmentSource }),
-        description: "检查目标版本代码",
+      await checkMaterializedReleaseProductionModules({
+        releaseDirectory,
+        command,
+        nodePath: resolveTool("node"),
+        environmentSource,
       });
     },
     copyProductionConfig: validateAndCopyProductionConfig,

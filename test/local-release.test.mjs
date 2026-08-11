@@ -22,6 +22,7 @@ import {
   assertOrdinaryReleaseMigrationBoundary,
   captureForwardBackupEvidence,
   captureReleaseIntegrity,
+  checkMaterializedReleaseProductionModules,
   clearPendingReleaseJournal,
   compareReleaseRuntimeIdentity,
   createLocalReleaseDependencies,
@@ -1859,6 +1860,36 @@ test("依赖安装固定由受信 Node 启动 npm CLI 且不传 GitHub token", a
   ]) {
     assert.equal(Object.hasOwn(calls[0].options.env, key), false, key);
   }
+});
+
+test("不可变发布物只检查生产模块且不依赖源码测试或 Git 工作区", async (t) => {
+  const directory = await realpath(
+    await mkdtemp(join(tmpdir(), "ai-employee-materialized-check-")),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(join(directory, "src"), { recursive: true });
+  await mkdir(join(directory, "test"), { recursive: true });
+  await writeFile(join(directory, "src", "valid.mjs"), "export const ok = true;\n");
+  await writeFile(
+    join(directory, "test", "requires-git.test.mjs"),
+    "throw new Error('源码测试不应在归档发布物中执行');\n",
+  );
+  const calls = [];
+  const result = await checkMaterializedReleaseProductionModules({
+    releaseDirectory: directory,
+    nodePath: "/trusted/node",
+    environmentSource: { GH_TOKEN: "must-not-reach-target" },
+    async command(command, args, options) {
+      calls.push({ command, args, options });
+      return "";
+    },
+  });
+
+  assert.deepEqual(result, { valid: true, productionModules: 1 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "/trusted/node");
+  assert.deepEqual(calls[0].args, ["--check", join(directory, "src", "valid.mjs")]);
+  assert.equal(Object.hasOwn(calls[0].options.env, "GH_TOKEN"), false);
 });
 
 test("维护控制命令来自受门禁控制器并明确绑定固定目标版本", async (t) => {
