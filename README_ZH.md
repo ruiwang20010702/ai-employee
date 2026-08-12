@@ -25,7 +25,7 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 </a>
 
 **[观看 v0.5 候选版真实闭环 →](./assets/foursday-v0.5-demo.mp4)**<br>
-75 秒 · 静音字幕 · 合成 [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) → 已回读验证的 [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39) · 未合并 · 未部署
+75 秒 · 静音字幕 · 合成 [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) → 已回读验证的 [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39) · 隐私复核已绑定媒体摘要 · 未合并 · 未部署
 
 </div>
 

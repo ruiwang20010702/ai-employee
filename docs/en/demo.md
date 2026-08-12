@@ -6,6 +6,15 @@ the resulting verified [Draft PR #39](https://github.com/ruiwang20010702/foursda
 Nothing was merged or deployed, and production sending, execution, and proactive
 work remained disabled.
 
+The published file is 75 seconds, 1280×720, H.264, silent, and uses burned-in
+captions. A human reviewed the exact media digest for exposed credentials,
+private repositories, and user-specific filesystem paths. The repository field
+shown in the public recording is the synthetic `/workspace/foursday`. Run
+`npm run demo:verify` to verify the media structure, exact reviewed digest,
+poster, and public-evidence boundary. This command binds the visual review to
+the published bytes; it does not claim automated OCR or pixel-level privacy
+analysis.
+
 The v0.5 launch demo must show one real, reviewable handoff. It is not a motion mockup and must not splice a local preview together with an unrelated pull request.
 
 ## Recording contract
@@ -21,6 +30,7 @@ The v0.5 launch demo must show one real, reviewable handoff. It is not a motion 
 - Return to Foursday and confirm the project-memory candidate and evidence-backed time return separately.
 - Download the evidence bundle after confirmation and show `verified_closed_loop`; keep its SHA-256 digest on the final slate.
 - Use only synthetic content. Hide the browser profile, unrelated tabs, filesystem username, tokens, and private repositories.
+- Record the human privacy review in `assets/foursday-v0.5-demo.manifest.json` and bind it to the exact video and poster SHA-256 digests.
 
 ## 75-second storyboard
 

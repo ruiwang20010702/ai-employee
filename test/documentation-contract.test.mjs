@@ -561,11 +561,13 @@ test("首批贡献任务已公开、范围受限且进入复用安装包", async
 });
 
 test("真实演示来自同一次闭环并保留外部复现边界", async () => {
-  const [readme, chineseReadme, demo, chineseDemo] = await Promise.all([
+  const [readme, chineseReadme, demo, chineseDemo, packageText, manifestText] = await Promise.all([
     projectText("README.md"),
     projectText("README_ZH.md"),
     projectText("docs/en/demo.md"),
     projectText("docs/真实演示录制说明.md"),
+    projectText("package.json"),
+    projectText("assets/foursday-v0.5-demo.manifest.json"),
   ]);
   assert.match(readme, /Watch the 75-second demo/u);
   assert.match(readme, /Issue #29/u);
@@ -584,10 +586,22 @@ test("真实演示来自同一次闭环并保留外部复现边界", async () =>
   assert.match(demo, /ten independent testers/u);
   assert.match(demo, /verified_closed_loop/u);
   assert.match(demo, /integrity digest/u);
+  assert.match(demo, /npm run demo:verify/u);
+  assert.match(demo, /does not claim automated OCR/u);
+  assert.match(demo, /\/workspace\/foursday/u);
   assert.match(chineseDemo, /不能把本地预览、无关 PR 和模拟结果剪接/u);
   assert.match(chineseDemo, /不代表外部可复现性已经验收/u);
   assert.match(chineseDemo, /10 位独立测试者/u);
   assert.match(chineseDemo, /verified_closed_loop/u);
+  assert.match(chineseDemo, /不声称能够自动 OCR/u);
+  assert.match(chineseDemo, /\/workspace\/foursday/u);
+  const packageJson = JSON.parse(packageText);
+  const manifest = JSON.parse(manifestText);
+  assert.equal(packageJson.scripts["demo:verify"], "node scripts/验证公开演示.mjs");
+  assert.equal(manifest.media.durationSeconds, 75);
+  assert.equal(manifest.privacyReview.localAbsolutePathsShown, false);
+  assert.equal(manifest.publicEvidence.merged, false);
+  assert.equal(manifest.publicEvidence.deployed, false);
 });
 
 test("外部体验入口使用 fork 推送并把来源与上游目标纳入审批证据", async () => {

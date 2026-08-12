@@ -30,7 +30,7 @@ impersonating you.
 </a>
 
 **[Watch the real v0.5 candidate loop →](./assets/foursday-v0.5-demo.mp4)**<br>
-75 seconds · silent captions · synthetic [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) → verified [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39) · no merge · no deployment
+75 seconds · silent captions · synthetic [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) → verified [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39) · digest-bound privacy review · no merge · no deployment
 
 </div>
 
