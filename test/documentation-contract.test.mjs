@@ -298,6 +298,7 @@ test("公开增长记分卡不把重复自测和社区意向冒充用户或贡�
     assert.match(text, /0\/10/u);
     assert.match(text, /Issue #3/u);
     assert.match(text, /Issue #49/u);
+    assert.match(text, /Issue #50/u);
   }
   assert.match(scorecard, /ten loops by one person still count as one user/u);
   assert.match(scorecard, /Claim comments.+are not completed contributors/su);
@@ -305,6 +306,8 @@ test("公开增长记分卡不把重复自测和社区意向冒充用户或贡�
   assert.match(chineseScorecard, /同一个人的 10 次闭环仍只算 1 人/u);
   assert.match(chineseScorecard, /认领留言.+不能提前记为完成/su);
   assert.match(chineseScorecard, /不会主动回传数据/u);
+  assert.match(readme, /Report a successful install.+issues\/50/u);
+  assert.match(chineseReadme, /报告一次成功安装.+issues\/50/u);
 });
 
 test("五分钟演示和三类扩展契约在中英文入口保持一致", async () => {

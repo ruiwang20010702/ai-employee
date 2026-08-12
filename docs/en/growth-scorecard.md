@@ -19,6 +19,8 @@ Snapshot: **2026-08-12**. A dated snapshot is intentionally not presented as liv
 The launch cohort has separately completed **10/10 maintainer loops** and
 **0/10 external tester loops**. External progress remains open in
 [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49).
+Successful setup reports are collected separately in
+[setup check-in Issue #50](https://github.com/ruiwang20010702/foursday/issues/50).
 
 ## Counting contract
 
@@ -28,6 +30,10 @@ Count one installation only when a person voluntarily reports a successful
 immutable one-command launch, or a maintainer directly reproduces it in a fresh
 workspace and records bounded evidence. Package downloads, CI jobs, repeated
 retries, and the two workspaces created by `reuse:verify` do not count.
+
+External users can use the bounded template in Issue #50. A setup report never
+counts as a verified closed-loop user and never grants repository or production
+authority.
 
 The proof must contain no username, email, local path, token, model output, private
 repository identity, or company data. A successful preview does not claim that a
