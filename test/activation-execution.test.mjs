@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { buildActivationPreview } from "../src/activation.mjs";
 import {
   ActivationExecutionCoordinator,
+  inspectActivationReadiness,
   inspectActivationRepository,
   prepareActivationExecution,
 } from "../src/activation-execution.mjs";
@@ -45,6 +46,62 @@ const snapshot = {
   remoteUrl: "https://github.com/example/project.git",
   repository: "example/project",
 };
+
+test("activation readiness exposes only bounded GitHub and runtime booleans", async () => {
+  const calls = [];
+  const result = await inspectActivationReadiness({
+    environment: {
+      HOME: "/private/home/should-not-leak",
+      GH_PATH: "/usr/bin/true",
+      CODEX_PATH: "/usr/bin/true",
+      CLAUDE_CODE_PATH: "/missing/claude",
+      SECRET_SENTINEL: "must-not-leak",
+    },
+    openAiCompatibleConfigured: true,
+    githubAuthCheck: async (path, environment) => {
+      calls.push({ path, environment });
+      return true;
+    },
+  });
+
+  assert.deepEqual(result, {
+    schema: "foursday-activation-readiness/v1",
+    externalSystemsModified: false,
+    github: { cliAvailable: true, authenticated: true },
+    runtimes: {
+      codex: true,
+      claudeCode: false,
+      openAiCompatible: true,
+      openAiCompatibleConfigurationError: false,
+    },
+    readyForPilotPreparation: true,
+    readyForGovernedExecution: true,
+  });
+  assert.equal(calls[0].path, "/usr/bin/true");
+  assert.doesNotMatch(JSON.stringify(result), /private|SECRET_SENTINEL|must-not-leak/u);
+});
+
+test("activation readiness fails closed for missing auth and invalid model configuration", async () => {
+  const result = await inspectActivationReadiness({
+    environment: {
+      GH_PATH: "/usr/bin/true",
+      CODEX_PATH: "/missing/codex",
+      CLAUDE_CODE_PATH: "/missing/claude",
+    },
+    openAiCompatibleConfigurationError: true,
+    githubAuthCheck: async () => false,
+  });
+
+  assert.equal(result.github.cliAvailable, true);
+  assert.equal(result.github.authenticated, false);
+  assert.equal(result.runtimes.codex, false);
+  assert.equal(result.runtimes.claudeCode, false);
+  assert.equal(result.runtimes.openAiCompatible, false);
+  assert.equal(result.runtimes.openAiCompatibleConfigurationError, true);
+  assert.equal(result.readyForPilotPreparation, false);
+  assert.equal(result.readyForGovernedExecution, false);
+  assert.equal(result.externalSystemsModified, false);
+});
 
 async function candidate() {
   return prepareActivationExecution(input, {

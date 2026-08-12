@@ -19,7 +19,7 @@ Safety:
 async function loadActivationRuntime() {
   const [
     { startActivationServer },
-    { createDefaultActivationExecutionCoordinator },
+    { createDefaultActivationExecutionCoordinator, inspectActivationReadiness },
     { prepareFoursdayPilotWorkspace },
     { openAiCompatibleProviderFromEnvironment },
   ] = await Promise.all([
@@ -31,6 +31,7 @@ async function loadActivationRuntime() {
   return {
     startActivationServer,
     createDefaultActivationExecutionCoordinator,
+    inspectActivationReadiness,
     prepareFoursdayPilotWorkspace,
     openAiCompatibleProviderFromEnvironment,
   };
@@ -79,6 +80,7 @@ export async function runActivation({
   output = process.stdout,
   loadRuntime = loadActivationRuntime,
   workingDirectory = process.cwd(),
+  environment = process.env,
 } = {}) {
   if (args.includes("--help")) {
     output.write(activationHelp);
@@ -90,12 +92,26 @@ export async function runActivation({
   const {
     startActivationServer,
     createDefaultActivationExecutionCoordinator,
+    inspectActivationReadiness,
     openAiCompatibleProviderFromEnvironment,
     prepareFoursdayPilotWorkspace,
   } = await loadRuntime();
+  let modelProvider = null;
+  let openAiCompatibleConfigurationError = false;
+  try {
+    modelProvider = openAiCompatibleProviderFromEnvironment(environment);
+  } catch {
+    openAiCompatibleConfigurationError = true;
+  }
   const executionCoordinator = createDefaultActivationExecutionCoordinator({
     workingDirectory,
-    modelProvider: openAiCompatibleProviderFromEnvironment(),
+    modelProvider,
+    environment,
+  });
+  const readinessChecker = () => inspectActivationReadiness({
+    environment,
+    openAiCompatibleConfigured: Boolean(modelProvider),
+    openAiCompatibleConfigurationError,
   });
   const pilotWorkspace = pilotSourceSha
     ? {
@@ -116,6 +132,7 @@ export async function runActivation({
     workingDirectory,
     executionCoordinator,
     pilotWorkspace,
+    readinessChecker,
   });
   output.write(`Foursday activation is ready: ${server.url}\n`);
   output.write("Preview is read-only. Pilot fork setup requires separate confirmation; delivery still requires exact-plan approval.\n");

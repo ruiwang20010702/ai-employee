@@ -71,6 +71,16 @@ test("pilot preparation is separately confirmed and reports only bounded status 
   assert.doesNotMatch(script, /pilot-status[^;]*error\.(?:message|stack)/u);
 });
 
+test("readiness UI is read-only, accessible, and does not expose command errors", () => {
+  const script = activationHtml.match(/<script nonce="__NONCE__">([\s\S]*?)<\/script>/u)?.[1];
+  assert.match(activationHtml, /Check pilot readiness/u);
+  assert.match(activationHtml, /id="pilot-readiness-status"[^>]*role="status"[^>]*aria-live="polite"/u);
+  assert.match(script, /api\('\/api\/readiness',\{\}\)/u);
+  assert.match(script, /Ready for fork preparation and governed execution/u);
+  assert.match(script, /No fork, branch, push, or PR was created/u);
+  assert.doesNotMatch(script, /pilot-readiness-status[^;]*error\.(?:message|stack)/u);
+});
+
 test("activation server exposes only loopback preview endpoints", async () => {
   const calls = [];
   const service = await startActivationServer({
@@ -187,6 +197,75 @@ test("pilot workspace endpoint hides unexpected preparation errors", async () =>
     assert.doesNotMatch(JSON.stringify(body), /private|secret-value/u);
   } finally {
     await service.stop();
+  }
+});
+
+test("readiness endpoint is token protected, read-only, and error bounded", async () => {
+  const actionToken = "d".repeat(64);
+  let calls = 0;
+  const service = await startActivationServer({
+    port: 0,
+    actionToken,
+    readinessChecker: async () => {
+      calls += 1;
+      return {
+        schema: "foursday-activation-readiness/v1",
+        externalSystemsModified: false,
+        github: { cliAvailable: true, authenticated: true },
+        runtimes: { codex: true, claudeCode: false, openAiCompatible: false },
+        readyForPilotPreparation: true,
+        readyForGovernedExecution: true,
+      };
+    },
+  });
+  const post = (token = actionToken, contentType = "application/json") => fetch(
+    new URL("/api/readiness", service.url),
+    {
+      method: "POST",
+      headers: {
+        "content-type": contentType,
+        "x-foursday-action-token": token,
+      },
+      body: "{}",
+    },
+  );
+  try {
+    const environment = await fetch(new URL("/api/environment", service.url))
+      .then((response) => response.json());
+    assert.equal(environment.readinessAvailable, true);
+    assert.equal((await post("wrong")).status, 403);
+    assert.equal((await post(actionToken, "text/plain")).status, 415);
+    assert.equal(calls, 0);
+    const response = await post();
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.externalSystemsModified, false);
+    assert.equal(body.readyForGovernedExecution, true);
+    assert.equal(calls, 1);
+  } finally {
+    await service.stop();
+  }
+
+  const failing = await startActivationServer({
+    port: 0,
+    actionToken,
+    readinessChecker: async () => {
+      throw new Error("/Users/private/token-secret");
+    },
+  });
+  try {
+    const response = await fetch(new URL("/api/readiness", failing.url), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-foursday-action-token": actionToken,
+      },
+      body: "{}",
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "readiness_check_failed" });
+  } finally {
+    await failing.stop();
   }
 });
 

@@ -80,6 +80,7 @@ test("activation offers the exact pilot workspace without preparing it at startu
       createDefaultActivationExecutionCoordinator: () => ({
         ghPath: "/usr/bin/true",
       }),
+      inspectActivationReadiness: async () => ({ readyForGovernedExecution: true }),
       openAiCompatibleProviderFromEnvironment: () => null,
       prepareFoursdayPilotWorkspace: async (input) => {
         preparations += 1;
@@ -93,9 +94,44 @@ test("activation offers the exact pilot workspace without preparing it at startu
   assert.equal(serverCalls.length, 1);
   assert.equal(serverCalls[0].port, 0);
   assert.equal(serverCalls[0].pilotWorkspace.sourceSha, sourceSha);
+  assert.equal((await serverCalls[0].readinessChecker()).readyForGovernedExecution, true);
   const prepared = await serverCalls[0].pilotWorkspace.prepare({ confirmForkAndClone: true });
   assert.deepEqual(prepared, { sourceSha, confirmForkAndClone: true });
   assert.equal(preparations, 1);
+});
+
+test("invalid optional model configuration keeps Web readiness available", async () => {
+  const serverCalls = [];
+  const environment = {
+    FOURSDAY_OPENAI_BASE_URL: "https://example.invalid/v1/",
+    FOURSDAY_OPENAI_API_KEY: "",
+    FOURSDAY_OPENAI_MODEL: "",
+  };
+  await runActivation({
+    args: ["--port", "0"],
+    output: { write() {} },
+    environment,
+    loadRuntime: async () => ({
+      startActivationServer: async (options) => {
+        serverCalls.push(options);
+        return { url: "http://127.0.0.1:4173/" };
+      },
+      createDefaultActivationExecutionCoordinator: ({ modelProvider, environment: passed }) => {
+        assert.equal(modelProvider, null);
+        assert.equal(passed, environment);
+        return {};
+      },
+      inspectActivationReadiness: async (options) => options,
+      openAiCompatibleProviderFromEnvironment: () => {
+        throw new Error("partial configuration must not stop Web startup");
+      },
+      prepareFoursdayPilotWorkspace: async () => null,
+    }),
+  });
+  const readiness = await serverCalls[0].readinessChecker();
+  assert.equal(readiness.environment, environment);
+  assert.equal(readiness.openAiCompatibleConfigured, false);
+  assert.equal(readiness.openAiCompatibleConfigurationError, true);
 });
 
 test("activation rejects unknown options before loading runtime", async () => {

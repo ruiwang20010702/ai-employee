@@ -47,6 +47,7 @@ export async function startActivationServer({
   previewBuilder = buildActivationPreview,
   executionCoordinator = null,
   pilotWorkspace = null,
+  readinessChecker = null,
   actionToken = randomBytes(32).toString("hex"),
 } = {}) {
   if (!["127.0.0.1", "::1", "localhost"].includes(host)) {
@@ -76,7 +77,25 @@ export async function startActivationServer({
         executionAvailable: Boolean(executionCoordinator),
         pilotWorkspaceAvailable: Boolean(pilotWorkspace),
         pilotSourceSha: pilotWorkspace?.sourceSha ?? null,
+        readinessAvailable: Boolean(readinessChecker),
       });
+      return;
+    }
+    if (readinessChecker && request.method === "POST" && url.pathname === "/api/readiness") {
+      try {
+        if (!equalToken(request.headers["x-foursday-action-token"], actionToken)) {
+          throw Object.assign(new Error("action_token_invalid"), { status: 403 });
+        }
+        if (!String(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+          throw Object.assign(new Error("content_type_must_be_application_json"), { status: 415 });
+        }
+        await readJson(request);
+        json(response, 200, await readinessChecker());
+      } catch (error) {
+        json(response, error.status ?? 400, {
+          error: error.status ? String(error.message) : "readiness_check_failed",
+        });
+      }
       return;
     }
     if (pilotWorkspace && request.method === "POST" && url.pathname === "/api/pilot-workspace") {

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, constants, mkdir, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { validateProjectManifest } from "./capability-policy.mjs";
 import { buildActivationPreview } from "./activation.mjs";
@@ -515,6 +515,97 @@ export async function resolveExecutable(configured, candidates, label) {
     }
   }
   throw new Error(`${label} executable is unavailable; configure its absolute path`);
+}
+
+function readinessCommandEnvironment(executable, environment) {
+  const allowed = ["HOME", "TMPDIR", "LANG", "LC_ALL", "TERM"];
+  return {
+    ...Object.fromEntries(
+      allowed
+        .filter((name) => typeof environment[name] === "string")
+        .map((name) => [name, environment[name]]),
+    ),
+    PATH: [dirname(executable), "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":"),
+    CI: "1",
+    NO_COLOR: "1",
+  };
+}
+
+async function defaultGitHubAuthCheck(ghPath, environment) {
+  await execFileAsync(ghPath, [
+    "auth", "status", "--active", "--hostname", "github.com",
+  ], {
+    env: readinessCommandEnvironment(ghPath, environment),
+    timeout: 15_000,
+    maxBuffer: 64 * 1024,
+  });
+  return true;
+}
+
+async function availableExecutable(configured, candidates, label) {
+  try {
+    await resolveExecutable(configured, candidates, label);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function inspectActivationReadiness({
+  environment = process.env,
+  openAiCompatibleConfigured = false,
+  openAiCompatibleConfigurationError = false,
+  githubAuthCheck = defaultGitHubAuthCheck,
+} = {}) {
+  const home = homedir();
+  const ghCandidates = [
+    "/opt/homebrew/bin/gh",
+    "/usr/local/bin/gh",
+    join(home, ".local", "bin", "gh"),
+  ];
+  let ghPath = null;
+  try {
+    ghPath = await resolveExecutable(environment.GH_PATH, ghCandidates, "GitHub CLI");
+  } catch {
+    // The public result exposes only readiness, never a local executable path.
+  }
+  let githubAuthenticated = false;
+  if (ghPath) {
+    try {
+      githubAuthenticated = await githubAuthCheck(ghPath, environment) === true;
+    } catch {
+      // Authentication errors are intentionally reduced to one bounded boolean.
+    }
+  }
+  const [codexAvailable, claudeCodeAvailable] = await Promise.all([
+    availableExecutable(environment.CODEX_PATH, [
+      "/opt/homebrew/bin/codex",
+      "/usr/local/bin/codex",
+      join(home, ".local", "bin", "codex"),
+    ], "Codex"),
+    availableExecutable(environment.CLAUDE_CODE_PATH, [
+      join(home, ".local", "bin", "claude"),
+      "/opt/homebrew/bin/claude",
+      "/usr/local/bin/claude",
+    ], "Claude Code"),
+  ]);
+  const runtimeAvailable = codexAvailable || claudeCodeAvailable || openAiCompatibleConfigured;
+  return Object.freeze({
+    schema: "foursday-activation-readiness/v1",
+    externalSystemsModified: false,
+    github: {
+      cliAvailable: Boolean(ghPath),
+      authenticated: githubAuthenticated,
+    },
+    runtimes: {
+      codex: codexAvailable,
+      claudeCode: claudeCodeAvailable,
+      openAiCompatible: openAiCompatibleConfigured,
+      openAiCompatibleConfigurationError,
+    },
+    readyForPilotPreparation: Boolean(ghPath) && githubAuthenticated,
+    readyForGovernedExecution: Boolean(ghPath) && githubAuthenticated && runtimeAvailable,
+  });
 }
 
 export function createDefaultActivationExecutionCoordinator({
