@@ -136,7 +136,7 @@ With Node.js 22 or 24 installed, launch the reviewed v0.5 Web flow directly
 from its immutable GitHub commit:
 
 ```bash
-npx --yes --package "github:ruiwang20010702/foursday#e2322c7759c5b097cec398f7a125299eb3e755e3" foursday start --pilot-sha e2322c7759c5b097cec398f7a125299eb3e755e3
+npx --yes --package "github:ruiwang20010702/foursday#26569e18f20e75644f96a3bbc6a516df6325b4c6" foursday start --pilot-sha 26569e18f20e75644f96a3bbc6a516df6325b4c6
 ```
 
 Open the printed loopback URL. The command downloads and runs that exact public
@@ -221,8 +221,8 @@ The equivalent manual fallback is:
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
 git fetch upstream codex/v0.5-candidate
-git merge-base --is-ancestor e2322c7759c5b097cec398f7a125299eb3e755e3 FETCH_HEAD
-git switch --create pilot-v0.5-e2322c7 e2322c7759c5b097cec398f7a125299eb3e755e3
+git merge-base --is-ancestor 26569e18f20e75644f96a3bbc6a516df6325b4c6 FETCH_HEAD
+git switch --create pilot-v0.5-26569e1 26569e18f20e75644f96a3bbc6a516df6325b4c6
 npm ci --ignore-scripts
 npm start
 ```
