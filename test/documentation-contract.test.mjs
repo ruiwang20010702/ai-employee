@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import test from "node:test";
 
 async function projectText(path) {
@@ -308,6 +308,22 @@ test("公开增长记分卡不把重复自测和社区意向冒充用户或贡�
   assert.match(chineseScorecard, /不会主动回传数据/u);
   assert.match(readme, /Report a successful install.+issues\/50/u);
   assert.match(chineseReadme, /报告一次成功安装.+issues\/50/u);
+});
+
+test("社交预览候选图满足 GitHub 推荐尺寸且不冒充已经上传", async () => {
+  const assetUrl = new URL("../assets/foursday-social-preview.png", import.meta.url);
+  const [image, metadata, english, chinese] = await Promise.all([
+    readFile(assetUrl),
+    stat(assetUrl),
+    projectText("docs/en/growth-scorecard.md"),
+    projectText("docs/公开增长记分卡.md"),
+  ]);
+  assert.equal(image.subarray(1, 4).toString("ascii"), "PNG");
+  assert.equal(image.readUInt32BE(16), 1280);
+  assert.equal(image.readUInt32BE(20), 640);
+  assert.ok(metadata.size < 1024 * 1024);
+  assert.match(english, /separate public metadata change.+not implied/su);
+  assert.match(chinese, /独立的公开元数据变更.+不能.+声称已经上传/su);
 });
 
 test("五分钟演示和三类扩展契约在中英文入口保持一致", async () => {

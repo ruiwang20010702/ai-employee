@@ -79,3 +79,12 @@ automate stars.
 
 This scorecard is deliberately conservative. Missing evidence means “not counted,”
 not “probably complete.”
+
+## Maintainer launch asset
+
+The repository includes [`assets/foursday-social-preview.png`](../../assets/foursday-social-preview.png),
+a deterministic crop of the authentic 75-second demo poster. It is a solid-background
+PNG at 1280 × 640 pixels and below 1 MB, ready for GitHub's Social Preview setting.
+
+The candidate only versions and verifies the asset. Uploading it in GitHub Settings
+is a separate public metadata change and is not implied by a passing test or commit.
