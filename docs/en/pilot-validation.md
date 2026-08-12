@@ -17,6 +17,8 @@ An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed
 
 ## Cohort manifest
 
+Start from the [synthetic pilot manifest example](../examples/pilot-manifest.example.json), then replace its relative evidence paths with the files from each completed loop.
+
 Keep evidence files and `pilot.json` in one private local directory that is not committed. Use pseudonymous external aliases and never collect a name, email address, token, repository credential, or private model output.
 
 ```json

@@ -1,0 +1,18 @@
+{
+  "schema": "foursday-pilot-evidence/v1",
+  "entries": [
+    {
+      "cohort": "self",
+      "participantAlias": "pilot-self-01",
+      "evidencePath": "evidence/self-01.json",
+      "reproducedFromQuickStart": true
+    },
+    {
+      "cohort": "external",
+      "participantAlias": "pilot-external-01",
+      "evidencePath": "evidence/external-01.json",
+      "reproducedFromQuickStart": true,
+      "feedback": "Synthetic feedback: the approval step was clear."
+    }
+  ]
+}
