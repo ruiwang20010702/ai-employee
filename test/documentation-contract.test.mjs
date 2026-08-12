@@ -281,6 +281,32 @@ test("中英文快速开始提供不可变的一条命令 Web 体验入口", asy
   assert.match(chinese, /再次批准完整计划哈希/u);
 });
 
+test("公开增长记分卡不把重复自测和社区意向冒充用户或贡献", async () => {
+  const [readme, chineseReadme, scorecard, chineseScorecard] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/growth-scorecard.md"),
+    projectText("docs/公开增长记分卡.md"),
+  ]);
+  assert.match(readme, /Public growth scorecard/u);
+  assert.match(chineseReadme, /公开增长记分卡/u);
+  for (const text of [scorecard, chineseScorecard]) {
+    for (const target of ["200", "50", "10", "5", "1,000"]) {
+      assert.match(text, new RegExp(target, "u"));
+    }
+    assert.match(text, /10\/10/u);
+    assert.match(text, /0\/10/u);
+    assert.match(text, /Issue #3/u);
+    assert.match(text, /Issue #49/u);
+  }
+  assert.match(scorecard, /ten loops by one person still count as one user/u);
+  assert.match(scorecard, /Claim comments.+are not completed contributors/su);
+  assert.match(scorecard, /does not phone home/u);
+  assert.match(chineseScorecard, /同一个人的 10 次闭环仍只算 1 人/u);
+  assert.match(chineseScorecard, /认领留言.+不能提前记为完成/su);
+  assert.match(chineseScorecard, /不会主动回传数据/u);
+});
+
 test("五分钟演示和三类扩展契约在中英文入口保持一致", async () => {
   const [
     readme,

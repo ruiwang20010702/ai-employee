@@ -18,7 +18,7 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[10 分钟开始](#快速开始) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入 v0.5 外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+[10 分钟开始](#快速开始) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入 v0.5 外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [查看 90 天增长记分卡](./docs/公开增长记分卡.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
 
 <a href="./assets/foursday-v0.5-demo.mp4">
   <img src="./assets/foursday-v0.5-demo-poster.png" alt="观看 Foursday 将合成 GitHub Issue 转化为经过验证的 Draft PR" width="960">
@@ -385,6 +385,7 @@ flowchart LR
 | [首次贡献任务](./docs/首次贡献任务.md) | 新贡献者 | 5 个已开放、边界清晰的 `good first issue` 入门任务 |
 | [真实演示录制说明](./docs/真实演示录制说明.md) | 发布负责人 | 75 秒演示分镜、公开证据和真实性门禁 |
 | [体验验证说明](./docs/体验验证说明.md) | 发布负责人和体验者 | 10 次自测、10 名外测和证据汇总门禁 |
+| [公开增长记分卡](./docs/公开增长记分卡.md) | 维护者与社区 | 90 天目标、当前证据基线、计数与隐私边界 |
 | [安全说明](./安全说明.md) | 安全审查人员 | 数据边界、密钥、报告渠道和风险 |
 
 ## 参与贡献
