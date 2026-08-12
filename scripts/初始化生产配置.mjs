@@ -45,6 +45,7 @@ export async function initializeProductionConfig({
   values.CLAUDE_CODE_PATH = "claude";
   values.AI_EMPLOYEE_AGENT_RUNTIME = "codex";
   values.GBRAIN_PATH = "gbrain";
+  values.GH_PATH = "";
   values.AI_EMPLOYEE_TENANT_ID = "";
   values.AI_EMPLOYEE_APPROVER = "";
   values.DINGTALK_TARGET_USER_IDS = "";

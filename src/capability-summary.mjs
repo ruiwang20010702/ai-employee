@@ -8,6 +8,7 @@ const capabilityLabels = Object.freeze({
   work_plan_proposal: "生成工作计划提案",
   reply_draft: "生成回复草稿",
   document_draft: "文档草稿",
+  project_memory_proposal: "形成待人工确认的项目记忆候选",
   code_patch: "代码补丁",
   local_branch: "隔离分支和本地提交",
   local_test: "运行项目登记的测试",
@@ -17,6 +18,7 @@ const capabilityLabels = Object.freeze({
   dingtalk_calendar_create: "创建受控钉钉日程",
   dingtalk_report_submit: "提交固定模板钉钉日志",
   git_push: "推送受控 Git 分支",
+  github_pr_draft: "创建可核验的 GitHub PR 草稿",
   production_deploy: "执行带验收和回滚的生产发布",
 });
 

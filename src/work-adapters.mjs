@@ -116,6 +116,28 @@ async function dws(dwsPath, args, timeout) {
   return JSON.parse(stdout);
 }
 
+async function gh(ghPath, args, timeout = 120_000) {
+  const { stdout } = await execFileAsync(ghPath, args, {
+    timeout,
+    maxBuffer: 2 * 1024 * 1024,
+    env: safeCommandEnvironment(ghPath),
+  });
+  return stdout.trim();
+}
+
+function githubRepositoryFromRemote(remote) {
+  const value = String(remote ?? "").trim();
+  const scp = value.match(/^git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/iu);
+  if (scp) return scp[1].toLowerCase();
+  try {
+    const url = new URL(value);
+    if (url.hostname.toLowerCase() !== "github.com") return null;
+    return url.pathname.replace(/^\//u, "").replace(/\.git$/iu, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 function dwsResult(payload) {
   return payload?.result ?? payload?.data ?? payload ?? {};
 }
@@ -768,9 +790,51 @@ export function createControlledWorkAdapters({
   codexPath,
   dwsPath = null,
   gbrainPath = "gbrain",
+  ghPath = null,
+  store = null,
 }) {
   return {
     ...createReadOnlyWorkAdapters({ codexPath, gbrainPath }),
+    project_memory_proposal: {
+      async preflight({ plan, step, manifest }) {
+        referencedEarlierStep(plan, step, "documentStepId", "document_draft");
+        if (!store?.proposeWorkPlanMemory) {
+          throw new Error("Project memory store port is unavailable");
+        }
+        if (!(manifest.profile?.memoryScope.allowedTypes ?? []).includes("project")) {
+          throw new Error("Project memory is outside the approved memory scope");
+        }
+      },
+      async execute({ plan, step }) {
+        const retentionDays = Number(step.inputs.retentionDays);
+        const expiresAt = new Date(Date.now() + retentionDays * 86_400_000);
+        const result = await store.proposeWorkPlanMemory({
+          type: "project",
+          subject: plan.projectId,
+          projectId: plan.projectId,
+          statement: String(step.inputs.statement).trim(),
+          sourceId: plan.planHash,
+          sourceVersion: plan.recipe ? `${plan.recipe.id}@${plan.recipe.version}` : "work-plan-v1",
+          scope: { factKey: String(step.inputs.factKey).trim() },
+          confidence: 1,
+          sensitivity: "internal",
+          expiresAt,
+          createdBy: plan.requesterId,
+        });
+        return {
+          verified: true,
+          evidence: {
+            kind: "project_memory_candidate",
+            memoryId: result.id,
+            status: result.status,
+            created: result.created,
+            sourcePlanHash: plan.planHash,
+            statementSha256: createHash("sha256").update(String(step.inputs.statement).trim()).digest("hex"),
+            verification: "stored_as_proposed_and_requires_human_confirmation",
+          },
+        };
+      },
+    },
     local_test: {
       interruptible: Boolean(capabilityCatalog.local_test.interruptible),
       async preflight({ plan, step, manifest }) {
@@ -909,6 +973,92 @@ export function createControlledWorkAdapters({
             rollback: "remote branch deletion requires a separate approved plan",
           },
         };
+      },
+    },
+    github_pr_draft: {
+      async preflight({ plan, step, manifest }) {
+        referencedEarlierStep(plan, step, "pushStepId", "git_push");
+        if (!ghPath || !isAbsolute(ghPath)) {
+          throw new Error("GitHub CLI path must be an approved absolute path");
+        }
+        await access(ghPath, constants.X_OK);
+        const rule = manifest.capabilities.github_pr_draft;
+        const pushRule = manifest.capabilities.git_push;
+        if (!rule?.repository || !pushRule?.expectedRemoteUrl) {
+          throw new Error("github_pr_draft project rule is incomplete");
+        }
+        if (githubRepositoryFromRemote(pushRule.expectedRemoteUrl) !== rule.repository.toLowerCase()) {
+          throw new Error("GitHub repository differs from the approved Git remote");
+        }
+      },
+      async execute({ plan, step, manifest, priorEvidence }) {
+        const pushReference = referencedEarlierStep(
+          plan,
+          step,
+          "pushStepId",
+          "git_push",
+        );
+        const pushEvidence = priorEvidence[pushReference];
+        if (pushEvidence?.kind !== "verified_git_push") {
+          throw new Error("GitHub PR draft requires verified push evidence");
+        }
+        const rule = manifest.capabilities.github_pr_draft;
+        const title = String(step.inputs.title).trim();
+        const body = String(step.inputs.body).trim();
+        const baseBranch = String(step.inputs.baseBranch).trim();
+        if (!rule.baseBranches.includes(baseBranch)) {
+          throw new Error("GitHub PR base branch is not approved");
+        }
+        await mkdir(patchDirectory, { recursive: true, mode: 0o700 });
+        const bodyPath = fileURLToPath(new URL(`${randomUUID()}.pr-body.md`, patchDirectory));
+        try {
+          await writeFile(bodyPath, `${body}\n`, { mode: 0o600, flag: "wx" });
+          const createdUrl = await gh(ghPath, [
+            "pr", "create", "--draft", "--repo", rule.repository,
+            "--head", pushEvidence.branch, "--base", baseBranch,
+            "--title", title, "--body-file", bodyPath,
+          ], rule.timeoutMs ?? 120_000);
+          const parsed = new URL(createdUrl);
+          const expectedPrefix = `/${rule.repository.toLowerCase()}/pull/`;
+          if (
+            parsed.protocol !== "https:" ||
+            parsed.hostname.toLowerCase() !== "github.com" ||
+            !parsed.pathname.toLowerCase().startsWith(expectedPrefix)
+          ) {
+            throw new Error("GitHub PR create returned an unexpected URL");
+          }
+          const readback = JSON.parse(await gh(ghPath, [
+            "pr", "view", createdUrl, "--repo", rule.repository,
+            "--json", "number,url,state,isDraft,headRefName,headRefOid,baseRefName,title",
+          ], rule.timeoutMs ?? 120_000));
+          if (
+            readback.url !== createdUrl || readback.state !== "OPEN" || readback.isDraft !== true ||
+            readback.headRefName !== pushEvidence.branch || readback.headRefOid !== pushEvidence.commit ||
+            readback.baseRefName !== baseBranch || readback.title !== title
+          ) {
+            throw new Error("GitHub PR readback did not match the approved intent");
+          }
+          return {
+            verified: true,
+            evidence: {
+              kind: "verified_github_pr_draft",
+              repository: rule.repository,
+              number: readback.number,
+              url: readback.url,
+              head: readback.headRefName,
+              base: readback.baseRefName,
+              commit: readback.headRefOid,
+              titleSha256: createHash("sha256").update(title).digest("hex"),
+              bodySha256: createHash("sha256").update(body).digest("hex"),
+              verification: "gh_pr_view_matches_push_and_intent",
+              rollback: "closing or deleting the remote branch requires separate approval",
+            },
+          };
+        } finally {
+          await unlink(bodyPath).catch((error) => {
+            if (error.code !== "ENOENT") throw error;
+          });
+        }
       },
     },
     production_deploy: {

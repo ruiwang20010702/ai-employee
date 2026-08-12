@@ -40,6 +40,7 @@ export const serviceDefinitions = [
   { component: "listener", label: "com.foursday.listener" },
   { component: "worker", label: "com.foursday.worker" },
   { component: "executor", label: "com.foursday.executor" },
+  { component: "proactive", label: "com.foursday.proactive" },
   { component: "health", label: "com.foursday.health" },
   { component: "admin", label: "com.foursday.admin" },
   { component: "alert", label: "com.foursday.alert" },

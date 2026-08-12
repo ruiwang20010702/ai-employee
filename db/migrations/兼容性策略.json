@@ -23,6 +23,16 @@
       "rollback": "service_only_with_state_guard",
       "guard": "capability_budget_target_support_required",
       "evidence": "增加两个可空计划字段、独立预算账本和索引；数据库约束拒绝无预算绑定的计划进入可执行状态，已应用迁移时仅允许回退到同样支持第018号持久预算门禁的服务"
+    },
+    "019_个人项目与时间返还.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only",
+      "evidence": "只增加独立时间返还表和索引；旧服务不会读取或写入新表，既有任务、计划、记忆和预算语义不变"
+    },
+    "020_主动工作触发器.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only",
+      "evidence": "只增加独立触发器与运行幂等账本；旧服务不会创建主动任务，已有消息、计划、记忆和预算语义不变"
     }
   }
 }

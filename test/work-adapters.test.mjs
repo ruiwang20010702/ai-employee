@@ -511,6 +511,72 @@ test("代码补丁只应用到隔离分支且不覆盖原工作区", async (t) =
   assert.equal(await readFile(releaseState, "utf8"), "old\n");
 });
 
+test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "foursday-gh-pr-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const executable = join(directory, "fake-gh");
+  const argumentsPath = join(directory, "arguments.jsonl");
+  const bodyRecord = join(directory, "body.md");
+  const branch = "foursday/change-1";
+  const commit = "a".repeat(40);
+  await writeFile(executable, [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const args = process.argv.slice(2);",
+    `fs.appendFileSync(${JSON.stringify(argumentsPath)}, JSON.stringify(args)+'\\n');`,
+    "if (args[0] === 'pr' && args[1] === 'create') {",
+    "  const bodyPath = args[args.indexOf('--body-file') + 1];",
+    `  fs.writeFileSync(${JSON.stringify(bodyRecord)}, fs.readFileSync(bodyPath));`,
+    "  console.log('https://github.com/example/project/pull/42');",
+    "} else if (args[0] === 'pr' && args[1] === 'view') {",
+    `  console.log(JSON.stringify({number:42,url:'https://github.com/example/project/pull/42',state:'OPEN',isDraft:true,headRefName:${JSON.stringify(branch)},headRefOid:${JSON.stringify(commit)},baseRefName:'main',title:'修复问题'}));`,
+    "} else process.exit(2);",
+  ].join("\n"), { mode: 0o700 });
+  const plan = {
+    steps: [
+      { id: "push", capability: "git_push" },
+      {
+        id: "pr", capability: "github_pr_draft",
+        inputs: { pushStepId: "push", title: "修复问题", body: "变更与测试说明", baseBranch: "main" },
+      },
+    ],
+  };
+  const project = {
+    version: 1, projectId: "test_project", name: "GitHub 项目",
+    rootDirectory: directory, requesters: ["user-1"],
+    capabilities: {
+      git_push: {
+        mode: "approval_required", remote: "origin",
+        expectedRemoteUrl: "https://github.com/example/project.git",
+        branchPrefix: "foursday/",
+      },
+      github_pr_draft: {
+        mode: "approval_required", repository: "example/project",
+        baseBranches: ["main"], maxTitleChars: 120, maxBodyBytes: 65_536,
+      },
+    },
+  };
+  const adapter = createControlledWorkAdapters({
+    codexPath: "/bin/false", ghPath: executable,
+  }).github_pr_draft;
+  await adapter.preflight({ plan, step: plan.steps[1], manifest: project });
+  const result = await adapter.execute({
+    plan,
+    step: plan.steps[1],
+    manifest: project,
+    priorEvidence: {
+      push: { kind: "verified_git_push", branch, commit },
+    },
+  });
+  assert.equal(result.evidence.kind, "verified_github_pr_draft");
+  assert.equal(result.evidence.commit, commit);
+  assert.equal(await readFile(bodyRecord, "utf8"), "变更与测试说明\n");
+  const invocations = (await readFile(argumentsPath, "utf8")).trim().split("\n").map(JSON.parse);
+  assert.equal(invocations.length, 2);
+  assert.equal(invocations[0].includes("--draft"), true);
+  assert.match(invocations[1][invocations[1].indexOf("--json") + 1], /headRefOid/u);
+});
+
 test("共享文档只写固定目标并通过 DWS 回读哈希验收", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "ai-shared-doc-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

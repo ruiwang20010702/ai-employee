@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "id": "meeting-follow-up",
+  "name": "会议到执行",
+  "description": "把会议记录转成决策草稿、项目记忆候选、钉钉待办和复盘日程；所有外部动作仍需项目授权与人工审批。",
+  "category": "meeting",
+  "objective": "将 {{meetingTitle}} 从会议记录推进到可回读的执行闭环",
+  "baselineMinutes": 40,
+  "baselineMethod": "user_confirmed",
+  "inputs": [
+    {
+      "name": "meetingTitle",
+      "type": "string",
+      "required": true,
+      "description": "会议标题或主题"
+    },
+    {
+      "name": "meetingNotes",
+      "type": "string",
+      "required": true,
+      "description": "经过授权的会议记录或纪要"
+    },
+    {
+      "name": "executorUserIds",
+      "type": "string_list",
+      "required": true,
+      "description": "待办执行人的钉钉用户 ID"
+    },
+    {
+      "name": "attendeeUserIds",
+      "type": "string_list",
+      "required": true,
+      "description": "复盘日程参与人的钉钉用户 ID"
+    },
+    {
+      "name": "decisionStatement",
+      "type": "string",
+      "required": true,
+      "description": "需要形成人工确认项目记忆候选的决策事实"
+    },
+    {
+      "name": "decisionFactKey",
+      "type": "string",
+      "required": true,
+      "description": "项目记忆事实键，例如 decision.release_gate"
+    },
+    {
+      "name": "memoryRetentionDays",
+      "type": "number",
+      "required": true,
+      "description": "项目记忆候选保留天数"
+    },
+    {
+      "name": "actionDue",
+      "type": "string",
+      "required": true,
+      "description": "行动项截止时间"
+    },
+    {
+      "name": "followupStart",
+      "type": "string",
+      "required": true,
+      "description": "复盘开始时间"
+    },
+    {
+      "name": "followupEnd",
+      "type": "string",
+      "required": true,
+      "description": "复盘结束时间"
+    }
+  ],
+  "steps": [
+    {
+      "id": "research-meeting",
+      "capability": "research",
+      "description": "核对 {{meetingTitle}} 的会议记录和项目材料，会议记录如下：{{meetingNotes}}",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {},
+      "expectedEvidence": "返回带来源的会议事实和缺口清单",
+      "rollback": null
+    },
+    {
+      "id": "draft-actions",
+      "capability": "document_draft",
+      "description": "生成 {{meetingTitle}} 的决策、行动项、负责人待确认项、项目记忆候选和跟进节奏草稿",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {},
+      "expectedEvidence": "生成非空 Markdown 行动草稿及内容哈希",
+      "rollback": null
+    },
+    {
+      "id": "propose-memory",
+      "capability": "project_memory_proposal",
+      "description": "把会议中已确认的决策形成待人工确认的项目记忆候选",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {
+        "documentStepId": "draft-actions",
+        "statement": "{{decisionStatement}}",
+        "factKey": "{{decisionFactKey}}",
+        "retentionDays": "{{memoryRetentionDays}}"
+      },
+      "expectedEvidence": "记忆候选编号、proposed 状态、计划来源哈希和事实哈希",
+      "rollback": "候选可由负责人拒绝或撤销，不会自动转为正式记忆"
+    },
+    {
+      "id": "create-todo",
+      "capability": "dingtalk_todo_create",
+      "description": "创建 {{meetingTitle}} 的已确认行动待办",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {
+        "title": "{{meetingTitle}}：执行已确认行动项",
+        "executorUserIds": "{{executorUserIds}}",
+        "priority": "20",
+        "due": "{{actionDue}}"
+      },
+      "expectedEvidence": "钉钉待办 ID、逐字段回读和输入哈希",
+      "rollback": "删除待办需要单独审批"
+    },
+    {
+      "id": "create-followup",
+      "capability": "dingtalk_calendar_create",
+      "description": "创建 {{meetingTitle}} 的跟进复盘日程",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {
+        "title": "{{meetingTitle}}：行动复盘",
+        "start": "{{followupStart}}",
+        "end": "{{followupEnd}}",
+        "description": "复核决策、行动项和项目记忆候选是否需要确认或纠正。",
+        "attendeeUserIds": "{{attendeeUserIds}}",
+        "timezone": "Asia/Shanghai",
+        "freeBusy": "busy"
+      },
+      "expectedEvidence": "钉钉日程 ID、逐字段回读和输入哈希",
+      "rollback": "删除日程需要单独审批"
+    }
+  ]
+}

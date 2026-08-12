@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { startAdminServer } from "../src/admin-server.mjs";
 import { adminHtml } from "../src/admin-ui.mjs";
+import { personalDashboardHtml } from "../src/personal-dashboard-ui.mjs";
 import { draftSha256 } from "../src/decision-quality.mjs";
 
 test("管理台内嵌脚本可以被浏览器解析", () => {
@@ -20,6 +21,76 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.match(script, /conflictIds\.length===0/u);
   assert.match(script, /candidate\?\.conflict\?\.conflicts\?\.find/u);
   assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
+});
+
+test("个人工作台脚本可解析并展示四项个人闭环", () => {
+  const script = personalDashboardHtml.match(
+    /<script nonce="__NONCE__">([\s\S]*?)<\/script>/u,
+  )?.[1];
+  assert.ok(script);
+  assert.doesNotThrow(() => new Function(script));
+  assert.match(personalDashboardHtml, /项目接入向导/u);
+  assert.match(personalDashboardHtml, /可用配方/u);
+  assert.match(personalDashboardHtml, /返还时间/u);
+  assert.match(script, /\/api\/projects\/onboarding/u);
+  assert.match(script, /\/api\/time-returns/u);
+  assert.match(script, /完整回读证据与本人确认/u);
+  assert.match(script, /设为定时工作/u);
+  assert.match(script, /\/api\/triggers/u);
+});
+
+test("主动触发器默认停用、列表脱敏且启用受全局能力门禁", async () => {
+  const { store, config, triggers } = fixture();
+  const manifest = {
+    version: 1, projectId: "project_1", name: "项目", rootDirectory: "/tmp/project",
+    requesters: ["owner"],
+    profile: {
+      objective: "主动推进", successCriteria: [], milestones: [], collaborationObjects: [],
+      selectedRecipeIds: ["project-follow-up"],
+      memoryScope: { allowedTypes: ["project"], retentionDays: 90 },
+    },
+    capabilities: { research: { mode: "automatic" }, document_draft: { mode: "automatic" } },
+  };
+  const service = await startAdminServer({
+    store,
+    config,
+    manifestLoader: async () => new Map([[manifest.projectId, manifest]]),
+  });
+  const base = `http://127.0.0.1:${service.server.address().port}`;
+  const headers = {
+    authorization: "Bearer read-secret",
+    "x-ai-employee-write-token": "write-secret",
+    "content-type": "application/json",
+  };
+  try {
+    const created = await fetch(`${base}/api/triggers`, {
+      method: "POST", headers, body: JSON.stringify({
+        id: "daily-follow-up", projectId: "project_1", recipeId: "project-follow-up",
+        requesterId: "owner", kind: "schedule", values: { projectFocus: "每日风险" },
+        schedule: { startsAt: "2026-08-13T01:00:00.000Z", intervalMinutes: 1_440 },
+      }),
+    });
+    assert.equal(created.status, 201);
+    assert.equal((await created.json()).status, "disabled");
+    assert.equal(triggers[0].enabled, false);
+    const listed = await fetch(`${base}/api/triggers`, { headers: { authorization: "Bearer read-secret" } });
+    const item = (await listed.json()).items[0];
+    assert.equal(item.id, "daily-follow-up");
+    assert.equal(Object.hasOwn(item, "requesterId"), false);
+    assert.equal(Object.hasOwn(item, "values"), false);
+    const blocked = await fetch(`${base}/api/triggers/daily-follow-up/enabled`, {
+      method: "POST", headers, body: JSON.stringify({ enabled: true }),
+    });
+    assert.equal(blocked.status, 403);
+    config.capabilities.add("proactive_work");
+    const enabled = await fetch(`${base}/api/triggers/daily-follow-up/enabled`, {
+      method: "POST", headers, body: JSON.stringify({ enabled: true }),
+    });
+    assert.equal(enabled.status, 200);
+    assert.equal((await enabled.json()).status, "enabled");
+  } finally {
+    await service.stop("test");
+  }
 });
 
 test("判断质量页使用内嵌两步表单连续复核", () => {
@@ -66,6 +137,7 @@ function fixture({ taskReply = "准备回复" } = {}) {
   const scopedPauses = [];
   const decisions = [];
   const reviews = [];
+  const triggers = [];
   const task = { id: "task_1", status: "awaiting_approval", payload: { senderName: "测试人", content: "需要回复" }, result: { shouldReply: true, reply: taskReply, riskLevel: "medium", reason: "需要确认", decisionSource: "model", decisionKind: "reply" }, created_at: "2026-08-04T00:00:00Z", updated_at: "2026-08-04T00:00:00Z" };
   const plan = { id: "plan_1", project_id: "project_1", objective: "发布修复", max_level: "L4", status: "awaiting_approval", policy_decision: "REQUIRE_APPROVAL", plan_hash: "0123456789abcdef", plan: { steps: [{ id: "step_1", capability: "production_deploy", description: "部署已审核版本", workingDirectory: "/tmp/project", inputs: { commandId: "deploy" }, expectedEvidence: "健康检查通过", rollback: "执行回滚命令" }] }, updated_at: "2026-08-04T00:00:00Z" };
   const store = {
@@ -89,6 +161,19 @@ function fixture({ taskReply = "准备回复" } = {}) {
       }];
     },
     async listMemories() { return []; },
+    async listTimeReturns() { return []; },
+    async listWorkTriggers({ projectId = null } = {}) {
+      return triggers.filter((trigger) => !projectId || trigger.projectId === projectId);
+    },
+    async createWorkTrigger(trigger) {
+      const saved = { ...trigger, status: trigger.enabled ? "enabled" : "disabled", nextRunAt: null, lastRunAt: null };
+      triggers.push(saved);return saved;
+    },
+    async setWorkTriggerEnabled(id, enabled) {
+      const trigger = triggers.find((item) => item.id === id);
+      if (!trigger) throw new Error("Work trigger not found");
+      trigger.status = enabled ? "enabled" : "disabled";trigger.enabled = enabled;return trigger;
+    },
     async memoryConflictMetrics() { return { candidates: 0, conflictCandidates: 0, duplicateCandidates: 0, activeConflictGroups: 0, conflictRate: null, healthy: true, items: [] }; },
     async listScopedPauses() { return scopedPauses; },
     async isScopedPaused(type, value) {
@@ -210,8 +295,10 @@ function fixture({ taskReply = "准备回复" } = {}) {
     approver: "test-reviewer",
     targetUserIds: ["contact_1"],
     targetGroupIds: ["group_1"],
+    recipesDirectory: new URL("../deploy/recipes/", import.meta.url),
+    projectsDirectory: "/tmp/foursday-admin-test-projects",
   };
-  return { store, config, decisions, task, plan };
+  return { store, config, decisions, task, plan, triggers };
 }
 
 test("管理台强制读取和写入令牌，并返回安全页面", async () => {
@@ -228,6 +315,9 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     assert.match(html, /明确替代这条旧记忆/u);
     assert.doesNotMatch(html, /conflictIds\[0\]/u);
     assert.doesNotMatch(html, /read-secret|write-secret/u);
+    const personal = await fetch(`${base}/projects`);
+    assert.equal(personal.status, 200);
+    assert.match(await personal.text(), /Foursday 个人工作台/u);
 
     assert.equal((await fetch(`${base}/api/overview`)).status, 401);
     const read = { authorization: "Bearer read-secret" };
@@ -239,6 +329,9 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     const capabilityBody = await capabilities.json();
     assert.equal(capabilityBody.catalog.some((item) => item.name === "production_deploy"), true);
     assert.equal(capabilityBody.global.find((item) => item.name === "work_plan_execution").enabled, false);
+    const recipes = await fetch(`${base}/api/recipes`, { headers: read });
+    assert.equal(recipes.status, 200);
+    assert.equal((await recipes.json()).items.length, 4);
     task.payload.messages = [{
       id: "source-message-1",
       senderName: "测试人",

@@ -91,7 +91,7 @@ test("完成度矩阵明确区分目标能力、当前授权和已部署闭环",
   assert.doesNotMatch(matrix, /第 01[78] 号迁移尚未应用生产/u);
 });
 
-test("权威文档共享同一生产版本且不保留已部署能力的候选口径", async () => {
+test("权威文档区分当前产品候选与已部署生产版本", async () => {
   const [readme, requirements, matrix, acceptance, review, technical, overview, operations] =
     await Promise.all([
       projectText("README_ZH.md"),
@@ -107,8 +107,10 @@ test("权威文档共享同一生产版本且不保留已部署能力的候选�
   const productionSha = acceptance.match(/当前生产精确绑定提交 `([0-9a-f]{40})`/u)?.[1];
   assert.ok(version);
   assert.ok(productionSha);
-  assert.match(matrix, new RegExp(`${version} 技术版本已部署`, "u"));
-  assert.match(review, new RegExp(`${version} 提交`, "u"));
+  assert.equal(version, "V2.3");
+  assert.match(matrix, /V2\.3 工作区候选已实现，尚未提交、推送或部署/u);
+  assert.match(matrix, /V2\.2 技术版本已部署/u);
+  assert.match(review, /V2\.2 提交/u);
   assert.ok(technical.includes(`当前生产提交为 \`${productionSha}\``));
   for (const text of [readme, matrix, acceptance, review, technical, overview, operations]) {
     assert.doesNotMatch(
@@ -117,6 +119,41 @@ test("权威文档共享同一生产版本且不保留已部署能力的候选�
     );
     assert.doesNotMatch(text, /当前主机仍安装[^\n|]*0\.2\.0/u);
   }
+  for (const text of [matrix, technical, overview, operations]) {
+    assert.doesNotMatch(text, /V2\.3 技术版本已部署/u);
+  }
+});
+
+test("V2.3 个人工作闭环和社区扩展在中英文文档统一", async () => {
+  const [readme, chinese, requirements, overview, architecture, integrations, capabilities, deployment] =
+    await Promise.all([
+      projectText("README.md"),
+      projectText("README_ZH.md"),
+      projectText("docs/产品需求文档.md"),
+      projectText("docs/en/overview.md"),
+      projectText("docs/en/architecture.md"),
+      projectText("docs/en/integrations.md"),
+      projectText("docs/en/capabilities.md"),
+      projectText("docs/en/deployment.md"),
+    ]);
+  for (const value of ["Project onboarding", "Recipe library", "Project cockpit", "Time-return dashboard", "Proactive mode"]) {
+    assert.match(readme, new RegExp(value, "u"));
+  }
+  for (const value of ["项目接入向导", "工作配方库", "项目驾驶舱", "时间返还仪表盘", "主动工作模式"]) {
+    assert.match(chinese, new RegExp(value, "u"));
+  }
+  for (const value of ["## 6.10", "## 6.11", "## 6.12", "## 6.13", "## 6.14", "## 6.15"]) {
+    assert.ok(requirements.includes(value));
+  }
+  for (const text of [readme, chinese, requirements, overview, integrations, deployment]) {
+    assert.match(text, /Slack/u);
+    assert.match(text, /Teams/u);
+    assert.match(text, /Gmail/u);
+    assert.match(text, /Google Workspace/u);
+  }
+  assert.match(architecture, /WorkTrigger/u);
+  assert.match(capabilities, /Draft PR/u);
+  assert.match(deployment, /workspace-candidate/u);
 });
 
 test("新环境文档禁止把生成的生产密钥写入配置", async () => {
@@ -282,6 +319,7 @@ test("中英文首页、治理文件和英文核心文档的本地链接全部�
     "CHANGELOG_ZH.md",
     "SECURITY.md",
     "docs/en/overview.md",
+    "docs/en/product-requirements.md",
     "docs/en/architecture.md",
     "docs/en/capabilities.md",
     "docs/en/deployment.md",

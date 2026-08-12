@@ -397,6 +397,9 @@ try {
       adapters: createControlledWorkAdapters({
         codexPath: config.codexPath,
         dwsPath: config.dwsPath,
+        gbrainPath: config.gbrainPath,
+        ghPath: config.ghPath,
+        store,
       }),
     });
     const notification = await store.ensureWorkPlanResultDraft?.(argument);

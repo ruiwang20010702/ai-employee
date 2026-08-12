@@ -5,10 +5,11 @@ import { startListener } from "./listener.mjs";
 import { applyProductionConfigFile } from "./production-config-file.mjs";
 import { runWorker } from "./worker.mjs";
 import { runPlanExecutor } from "./plan-executor.mjs";
+import { runProactiveWorker } from "./proactive-worker.mjs";
 
 const [component] = process.argv.slice(2);
-if (!["listener", "worker", "executor", "health", "admin", "alert"].includes(component)) {
-  throw new Error("Usage: service-launcher.mjs listener|worker|executor|health|admin|alert");
+if (!["listener", "worker", "executor", "proactive", "health", "admin", "alert"].includes(component)) {
+  throw new Error("Usage: service-launcher.mjs listener|worker|executor|proactive|health|admin|alert");
 }
 await applyProductionConfigFile();
 
@@ -18,7 +19,9 @@ const service =
     : component === "worker"
       ? await runWorker()
       : component === "executor"
-        ? await runPlanExecutor()
+      ? await runPlanExecutor()
+      : component === "proactive"
+        ? await runProactiveWorker()
       : component === "health"
         ? await startHealthServer()
         : component === "admin"

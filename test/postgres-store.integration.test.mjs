@@ -46,6 +46,9 @@ async function fixture(t) {
   await migrate(pool);
   const store = await new PostgresStore(settings, { pool }).open();
   t.after(async () => {
+    await pool.query("DELETE FROM time_return_entries WHERE tenant_id = $1", [tenantId]);
+    await pool.query("DELETE FROM work_trigger_runs WHERE tenant_id = $1", [tenantId]);
+    await pool.query("DELETE FROM work_triggers WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM availability_samples WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM audit_events WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM checkpoints WHERE tenant_id = $1", [tenantId]);
@@ -2102,4 +2105,181 @@ integration("PostgreSQL 幂等创建计划结果回传草稿", async (t) => {
   assert.equal(first.id, second.id);
   assert.equal(first.status, "awaiting_approval");
   assert.equal(first.conversation_id, "c1");
+});
+
+integration("PostgreSQL 时间返还需要完整证据、人工确认并随项目擦除", async (t) => {
+  const store = await fixture(t);
+  const manifest = {
+    version: 1,
+    projectId: "time_project",
+    name: "时间返还",
+    rootDirectory: "/workspace/time",
+    requesters: ["owner"],
+    capabilities: { research: { mode: "automatic" } },
+  };
+  const plan = await store.registerWorkPlan(assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: manifest.projectId,
+      requesterId: "owner",
+      recipe: {
+        id: "project-follow-up",
+        version: 1,
+        baselineMinutes: 60,
+        baselineMethod: "user_confirmed",
+      },
+      objective: "项目跟进",
+      steps: [{
+        id: "research",
+        capability: "research",
+        description: "核对进展",
+        expectedEvidence: "项目进展",
+      }],
+    },
+  }));
+  await store.consumeWorkPlanAuthorization(plan.id);
+  await assert.rejects(
+    store.proposeTimeReturn(plan.id, 10, "owner"),
+    /completed work plan/u,
+  );
+  await store.updateWorkPlanStep(plan.id, "research", {
+    status: "completed",
+    evidence: { kind: "research", verification: "source_checked", sha256: "a".repeat(64) },
+  });
+  await store.finishWorkPlan(plan.id, { success: true });
+  const proposed = await store.proposeTimeReturn(plan.id, 10, "owner");
+  assert.equal(proposed.returnedMinutes, 50);
+  assert.equal(proposed.status, "proposed");
+  const confirmed = await store.decideTimeReturn(proposed.id, "confirmed", "owner");
+  assert.equal(confirmed.status, "confirmed");
+  const preview = await store.previewPrivacyErasure({ projectId: manifest.projectId });
+  assert.equal(preview.counts.timeReturns, 1);
+  await store.erasePrivacyData(
+    { projectId: manifest.projectId },
+    preview.confirmation,
+    "owner",
+  );
+  assert.equal((await store.listTimeReturns({ projectId: manifest.projectId })).length, 0);
+});
+
+integration("PostgreSQL 主动触发运行绑定实例并在隐私删除前要求停用", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-12T05:00:00.000Z");
+  await store.createWorkTrigger({
+    version: 1, id: "schedule-lease", projectId: "trigger_project",
+    recipeId: "project-follow-up", requesterId: "owner", kind: "schedule",
+    enabled: true, schedule: { startsAt: now.toISOString(), intervalMinutes: 60 },
+    values: { projectFocus: "租约核对" },
+  }, "owner", now);
+  const schedule = await store.claimDueWorkTrigger(
+    "schedule-worker",
+    new Date(now.getTime() + 60_000),
+    now,
+  );
+  const scheduleRunKey = "b".repeat(64);
+  assert.equal(await store.reserveWorkTriggerRun(schedule.id, scheduleRunKey, "wrong-worker", now), false);
+  assert.equal(await store.reserveWorkTriggerRun(schedule.id, scheduleRunKey, "schedule-worker", now), true);
+  assert.equal(
+    await store.failWorkTriggerRun(schedule.id, scheduleRunKey, "test", "schedule-worker", now),
+    "failed",
+  );
+  const failedSchedule = await store.getWorkTrigger(schedule.id);
+  assert.equal(failedSchedule.leaseOwner, null);
+  assert.ok(new Date(failedSchedule.nextRunAt) > now);
+  await store.setWorkTriggerEnabled(schedule.id, false, "owner", now);
+  await store.createWorkTrigger({
+    version: 1, id: "privacy-trigger", projectId: "trigger_project",
+    recipeId: "project-follow-up", requesterId: "owner", kind: "event",
+    enabled: true, event: { type: "meeting.ended" }, values: { projectFocus: "会议跟进" },
+  }, "owner", now);
+  const runKey = "a".repeat(64);
+  assert.equal(await store.reserveWorkTriggerRun("privacy-trigger", runKey, "worker-a", now), true);
+  await assert.rejects(
+    store.failWorkTriggerRun("privacy-trigger", runKey, "wrong-owner", "worker-b", now),
+    /not claimed/u,
+  );
+  assert.equal(await store.failWorkTriggerRun("privacy-trigger", runKey, "test", "worker-a", now), "failed");
+  const blocked = await store.previewPrivacyErasure({ projectId: "trigger_project" }, new Date(now.getTime() + 1));
+  assert.equal(blocked.blocked.workTriggers, 1);
+  await store.setWorkTriggerEnabled("privacy-trigger", false, "owner", now);
+  const preview = await store.previewPrivacyErasure({ projectId: "trigger_project" }, new Date(now.getTime() + 1));
+  assert.equal(preview.counts.workTriggers, 2);
+  await store.erasePrivacyData(
+    { projectId: "trigger_project" }, preview.confirmation, "owner", new Date(now.getTime() + 1),
+  );
+  assert.equal(await store.getWorkTrigger("privacy-trigger"), null);
+  assert.equal(await store.getWorkTrigger("schedule-lease"), null);
+});
+
+integration("PostgreSQL 主动计划在触发运行完成前不能消费授权", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-12T05:30:00.000Z");
+  await store.createWorkTrigger({
+    version: 1, id: "atomic-trigger", projectId: "trigger_project",
+    recipeId: "project-follow-up", requesterId: "owner", kind: "event",
+    enabled: true, event: { type: "meeting.ended" }, values: { projectFocus: "原子落账" },
+  }, "owner", now);
+  const runKey = "d".repeat(64);
+  const assessment = assessWorkPlan({
+    manifest: {
+      version: 1, projectId: "trigger_project", name: "触发项目",
+      rootDirectory: "/workspace/trigger", requesters: ["owner"],
+      capabilities: { research: { mode: "automatic" } },
+    },
+    plan: {
+      version: 1, projectId: "trigger_project", requesterId: "owner",
+      recipe: {
+        id: "project-follow-up", version: 1, baselineMinutes: 30,
+        baselineMethod: "user_confirmed", triggerId: "atomic-trigger", triggerRunKey: runKey,
+      },
+      objective: "验证主动计划落账",
+      steps: [{ id: "research", capability: "research", description: "核对", expectedEvidence: "证据" }],
+    },
+  });
+  assert.equal(await store.reserveWorkTriggerRun("atomic-trigger", runKey, "worker-a", now), true);
+  const plan = await store.registerWorkPlan(assessment, now);
+  await assert.rejects(
+    store.consumeWorkPlanAuthorization(plan.id, now),
+    /triggered work plan run is not completed/ui,
+  );
+  await store.completeWorkTriggerRun("atomic-trigger", runKey, plan.id, "worker-a", now);
+  assert.equal(await store.consumeWorkPlanAuthorization(plan.id, now), true);
+});
+
+integration("PostgreSQL 项目记忆候选绑定计划来源并保持幂等", async (t) => {
+  const store = await fixture(t);
+  const manifest = {
+    version: 1, projectId: "memory_project", name: "项目记忆",
+    rootDirectory: "/workspace/memory", requesters: ["owner"],
+    profile: {
+      objective: "形成决策", successCriteria: [], milestones: [], collaborationObjects: [],
+      selectedRecipeIds: ["meeting-follow-up"],
+      memoryScope: { allowedTypes: ["project"], retentionDays: 90 },
+    },
+    capabilities: { research: { mode: "automatic" } },
+  };
+  const plan = await store.registerWorkPlan(assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1, projectId: manifest.projectId, requesterId: "owner",
+      recipe: { id: "meeting-follow-up", version: 1, baselineMinutes: 40, baselineMethod: "user_confirmed" },
+      objective: "会议闭环",
+      steps: [{ id: "research", capability: "research", description: "核对", expectedEvidence: "事实" }],
+    },
+  }));
+  const input = {
+    type: "project", subject: manifest.projectId, projectId: manifest.projectId,
+    statement: "发布前必须完成安全检查。", sourceId: plan.plan_hash,
+    sourceVersion: "meeting-follow-up@1", scope: { factKey: "decision.release_gate" },
+    confidence: 1, sensitivity: "internal",
+    expiresAt: "2026-11-10T00:00:00.000Z", createdBy: "owner",
+  };
+  const first = await store.proposeWorkPlanMemory(input, new Date("2026-08-12T00:00:00.000Z"));
+  const second = await store.proposeWorkPlanMemory(input, new Date("2026-08-12T00:01:00.000Z"));
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
+  const personPreview = await store.previewPrivacyErasure({ personId: "owner" });
+  assert.equal(personPreview.counts.memories, 1);
+  assert.equal(await store.confirmMemory(first.id, "owner", new Date("2026-08-12T00:02:00.000Z")), "confirmed");
 });

@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "id": "project-follow-up",
+  "name": "项目进度跟进",
+  "description": "核对项目目标、进展、风险和下一步，形成可审核跟进草稿。",
+  "category": "project-management",
+  "objective": "核对 {{projectFocus}} 的最新状态并形成下一步建议",
+  "baselineMinutes": 45,
+  "baselineMethod": "user_confirmed",
+  "inputs": [
+    {
+      "name": "projectFocus",
+      "type": "string",
+      "required": true,
+      "description": "本次需要跟进的项目目标或里程碑"
+    }
+  ],
+  "steps": [
+    {
+      "id": "research-status",
+      "capability": "research",
+      "description": "围绕 {{projectFocus}} 核对项目文件、变更和已有证据",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {},
+      "expectedEvidence": "列出已完成、进行中、阻塞、风险与未知项",
+      "rollback": null
+    },
+    {
+      "id": "draft-follow-up",
+      "capability": "document_draft",
+      "description": "形成 {{projectFocus}} 的进度、风险和下一步跟进草稿",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {},
+      "expectedEvidence": "生成带验收标准和责任边界的 Markdown 草稿",
+      "rollback": null
+    }
+  ]
+}

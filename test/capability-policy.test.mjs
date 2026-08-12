@@ -211,6 +211,88 @@ test("L3 推送即使标记自动也必须单次审批并绑定远端", () => {
   assert.throws(() => validateProjectManifest(value), /must not contain credentials/u);
 });
 
+test("GitHub PR 草稿必须引用已推送步骤并固定仓库与基础分支", () => {
+  const value = manifest();
+  value.capabilities.git_push = {
+    mode: "approval_required",
+    remote: "origin",
+    expectedRemoteUrl: "https://github.com/example/project.git",
+    branchPrefix: "foursday/",
+  };
+  value.capabilities.github_pr_draft = {
+    mode: "approval_required",
+    repository: "example/project",
+    baseBranches: ["main"],
+  };
+  const result = evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [
+      { id: "push", capability: "git_push", workingDirectory: "/workspace/vocab" },
+      {
+        capability: "github_pr_draft",
+        workingDirectory: "/workspace/vocab",
+        inputs: { pushStepId: "push", title: "修复问题", body: "变更与测试说明", baseBranch: "main" },
+      },
+    ],
+  });
+  assert.equal(result.decision, "REQUIRE_APPROVAL");
+  const denied = structuredClone(result);
+  assert.equal(evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [{
+      capability: "github_pr_draft",
+      workingDirectory: "/workspace/vocab",
+      inputs: { pushStepId: "missing", title: "修复", body: "说明", baseBranch: "develop" },
+    }],
+  }).decision, "DENY");
+  assert.ok(denied);
+});
+
+test("项目记忆能力只能形成符合项目记忆范围的候选", () => {
+  const value = manifest();
+  value.profile = {
+    objective: "形成项目记忆", successCriteria: [], milestones: [], collaborationObjects: [],
+    selectedRecipeIds: ["meeting-follow-up"],
+    memoryScope: { allowedTypes: ["project"], retentionDays: 90 },
+  };
+  value.capabilities.document_draft = { mode: "automatic" };
+  value.capabilities.project_memory_proposal = {
+    mode: "approval_required",
+    allowedFactKeyPrefixes: ["decision.", "risk."],
+    maxRetentionDays: 90,
+  };
+  assert.equal(evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [
+      { id: "draft", capability: "document_draft" },
+      {
+        capability: "project_memory_proposal",
+        inputs: {
+          documentStepId: "draft", statement: "发布前必须完成安全检查。",
+          factKey: "decision.release_gate", retentionDays: 90,
+        },
+      },
+    ],
+  }).decision, "REQUIRE_APPROVAL");
+  assert.equal(evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [
+      { id: "draft", capability: "document_draft" },
+      {
+        capability: "project_memory_proposal",
+        inputs: {
+          documentStepId: "draft", statement: "token=secret-value",
+          factKey: "person.phone", retentionDays: 365,
+        },
+      },
+    ],
+  }).decision, "DENY");
+});
+
 test("共享文档写入必须固定唯一目标且强制审批", () => {
   const value = manifest();
   value.capabilities.shared_document_write = {
@@ -235,6 +317,7 @@ test("高风险能力禁用时不要求预填外部目标", () => {
   const value = manifest();
   value.capabilities.shared_document_write = { mode: "disabled" };
   value.capabilities.git_push = { mode: "disabled" };
+  value.capabilities.github_pr_draft = { mode: "disabled" };
   assert.doesNotThrow(() => validateProjectManifest(value));
 });
 

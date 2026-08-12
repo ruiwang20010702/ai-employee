@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "id": "community-weekly-review",
+  "name": "Community weekly review",
+  "description": "A safe reference recipe that turns a weekly focus into a reviewable research and document plan.",
+  "category": "community",
+  "objective": "Review {{weeklyFocus}} and prepare a concise progress brief.",
+  "baselineMinutes": 45,
+  "baselineMethod": "user_confirmed",
+  "inputs": [
+    {
+      "name": "weeklyFocus",
+      "type": "string",
+      "description": "The project focus to review"
+    }
+  ],
+  "steps": [
+    {
+      "id": "research-progress",
+      "capability": "research",
+      "description": "Verify progress and risks for {{weeklyFocus}}.",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {},
+      "expectedEvidence": "Source-checked progress and risk summary",
+      "rollback": null
+    },
+    {
+      "id": "draft-brief",
+      "capability": "document_draft",
+      "description": "Draft a weekly brief for {{weeklyFocus}}.",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {},
+      "expectedEvidence": "Draft content hash",
+      "rollback": null
+    }
+  ]
+}

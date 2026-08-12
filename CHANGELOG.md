@@ -6,9 +6,24 @@ Notable changes to this project are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Personal project onboarding, a four-recipe library, project cockpit, and human-confirmed time-return ledger.
+- Disabled-by-default schedule and event triggers with idempotent runs, daily limits, cooldowns, and leases.
+- Meeting-to-execution and GitHub patch-to-Draft-PR recipes.
+- Versioned work-event and workspace adapter contracts plus Slack, Teams, Gmail, and Google Workspace examples.
+
+### Security
+
+- Project memory created by recipes remains proposed until human confirmation and is erased with its requester/project source scope.
+- Proactive runs reuse the same project authorization, approval, budget, takeover, idempotency, and read-back gates as message-originated work.
+- Project onboarding verifies the canonical Git repository root in the shared server boundary, not only in the CLI.
+- Trigger definitions reject credential material, schedule runs bind to their lease owner, and triggered plans cannot consume authorization before the exact run is durably completed.
+- Community manifests must use contract version `1.0` and explicitly enable all five safety guarantees.
+
 ### Planned
 
-- Easier desktop distribution and a community example library.
+- Easier desktop distribution and production community connectors.
 
 ## [0.4.0] - 2026-08-11
 

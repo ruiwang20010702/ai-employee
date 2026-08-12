@@ -87,3 +87,36 @@ export function assertModelProvider(provider) {
   assertMethods(provider, ["generateStructured"], "model_provider");
   return provider;
 }
+
+export function assertWorkEventAdapter(adapter) {
+  assertObject(adapter, "work_event_adapter");
+  assertIdentifier(adapter.id, "id", "work_event_adapter");
+  assertIdentifier(adapter.platform, "platform", "work_event_adapter");
+  if (adapter.contractVersion !== adapterContractVersion) {
+    throw contractError("work_event_adapter", `contractVersion must be ${adapterContractVersion}`);
+  }
+  if (!Array.isArray(adapter.eventTypes) || adapter.eventTypes.length === 0 || adapter.eventTypes.some(
+    (type) => typeof type !== "string" || !/^[a-z][a-z0-9]*(?:\.[a-z0-9_-]+)+$/u.test(type),
+  )) {
+    throw contractError("work_event_adapter", "eventTypes must be stable dotted identifiers");
+  }
+  assertMethods(adapter, ["normalizeEvent", "verifyAuthenticity"], "work_event_adapter");
+  return adapter;
+}
+
+export function assertWorkspaceAdapter(adapter) {
+  assertObject(adapter, "workspace_adapter");
+  assertIdentifier(adapter.id, "id", "workspace_adapter");
+  assertIdentifier(adapter.platform, "platform", "workspace_adapter");
+  if (adapter.contractVersion !== adapterContractVersion) {
+    throw contractError("workspace_adapter", `contractVersion must be ${adapterContractVersion}`);
+  }
+  const capabilities = adapter.capabilities;
+  if (!Array.isArray(capabilities) || capabilities.length === 0 || capabilities.some(
+    (capability) => !["todo", "calendar", "document", "mail"].includes(capability),
+  )) {
+    throw contractError("workspace_adapter", "capabilities must use the supported workspace ports");
+  }
+  assertMethods(adapter, ["create", "readBack"], "workspace_adapter");
+  return adapter;
+}

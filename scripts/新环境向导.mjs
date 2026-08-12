@@ -52,13 +52,13 @@ const serviceActions = Object.freeze({
     script: "scripts/管理常驻服务.mjs",
     args: ["generate"],
     applyRequired: true,
-    effect: "在当前安装包运行目录生成 9 个 LaunchAgent 配置，不加载服务",
+    effect: "在当前安装包运行目录生成 10 个 LaunchAgent 配置，不加载服务",
   }),
   install: Object.freeze({
     script: "scripts/管理常驻服务.mjs",
     args: ["install"],
     applyRequired: true,
-    effect: "从当前安装包目录生成、安装并加载 9 个 LaunchAgent",
+    effect: "从当前安装包目录生成、安装并加载 10 个 LaunchAgent",
   }),
   uninstall: Object.freeze({
     script: "scripts/管理常驻服务.mjs",
@@ -69,7 +69,7 @@ const serviceActions = Object.freeze({
   verify: Object.freeze({
     script: "scripts/验证服务部署.mjs",
     args: [],
-    effect: "只读核对 9 个 LaunchAgent、健康接口和目标安装包目录",
+    effect: "只读核对 10 个 LaunchAgent、健康接口和目标安装包目录",
   }),
 });
 

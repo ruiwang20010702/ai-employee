@@ -1,12 +1,9 @@
-import { execFile } from "node:child_process";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { promisify } from "node:util";
-import { validateProjectManifest } from "../src/capability-policy.mjs";
+import { buildProjectOnboardingDraft } from "../src/project-onboarding.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { applyProductionConfigFile } from "../src/production-config-file.mjs";
 
-const execFileAsync = promisify(execFile);
 const args = process.argv.slice(2);
 const value = (name) => {
   const index = args.indexOf(name);
@@ -17,37 +14,26 @@ const projectId = value("--project-id");
 const name = value("--name");
 const rootInput = value("--root");
 const requester = value("--requester");
+const objective = value("--objective") ?? `Safely deliver the outcomes of ${name ?? "this project"}`;
+const recipeIds = String(value("--recipes") ?? "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
 if (!projectId || !name || !rootInput || !requester) {
   throw new Error(
-    "Usage: 创建项目配置.mjs --project-id <id> --name <中文名> --root <绝对路径> --requester <钉钉用户ID> [--write]",
+    "Usage: 创建项目配置.mjs --project-id <id> --name <名称> --root <绝对路径> --requester <用户ID> --objective <项目目标> [--recipes <配方1,配方2>] [--write]",
   );
 }
 const rootDirectory = await realpath(rootInput);
-const repository = (
-  await execFileAsync("/usr/bin/git", ["-C", rootDirectory, "rev-parse", "--show-toplevel"])
-).stdout.trim();
-if ((await realpath(repository)) !== rootDirectory) {
-  throw new Error("Project root must be the Git repository root");
-}
-const manifest = validateProjectManifest({
-  version: 1,
+const { manifest } = await buildProjectOnboardingDraft({
   projectId,
   name,
   rootDirectory,
-  requesters: [requester],
-  capabilities: {
-    knowledge_read: { mode: "disabled" },
-    research: { mode: "automatic", timeoutMs: 120_000 },
-    document_draft: { mode: "automatic", timeoutMs: 120_000 },
-    shared_document_write: { mode: "disabled" },
-    dingtalk_todo_create: { mode: "disabled" },
-    dingtalk_calendar_create: { mode: "disabled" },
-    dingtalk_report_submit: { mode: "disabled" },
-    code_patch: { mode: "approval_required", timeoutMs: 600_000 },
-    local_branch: { mode: "approval_required", maxRuns: 1 },
-    local_test: { mode: "disabled" },
-    git_push: { mode: "disabled" },
-    production_deploy: { mode: "disabled" },
+  requesterIds: [requester],
+  profile: {
+    objective,
+    selectedRecipeIds: recipeIds,
+    memoryScope: { allowedTypes: ["project", "principle"], retentionDays: 90 },
   },
 });
 const output = `${JSON.stringify(manifest, null, 2)}\n`;

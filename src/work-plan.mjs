@@ -45,6 +45,50 @@ function stable(value) {
   return value;
 }
 
+function recipeBinding(value) {
+  if (value == null) return null;
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    throw new Error("recipe must be an object");
+  }
+  const id = required(value.id, "recipe.id", 100);
+  if (!/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u.test(id)) {
+    throw new Error("recipe.id is invalid");
+  }
+  const version = Number(value.version);
+  const baselineMinutes = Number(value.baselineMinutes);
+  if (version !== 1) throw new Error("recipe.version must be 1");
+  if (
+    !Number.isSafeInteger(baselineMinutes) ||
+    baselineMinutes < 1 ||
+    baselineMinutes > 2_400
+  ) {
+    throw new Error("recipe.baselineMinutes must be between 1 and 2400");
+  }
+  if (!["measured", "user_confirmed"].includes(value.baselineMethod)) {
+    throw new Error("recipe.baselineMethod is invalid");
+  }
+  const triggerId = value.triggerId == null
+    ? null
+    : required(value.triggerId, "recipe.triggerId", 100);
+  const triggerRunKey = value.triggerRunKey == null
+    ? null
+    : required(value.triggerRunKey, "recipe.triggerRunKey", 64);
+  if (triggerRunKey != null && !/^[a-f0-9]{64}$/u.test(triggerRunKey)) {
+    throw new Error("recipe.triggerRunKey is invalid");
+  }
+  if ((triggerId == null) !== (triggerRunKey == null)) {
+    throw new Error("recipe trigger id and run key must be provided together");
+  }
+  return {
+    id,
+    version,
+    baselineMinutes,
+    baselineMethod: value.baselineMethod,
+    triggerId,
+    triggerRunKey,
+  };
+}
+
 export function validateWorkPlan(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("Work plan must be an object");
@@ -94,6 +138,7 @@ export function validateWorkPlan(input) {
     sourceTaskId: input.sourceTaskId
       ? required(input.sourceTaskId, "sourceTaskId", 200)
       : null,
+    ...(input.recipe == null ? {} : { recipe: recipeBinding(input.recipe) }),
     objective: required(input.objective, "objective", 4_000),
     steps,
   };

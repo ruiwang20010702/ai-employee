@@ -1,10 +1,11 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
-import { access, constants } from "node:fs/promises";
-import { basename } from "node:path";
+import { access, constants, mkdir, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { adminHtml } from "./admin-ui.mjs";
+import { personalDashboardHtml } from "./personal-dashboard-ui.mjs";
 import { capabilityCatalog } from "./capability-policy.mjs";
 import { loadConfig } from "./config.mjs";
 import { evaluateHealth } from "./health-check.mjs";
@@ -30,6 +31,13 @@ import { buildPlanTakeover } from "./plan-takeover.mjs";
 import { evaluateBusinessAcceptance } from "./business-acceptance.mjs";
 import { validatePrivacySelector } from "./privacy-erasure.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
+import { buildProjectOnboardingDraft } from "./project-onboarding.mjs";
+import { buildProjectDashboard } from "./project-dashboard.mjs";
+import { loadWorkRecipes } from "./recipe-library.mjs";
+import { instantiateWorkRecipe } from "./work-recipe.mjs";
+import { validateWorkTrigger } from "./work-trigger.mjs";
+import { validateWorkEvent } from "./work-trigger.mjs";
+import { ingestProactiveEvent } from "./proactive-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -125,6 +133,7 @@ function planSummary(plan, stepRecords = []) {
     status: plan.status,
     policyDecision: plan.policy_decision,
     planHash: plan.plan_hash,
+    recipe: plan.plan?.recipe ?? null,
     supersedesWorkPlanId: plan.supersedes_work_plan_id ?? null,
     revisionActor: plan.revision_actor ?? null,
     steps: (plan.plan?.steps ?? []).map((step) => {
@@ -205,6 +214,8 @@ const privacyEligibleCountKeys = Object.freeze([
   "workPlans",
   "memories",
   "capabilityBudgets",
+  "timeReturns",
+  "workTriggers",
   "auditEvents",
   "identityReferences",
 ]);
@@ -212,6 +223,7 @@ const privacyBlockedCountKeys = Object.freeze([
   "tasks",
   "messages",
   "workPlans",
+  "workTriggers",
   "scopedPauses",
 ]);
 
@@ -322,6 +334,7 @@ async function capabilityAvailable(name, rule, config) {
     return dwsCapabilityAvailable(config.dwsPath, capabilityCatalog[name].probe);
   }
   if (runtime === "git") return executable("/usr/bin/git");
+  if (runtime === "gh") return Boolean(config.ghPath) && executable(config.ghPath);
   if (runtime === "commands") {
     const commands = Object.values(rule?.commands ?? {});
     return commands.length > 0 &&
@@ -340,6 +353,7 @@ async function capabilitySnapshot(config) {
       "draft_reply",
       "work_plan_proposal",
       "work_plan_execution",
+      "proactive_work",
       "send_message",
       "send_group_message",
     ].map((name) => ({ name, enabled: config.capabilities.has(name) })),
@@ -375,6 +389,7 @@ export async function startAdminServer({
   config = loadConfig({ requireTargets: false, production: true }),
   store = null,
   manifestLoader = loadProjectManifests,
+  recipeLoader = loadWorkRecipes,
 } = {}) {
   if (!loopbackHosts.has(config.adminHost)) {
     throw new Error("Admin server must remain loopback-only");
@@ -426,6 +441,16 @@ export async function startAdminServer({
         "content-security-policy": `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
       });
       response.end(adminHtml.replaceAll("__NONCE__", nonce));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/projects") {
+      const nonce = randomBytes(18).toString("base64");
+      response.writeHead(200, {
+        ...securityHeaders,
+        "content-type": "text/html; charset=utf-8",
+        "content-security-policy": `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+      });
+      response.end(personalDashboardHtml.replaceAll("__NONCE__", nonce));
       return;
     }
     if (!url.pathname.startsWith("/api/")) {
@@ -504,6 +529,64 @@ export async function startAdminServer({
             await (store.listWorkPlanSteps?.(plan.id) ?? Promise.resolve([])),
           )));
         json(response, 200, { items: summaries });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/recipes") {
+        const recipes = await recipeLoader(config.recipesDirectory);
+        json(response, 200, { items: [...recipes.values()] });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/projects") {
+        const [projects, recipes, plans, memories, timeReturns] = await Promise.all([
+          manifestLoader(config.projectsDirectory),
+          recipeLoader(config.recipesDirectory),
+          store.listWorkPlans({ limit: 1_000 }),
+          store.listMemories({ status: "confirmed", limit: 1_000 }),
+          store.listTimeReturns({ limit: 1_000 }),
+        ]);
+        const planSteps = new Map(await Promise.all(plans.map(async (plan) => [
+          plan.id,
+          await (store.listWorkPlanSteps?.(plan.id) ?? Promise.resolve([])),
+        ])));
+        json(response, 200, {
+          items: [...projects.values()].map((manifest) => buildProjectDashboard({
+            manifest,
+            plans,
+            memories,
+            timeReturns,
+            recipes: [...recipes.values()],
+            planSteps,
+          })),
+        });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/time-returns") {
+        json(response, 200, {
+          items: await store.listTimeReturns({
+            projectId: url.searchParams.get("projectId") || null,
+            status: url.searchParams.get("status") || null,
+            limit: 1_000,
+          }),
+        });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/triggers") {
+        const projectId = url.searchParams.get("projectId") || null;
+        const items = await store.listWorkTriggers({ projectId });
+        json(response, 200, { items: items.map((trigger) => ({
+          id: trigger.id,
+          projectId: trigger.projectId,
+          recipeId: trigger.recipeId,
+          recipeVersion: trigger.recipeVersion,
+          kind: trigger.kind,
+          status: trigger.status,
+          schedule: trigger.kind === "schedule" ? trigger.schedule : null,
+          eventType: trigger.kind === "event" ? trigger.event.type : null,
+          maxRunsPerDay: trigger.maxRunsPerDay,
+          cooldownMinutes: trigger.cooldownMinutes,
+          nextRunAt: trigger.nextRunAt,
+          lastRunAt: trigger.lastRunAt,
+        })) });
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/takeover") {
@@ -698,6 +781,188 @@ export async function startAdminServer({
           200,
           privacyPreviewSummary(await store.previewPrivacyErasure(selector)),
         );
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/projects/onboarding") {
+        const body = await readJson(request, 128 * 1024);
+        const recipes = await recipeLoader(config.recipesDirectory);
+        const draft = await buildProjectOnboardingDraft({
+          projectId: body.projectId,
+          name: body.name,
+          rootDirectory: body.rootDirectory,
+          requesterIds: body.requesterIds,
+          profile: body.profile,
+        });
+        if (draft.manifest.profile.selectedRecipeIds.some((id) => !recipes.has(id))) {
+          throw Object.assign(new Error("selected_recipe_not_found"), { status: 400 });
+        }
+        const existing = await manifestLoader(config.projectsDirectory);
+        if (existing.has(draft.manifest.projectId)) {
+          throw Object.assign(new Error("project_already_exists"), { status: 409 });
+        }
+        await mkdir(config.projectsDirectory, { recursive: true, mode: 0o700 });
+        await writeFile(
+          join(config.projectsDirectory, `${draft.manifest.projectId}.json`),
+          `${JSON.stringify(draft.manifest, null, 2)}\n`,
+          { mode: 0o600, flag: "wx" },
+        );
+        json(response, 201, {
+          projectId: draft.manifest.projectId,
+          checklist: draft.checklist,
+          externalSideEffectsEnabled: false,
+        });
+        return;
+      }
+      const recipeInstantiation = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/recipes\/([^/]+)\/instantiate$/u,
+      );
+      if (request.method === "POST" && recipeInstantiation) {
+        const body = await readJson(request, 128 * 1024);
+        const projectId = decodeURIComponent(recipeInstantiation[1]);
+        const recipeId = decodeURIComponent(recipeInstantiation[2]);
+        const [projects, recipes] = await Promise.all([
+          manifestLoader(config.projectsDirectory),
+          recipeLoader(config.recipesDirectory),
+        ]);
+        const manifest = projects.get(projectId);
+        const recipe = recipes.get(recipeId);
+        if (!manifest || !recipe) {
+          throw Object.assign(new Error("project_or_recipe_not_found"), { status: 404 });
+        }
+        if (!(manifest.profile?.selectedRecipeIds ?? []).includes(recipeId)) {
+          throw Object.assign(new Error("recipe_not_selected_for_project"), { status: 403 });
+        }
+        const requestedRequester = String(body.requesterId ?? "").trim();
+        const requesterId = manifest.requesters.length === 1
+          ? manifest.requesters[0]
+          : requestedRequester;
+        if (!requesterId || !manifest.requesters.includes(requesterId)) {
+          throw Object.assign(new Error("requester_not_authorized"), { status: 403 });
+        }
+        const instantiated = instantiateWorkRecipe(recipe, {
+          projectId,
+          requesterId,
+          projectRoot: manifest.rootDirectory,
+          values: body.values ?? {},
+        });
+        const assessment = assessWorkPlan({ manifest, plan: instantiated.plan });
+        if (!["ALLOW", "REQUIRE_APPROVAL"].includes(assessment.decision)) {
+          throw Object.assign(new Error("recipe_plan_denied_by_policy"), { status: 403 });
+        }
+        const plan = await store.registerWorkPlan(assessment);
+        json(response, 201, {
+          plan: planSummary(plan),
+          assessment: { decision: assessment.decision, maxLevel: assessment.maxLevel },
+        });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/time-returns") {
+        const body = await readJson(request, 4_096);
+        const entry = await store.proposeTimeReturn(
+          String(body.workPlanId ?? ""),
+          body.humanActiveMinutes,
+          "admin-ui",
+        );
+        json(response, 201, { entry });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/triggers") {
+        const body = await readJson(request, 128 * 1024);
+        const [projects, recipes] = await Promise.all([
+          manifestLoader(config.projectsDirectory),
+          recipeLoader(config.recipesDirectory),
+        ]);
+        const manifest = projects.get(String(body.projectId ?? ""));
+        const recipe = recipes.get(String(body.recipeId ?? ""));
+        if (!manifest || !recipe) {
+          throw Object.assign(new Error("project_or_recipe_not_found"), { status: 404 });
+        }
+        if (!(manifest.profile?.selectedRecipeIds ?? []).includes(recipe.id)) {
+          throw Object.assign(new Error("recipe_not_selected_for_project"), { status: 403 });
+        }
+        const requesterId = manifest.requesters.length === 1
+          ? manifest.requesters[0]
+          : String(body.requesterId ?? "").trim();
+        if (!manifest.requesters.includes(requesterId)) {
+          throw Object.assign(new Error("requester_not_authorized"), { status: 403 });
+        }
+        let trigger;
+        try {
+          trigger = validateWorkTrigger({
+            ...body,
+            version: 1,
+            recipeVersion: recipe.version,
+            requesterId,
+            enabled: false,
+          });
+        } catch {
+          throw Object.assign(new Error("invalid_work_trigger"), { status: 400 });
+        }
+        const created = await store.createWorkTrigger(trigger, "admin-ui");
+        json(response, 201, { id: created.id, status: created.status });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/events") {
+        if (!config.capabilities.has("proactive_work")) {
+          throw Object.assign(new Error("proactive_work_globally_disabled"), { status: 403 });
+        }
+        let event;
+        try {
+          event = validateWorkEvent(await readJson(request, 128 * 1024));
+        } catch {
+          throw Object.assign(new Error("invalid_work_event"), { status: 400 });
+        }
+        const [projects, recipes] = await Promise.all([
+          manifestLoader(config.projectsDirectory),
+          recipeLoader(config.recipesDirectory),
+        ]);
+        const results = await ingestProactiveEvent({
+          store,
+          manifests: projects,
+          recipes,
+          event,
+          owner: `admin-event:${event.source}`,
+        });
+        json(response, 202, {
+          eventId: event.id,
+          results: results.map((result) => ({
+            created: result.created,
+            triggerId: result.triggerId,
+            reason: result.reason ?? null,
+            plan: result.plan ? planSummary(result.plan) : null,
+          })),
+        });
+        return;
+      }
+      const timeReturnDecision = url.pathname.match(
+        /^\/api\/time-returns\/([^/]+)\/decision$/u,
+      );
+      if (request.method === "POST" && timeReturnDecision) {
+        const body = await readJson(request, 4_096);
+        if (!["confirmed", "rejected"].includes(body.decision)) {
+          throw Object.assign(new Error("invalid_decision"), { status: 400 });
+        }
+        const entry = await store.decideTimeReturn(
+          decodeURIComponent(timeReturnDecision[1]),
+          body.decision,
+          "admin-ui",
+        );
+        json(response, 200, { entry });
+        return;
+      }
+      const triggerEnable = url.pathname.match(/^\/api\/triggers\/([^/]+)\/enabled$/u);
+      if (request.method === "POST" && triggerEnable) {
+        const body = await readJson(request, 4_096);
+        if (typeof body.enabled !== "boolean") {
+          throw Object.assign(new Error("enabled_must_be_boolean"), { status: 400 });
+        }
+        if (body.enabled && !config.capabilities.has("proactive_work")) {
+          throw Object.assign(new Error("proactive_work_globally_disabled"), { status: 403 });
+        }
+        const updated = await store.setWorkTriggerEnabled(
+          decodeURIComponent(triggerEnable[1]), body.enabled, "admin-ui",
+        );
+        json(response, 200, { id: updated.id, status: updated.status });
         return;
       }
       const targetPause = url.pathname.match(

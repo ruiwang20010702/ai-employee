@@ -98,3 +98,22 @@ A contributed channel or runtime must prove:
 - exact target read-back before completion;
 - no business or infrastructure secrets in child-process environments;
 - positive, edge, error, retry, and mismatch tests.
+
+## Event, workspace, and recipe extensions
+
+Foursday now validates four community extension kinds:
+
+| Kind | Purpose | Repository evidence |
+|---|---|---|
+| `message_adapter` | Receive/send and detect human takeover | DingTalk and Feishu implementations; Slack/Teams examples |
+| `work_event_adapter` | Normalize signed external events | Meeting-ended and GitHub issue normalization |
+| `workspace_adapter` | Todo, calendar, document, and mail ports | Gmail/Google Workspace examples |
+| `work_recipe` | Versioned inputs and plan templates | Four built-in recipes plus the credential-free community example under `examples/recipes/` |
+
+Example manifests under `examples/adapters/` declare permission names and
+runtime secret names only. They do not contain credentials, make remote calls,
+or claim production support. An adapter market remains future work until
+package signing, publisher identity, revocation, and trust review are designed.
+Manifest contract version `1.0` is mandatory, and all five guarantees—allowlist,
+idempotency, human takeover, target read-back, and unknown-outcome handling—must
+be explicitly enabled or validation fails closed.

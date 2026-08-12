@@ -93,4 +93,21 @@ Only confirmed, unexpired, non-revoked memory with a valid source and matching p
 
 The runtime checks for manual replies before generation, after generation, during planning, before registration, before sending, and while active plans exist. A takeover cancels pending work or requests a safe stop for executing work. Business pause does not disable this safety reconciliation.
 
+## Recipes, proactive work, and project memory
+
+Recipes are versioned plan templates, not permissions. The built-in library
+contains daily reporting, project follow-up, meeting follow-up, and code
+delivery. Inputs are schema-validated, secret-shaped values are rejected, and
+the recipe identity is bound into the plan hash.
+
+Proactive triggers are always created disabled. Enabling requires the global
+capability, while every run still revalidates requester, project, recipe,
+budget, cooldown, risk, and approval. A meeting decision becomes only a
+source-bound `proposed` project memory item; it cannot be retrieved until a
+person confirms it. Time returned is counted only for a completed recipe plan
+with complete evidence and a separate human confirmation.
+
+The GitHub delivery recipe ends at a Draft PR. Merge, production deployment,
+and repository expansion remain separate capabilities and approvals.
+
 For the exhaustive capability fields, CLI examples, memory conflict rules, and current production boundaries, see the [Chinese capability and memory guide](../能力清单与正式记忆.md).

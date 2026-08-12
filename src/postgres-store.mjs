@@ -33,6 +33,8 @@ import {
   scopedPauseKey,
 } from "./scoped-pause.mjs";
 import { validateWorkPlanRevision } from "./work-plan.mjs";
+import { buildTimeReturnProposal } from "./time-return.mjs";
+import { nextScheduledRun, validateWorkTrigger } from "./work-trigger.mjs";
 import {
   assertMigrationStatus,
   inspectMigrationStatus,
@@ -113,6 +115,26 @@ function workPlanFromRow(row, cipher) {
     objective_ciphertext: undefined,
     plan_ciphertext: undefined,
     capability_budget_ciphertext: undefined,
+  };
+}
+
+function timeReturnFromRow(row, cipher) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    workPlanId: row.work_plan_id,
+    projectId: row.project_id,
+    recipeId: row.recipe_id,
+    baselineMinutes: row.baseline_minutes,
+    humanActiveMinutes: row.human_active_minutes,
+    returnedMinutes: row.returned_minutes,
+    baselineMethod: row.baseline_method,
+    outcomeEvidence: JSON.parse(cipher.decrypt(row.outcome_evidence_ciphertext)),
+    status: row.status,
+    proposedBy: row.proposed_by,
+    confirmedBy: row.confirmed_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -1643,6 +1665,53 @@ export class PostgresStore {
     return id;
   }
 
+  async proposeWorkPlanMemory(input, now = new Date()) {
+    const memory = validateMemoryProposal({ ...input, sourceType: "work_plan" });
+    if (!memory.projectId || !/^[a-f0-9]{64}$/u.test(memory.sourceId)) {
+      throw new Error("Work plan memory requires a project and plan hash source");
+    }
+    const factKey = String(memory.scope.factKey ?? "").trim();
+    const id = `memory_plan_${createHash("sha256").update(`${memory.sourceId}\n${factKey}`).digest("hex").slice(0, 32)}`;
+    return this.transaction(async (client) => {
+      const plan = await client.query(
+        `SELECT id FROM work_plans
+         WHERE tenant_id = $1 AND plan_hash = $2 AND project_id = $3
+           AND privacy_erased_at IS NULL FOR SHARE`,
+        [this.tenantId, memory.sourceId, memory.projectId],
+      );
+      if (plan.rowCount !== 1) throw new Error("Work plan memory source is not verifiable");
+      const inserted = await client.query(
+        `INSERT INTO memory_items(
+          id, tenant_id, type, subject_key, subject_ciphertext, project_id,
+          statement_ciphertext, source_type, source_id_ciphertext,
+          source_version, source_access_status, source_access_reason,
+          scope_ciphertext, confidence, status, sensitivity, expires_at,
+          created_by, updated_by, supersedes_id, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'not_required',NULL,$11,$12,'proposed',$13,$14,$15,$15,NULL,$16,$16)
+        ON CONFLICT (tenant_id, id) DO NOTHING`,
+        [
+          id, this.tenantId, memory.type, this.cipher.fingerprint(memory.subject),
+          this.cipher.encrypt(memory.subject), memory.projectId,
+          this.cipher.encrypt(memory.statement), memory.sourceType,
+          this.cipher.encrypt(memory.sourceId), memory.sourceVersion,
+          this.cipher.encrypt(JSON.stringify(memory.scope)), memory.confidence,
+          memory.sensitivity, memory.expiresAt, memory.createdBy, now,
+        ],
+      );
+      if (inserted.rowCount === 1) {
+        await this.audit(client, {
+          eventType: "memory.proposed", actor: memory.createdBy,
+          details: { memoryId: id, type: memory.type, projectId: memory.projectId, workPlanSource: true },
+        });
+      }
+      const existing = await client.query(
+        "SELECT status FROM memory_items WHERE tenant_id = $1 AND id = $2",
+        [this.tenantId, id],
+      );
+      return { created: inserted.rowCount === 1, id, status: existing.rows[0].status, sourcePlanId: plan.rows[0].id };
+    });
+  }
+
   async proposeMemoryCandidate(input, now = new Date()) {
     validateAutomaticMemoryProposal(input, now);
     const memory = validateMemoryProposal(input);
@@ -1792,6 +1861,19 @@ export class PostgresStore {
           (message) => String(message.id) === sourceId,
         )) {
           throw new Error("DingTalk memory source must remain verifiable before confirmation");
+        }
+      }
+      if (memory.source_type === "work_plan") {
+        const sourceId = this.cipher.decrypt(memory.source_id_ciphertext);
+        const sourcePlan = await client.query(
+          `SELECT 1 FROM work_plans
+           WHERE tenant_id = $1 AND plan_hash = $2
+             AND project_id IS NOT DISTINCT FROM $3
+             AND privacy_erased_at IS NULL FOR SHARE`,
+          [this.tenantId, sourceId, memory.project_id],
+        );
+        if (sourcePlan.rowCount !== 1) {
+          throw new Error("Work plan memory source must remain verifiable before confirmation");
         }
       }
       const candidate = memoryFromRow(memory, this.cipher);
@@ -2449,14 +2531,15 @@ export class PostgresStore {
       );
       const peekedPlan = peeked.rows[0];
       if (!peekedPlan) throw new Error("Work plan not found");
-      let sourceTaskId;
+      let peekedPlanContent;
       try {
-        sourceTaskId = JSON.parse(
+        peekedPlanContent = JSON.parse(
           this.cipher.decrypt(peekedPlan.plan_ciphertext),
-        )?.sourceTaskId;
+        );
       } catch {
         throw new Error("Stored work plan is invalid");
       }
+      const sourceTaskId = peekedPlanContent?.sourceTaskId;
       if (sourceTaskId) {
         const sourceTask = await client.query(
           `SELECT status, privacy_erased_at FROM tasks
@@ -2482,16 +2565,30 @@ export class PostgresStore {
       if (plan.privacy_erased_at) {
         throw new Error("Work plan source task is no longer actionable");
       }
-      let lockedSourceTaskId;
+      let lockedPlanContent;
       try {
-        lockedSourceTaskId = JSON.parse(
+        lockedPlanContent = JSON.parse(
           this.cipher.decrypt(plan.plan_ciphertext),
-        )?.sourceTaskId;
+        );
       } catch {
         throw new Error("Stored work plan is invalid");
       }
+      const lockedSourceTaskId = lockedPlanContent?.sourceTaskId;
       if (lockedSourceTaskId !== sourceTaskId) {
         throw new Error("Work plan changed while acquiring authorization");
+      }
+      const triggerId = lockedPlanContent?.recipe?.triggerId;
+      const triggerRunKey = lockedPlanContent?.recipe?.triggerRunKey;
+      if (triggerId || triggerRunKey) {
+        const completedTriggerRun = await client.query(
+          `SELECT 1 FROM work_trigger_runs
+           WHERE tenant_id = $1 AND trigger_id = $2 AND run_key = $3
+             AND status = 'completed' AND work_plan_id = $4`,
+          [this.tenantId, triggerId, triggerRunKey, id],
+        );
+        if (completedTriggerRun.rowCount !== 1) {
+          throw new Error("Triggered work plan run is not completed");
+        }
       }
       if (!plan.authorization_hash || !plan.capability_budget_ciphertext) {
         throw new Error("Work plan capability budget is not bound; register a new plan");
@@ -2626,6 +2723,387 @@ export class PostgresStore {
       remaining: row.limit_count - row.used_count,
       updatedAt: row.updated_at,
     }));
+  }
+
+  _workTriggerFromRow(row) {
+    if (!row) return null;
+    return {
+      ...JSON.parse(this.cipher.decrypt(row.definition_ciphertext)),
+      status: row.status,
+      nextRunAt: row.next_run_at?.toISOString?.() ?? row.next_run_at,
+      lastRunAt: row.last_run_at?.toISOString?.() ?? row.last_run_at,
+      leaseOwner: row.lease_owner,
+      leaseExpiresAt: row.lease_expires_at?.toISOString?.() ?? row.lease_expires_at,
+      createdAt: row.created_at?.toISOString?.() ?? row.created_at,
+      updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at,
+    };
+  }
+
+  async createWorkTrigger(input, actor, now = new Date()) {
+    const trigger = validateWorkTrigger(input);
+    if (!String(actor ?? "").trim()) throw new Error("Work trigger actor is required");
+    const nextRunAt = trigger.kind === "schedule" && trigger.enabled
+      ? nextScheduledRun(trigger, new Date(now.getTime() - 1))
+      : null;
+    await this.transaction(async (client) => {
+      await client.query(
+        `INSERT INTO work_triggers(
+           id, tenant_id, project_id, kind, status, definition_ciphertext,
+           next_run_at, created_at, updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)`,
+        [trigger.id, this.tenantId, trigger.projectId, trigger.kind,
+          trigger.enabled ? "enabled" : "disabled",
+          this.cipher.encrypt(JSON.stringify(trigger)), nextRunAt, now],
+      );
+      await this.audit(client, { eventType: "work_trigger.created", actor, details: {
+        triggerId: trigger.id, projectId: trigger.projectId, kind: trigger.kind,
+      } });
+    });
+    return this.getWorkTrigger(trigger.id);
+  }
+
+  async getWorkTrigger(id) {
+    const result = await this.pool.query(
+      "SELECT * FROM work_triggers WHERE tenant_id = $1 AND id = $2",
+      [this.tenantId, id],
+    );
+    return this._workTriggerFromRow(result.rows[0]);
+  }
+
+  async listWorkTriggers({ projectId = null, status = null } = {}) {
+    if (status && !["enabled", "disabled"].includes(status)) {
+      throw new Error("Work trigger status is invalid");
+    }
+    const values = [this.tenantId];
+    const clauses = ["tenant_id = $1"];
+    if (projectId) { values.push(projectId); clauses.push(`project_id = $${values.length}`); }
+    if (status) { values.push(status); clauses.push(`status = $${values.length}`); }
+    const result = await this.pool.query(
+      `SELECT * FROM work_triggers WHERE ${clauses.join(" AND ")}
+       ORDER BY updated_at DESC, id`, values,
+    );
+    return result.rows.map((row) => this._workTriggerFromRow(row));
+  }
+
+  async setWorkTriggerEnabled(id, enabled, actor, now = new Date()) {
+    if (typeof enabled !== "boolean" || !String(actor ?? "").trim()) {
+      throw new Error("Work trigger enable change is invalid");
+    }
+    return this.transaction(async (client) => {
+      const selected = await client.query(
+        "SELECT * FROM work_triggers WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+        [this.tenantId, id],
+      );
+      const current = this._workTriggerFromRow(selected.rows[0]);
+      if (!current) throw new Error("Work trigger not found");
+      const updated = validateWorkTrigger({ ...current, enabled });
+      const nextRunAt = updated.kind === "schedule" && enabled
+        ? nextScheduledRun(updated, new Date(now.getTime() - 1))
+        : null;
+      await client.query(
+        `UPDATE work_triggers SET status = $3, definition_ciphertext = $4,
+         next_run_at = $5, lease_owner = NULL, lease_expires_at = NULL, updated_at = $6
+         WHERE tenant_id = $1 AND id = $2`,
+        [this.tenantId, id, enabled ? "enabled" : "disabled",
+          this.cipher.encrypt(JSON.stringify(updated)), nextRunAt, now],
+      );
+      await this.audit(client, { eventType: `work_trigger.${enabled ? "enabled" : "disabled"}`, actor, details: { triggerId: id } });
+      const result = await client.query(
+        "SELECT * FROM work_triggers WHERE tenant_id = $1 AND id = $2",
+        [this.tenantId, id],
+      );
+      return this._workTriggerFromRow(result.rows[0]);
+    });
+  }
+
+  async claimDueWorkTrigger(owner, leaseExpiresAt, now = new Date()) {
+    if (!String(owner ?? "").trim() || !(leaseExpiresAt instanceof Date && leaseExpiresAt > now)) {
+      throw new Error("Work trigger claim requires an owner and future lease");
+    }
+    return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT * FROM work_triggers
+         WHERE tenant_id = $1 AND status = 'enabled' AND kind = 'schedule'
+           AND next_run_at <= $2 AND (lease_expires_at IS NULL OR lease_expires_at <= $2)
+         ORDER BY next_run_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+        [this.tenantId, now],
+      );
+      if (selected.rowCount === 0) return null;
+      const row = selected.rows[0];
+      const updated = await client.query(
+        `UPDATE work_triggers SET lease_owner = $3, lease_expires_at = $4, updated_at = $5
+         WHERE tenant_id = $1 AND id = $2 RETURNING *`,
+        [this.tenantId, row.id, owner, leaseExpiresAt, now],
+      );
+      return this._workTriggerFromRow(updated.rows[0]);
+    });
+  }
+
+  async reserveWorkTriggerRun(triggerId, runKey, owner, now = new Date()) {
+    if (!/^[a-f0-9]{64}$/u.test(String(runKey ?? "")) || !String(owner ?? "").trim()) {
+      throw new Error("Work trigger run identity is invalid");
+    }
+    return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT * FROM work_triggers
+         WHERE tenant_id = $1 AND id = $2 AND status = 'enabled' FOR UPDATE`,
+        [this.tenantId, triggerId],
+      );
+      const trigger = this._workTriggerFromRow(selected.rows[0]);
+      if (!trigger) return false;
+      if (trigger.kind === "schedule" && trigger.leaseOwner !== owner) return false;
+      const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
+      const recent = await client.query(
+        `SELECT created_at FROM work_trigger_runs
+         WHERE tenant_id = $1 AND trigger_id = $2 AND created_at >= $3
+         ORDER BY created_at DESC`,
+        [this.tenantId, triggerId, dayStart],
+      );
+      if (recent.rowCount >= trigger.maxRunsPerDay) return false;
+      if (recent.rows[0] && recent.rows[0].created_at.getTime() + trigger.cooldownMinutes * 60_000 > now.getTime()) return false;
+      const inserted = await client.query(
+        `INSERT INTO work_trigger_runs(
+           tenant_id, trigger_id, run_key, owner, status, created_at, updated_at
+         ) VALUES ($1,$2,$3,$4,'claimed',$5,$5) ON CONFLICT DO NOTHING`,
+        [this.tenantId, triggerId, runKey, owner, now],
+      );
+      return inserted.rowCount === 1;
+    });
+  }
+
+  async completeWorkTriggerRun(triggerId, runKey, workPlanId, owner, now = new Date()) {
+    return this.transaction(async (client) => {
+      const updatedRun = await client.query(
+        `UPDATE work_trigger_runs SET status = 'completed', work_plan_id = $5, updated_at = $6
+         WHERE tenant_id = $1 AND trigger_id = $2 AND run_key = $3
+           AND status = 'claimed' AND owner = $4`,
+        [this.tenantId, triggerId, runKey, owner, workPlanId, now],
+      );
+      if (updatedRun.rowCount !== 1) throw new Error("Work trigger run is not claimed");
+      const selected = await client.query(
+        "SELECT * FROM work_triggers WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+        [this.tenantId, triggerId],
+      );
+      const trigger = this._workTriggerFromRow(selected.rows[0]);
+      if (!trigger) throw new Error("Work trigger not found");
+      const nextRunAt = trigger.kind === "schedule" ? nextScheduledRun(trigger, now) : trigger.nextRunAt;
+      const updated = await client.query(
+        `UPDATE work_triggers SET last_run_at = $3, next_run_at = $4,
+         lease_owner = NULL, lease_expires_at = NULL, updated_at = $3
+         WHERE tenant_id = $1 AND id = $2 AND ((kind = 'schedule' AND lease_owner = $5)
+           OR (kind = 'event' AND lease_owner IS NULL))
+         RETURNING *`,
+        [this.tenantId, triggerId, now, nextRunAt, owner],
+      );
+      if (updated.rowCount !== 1) throw new Error("Work trigger lease was lost");
+      await this.audit(client, { eventType: "work_trigger.completed", actor: owner, details: {
+        triggerId, workPlanId, runKey,
+      } });
+      return this._workTriggerFromRow(updated.rows[0]);
+    });
+  }
+
+  async advanceWorkTrigger(triggerId, owner, now = new Date()) {
+    return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT * FROM work_triggers
+         WHERE tenant_id = $1 AND id = $2 AND lease_owner = $3 FOR UPDATE`,
+        [this.tenantId, triggerId, owner],
+      );
+      const trigger = this._workTriggerFromRow(selected.rows[0]);
+      if (!trigger || trigger.kind !== "schedule") throw new Error("Schedule trigger not found");
+      const result = await client.query(
+        `UPDATE work_triggers SET next_run_at = $4, lease_owner = NULL,
+         lease_expires_at = NULL, updated_at = $5
+         WHERE tenant_id = $1 AND id = $2 AND lease_owner = $3 RETURNING *`,
+        [this.tenantId, triggerId, owner, nextScheduledRun(trigger, now), now],
+      );
+      if (result.rowCount !== 1) throw new Error("Work trigger lease was lost");
+      return this._workTriggerFromRow(result.rows[0]);
+    });
+  }
+
+  async failWorkTriggerRun(triggerId, runKey, error, owner, now = new Date()) {
+    return this.transaction(async (client) => {
+      const result = await client.query(
+        `UPDATE work_trigger_runs SET status = 'failed', error_ciphertext = $5, updated_at = $6
+         WHERE tenant_id = $1 AND trigger_id = $2 AND run_key = $3
+           AND status = 'claimed' AND owner = $4`,
+        [this.tenantId, triggerId, runKey, owner, this.cipher.encrypt(String(error ?? "trigger_failed")), now],
+      );
+      if (result.rowCount !== 1) throw new Error("Work trigger run is not claimed");
+      const selected = await client.query(
+        "SELECT * FROM work_triggers WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+        [this.tenantId, triggerId],
+      );
+      const trigger = this._workTriggerFromRow(selected.rows[0]);
+      if (!trigger) throw new Error("Work trigger not found");
+      const nextRunAt = trigger.kind === "schedule" ? nextScheduledRun(trigger, now) : trigger.nextRunAt;
+      const updated = await client.query(
+        `UPDATE work_triggers SET next_run_at = $3, lease_owner = NULL,
+         lease_expires_at = NULL, updated_at = $4
+         WHERE tenant_id = $1 AND id = $2 AND ((kind = 'schedule' AND lease_owner = $5)
+           OR (kind = 'event' AND lease_owner IS NULL))`,
+        [this.tenantId, triggerId, nextRunAt, now, owner],
+      );
+      if (updated.rowCount !== 1) throw new Error("Work trigger lease was lost");
+      await this.audit(client, { eventType: "work_trigger.failed", actor: owner, details: { triggerId, runKey } });
+      return "failed";
+    });
+  }
+
+  async proposeTimeReturn(workPlanId, humanActiveMinutes, actor, now = new Date()) {
+    const proposedBy = String(actor ?? "").trim();
+    if (!proposedBy) throw new Error("Time return proposer is required");
+    let entryId;
+    await this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT * FROM work_plans
+         WHERE tenant_id = $1 AND id = $2 AND privacy_erased_at IS NULL
+         FOR UPDATE`,
+        [this.tenantId, workPlanId],
+      );
+      const row = selected.rows[0];
+      if (!row || row.status !== "completed") {
+        throw new Error("Time return requires a completed work plan");
+      }
+      const plan = workPlanFromRow(row, this.cipher);
+      const recipe = plan.plan?.recipe;
+      if (!recipe?.id || recipe.version !== 1) {
+        throw new Error("Time return requires a versioned work recipe");
+      }
+      const stepResult = await client.query(
+        `SELECT * FROM work_plan_steps
+         WHERE tenant_id = $1 AND work_plan_id = $2 ORDER BY position
+         FOR SHARE`,
+        [this.tenantId, workPlanId],
+      );
+      const steps = stepResult.rows.map((step) => ({
+        step_id: step.step_id,
+        status: step.status,
+        evidence: step.evidence_ciphertext
+          ? JSON.parse(this.cipher.decrypt(step.evidence_ciphertext))
+          : null,
+      }));
+      if (
+        steps.length !== plan.plan.steps.length ||
+        steps.some((step) => step.status !== "completed" || !step.evidence)
+      ) {
+        throw new Error("Time return requires verified evidence for every work plan step");
+      }
+      const evidence = {
+        planHash: plan.plan_hash,
+        steps: steps.map((step) => ({
+          stepId: step.step_id,
+          kind: step.evidence.kind ?? null,
+          verification: step.evidence.verification ?? null,
+          sha256: step.evidence.sha256 ?? null,
+        })),
+      };
+      const proposal = buildTimeReturnProposal({
+        projectId: plan.project_id,
+        workPlanId,
+        recipeId: recipe.id,
+        baselineMinutes: recipe.baselineMinutes,
+        humanActiveMinutes,
+        baselineMethod: recipe.baselineMethod,
+        outcomeEvidence: evidence,
+      });
+      entryId = `time_${workPlanId}`;
+      const inserted = await client.query(
+        `INSERT INTO time_return_entries(
+           id, tenant_id, work_plan_id, project_id, recipe_id,
+           baseline_minutes, human_active_minutes, returned_minutes,
+           baseline_method, outcome_evidence_ciphertext, status,
+           proposed_by, created_at, updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'proposed',$11,$12,$12)
+         ON CONFLICT (tenant_id, work_plan_id) DO NOTHING`,
+        [
+          entryId,
+          this.tenantId,
+          workPlanId,
+          proposal.projectId,
+          proposal.recipeId,
+          proposal.baselineMinutes,
+          proposal.humanActiveMinutes,
+          proposal.returnedMinutes,
+          proposal.baselineMethod,
+          this.cipher.encrypt(JSON.stringify(proposal.outcomeEvidence)),
+          proposedBy,
+          now,
+        ],
+      );
+      if (inserted.rowCount !== 1) {
+        throw new Error("Time return already exists for this work plan");
+      }
+      await this.audit(client, {
+        eventType: "time_return.proposed",
+        actor: proposedBy,
+        details: { workPlanId, timeReturnId: entryId },
+      });
+    });
+    return this.getTimeReturn(entryId);
+  }
+
+  async getTimeReturn(id) {
+    const result = await this.pool.query(
+      `SELECT * FROM time_return_entries
+       WHERE tenant_id = $1 AND id = $2`,
+      [this.tenantId, id],
+    );
+    return timeReturnFromRow(result.rows[0], this.cipher);
+  }
+
+  async listTimeReturns({ projectId = null, status = null, limit = 500 } = {}) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
+      throw new Error("Time return limit must be between 1 and 1000");
+    }
+    if (status && !["proposed", "confirmed", "rejected"].includes(status)) {
+      throw new Error("Time return status is invalid");
+    }
+    const values = [this.tenantId];
+    const clauses = ["tenant_id = $1"];
+    if (projectId) {
+      values.push(projectId);
+      clauses.push(`project_id = $${values.length}`);
+    }
+    if (status) {
+      values.push(status);
+      clauses.push(`status = $${values.length}`);
+    }
+    values.push(limit);
+    const result = await this.pool.query(
+      `SELECT * FROM time_return_entries
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY updated_at DESC, id DESC LIMIT $${values.length}`,
+      values,
+    );
+    return result.rows.map((row) => timeReturnFromRow(row, this.cipher));
+  }
+
+  async decideTimeReturn(id, decision, actor, now = new Date()) {
+    if (!["confirmed", "rejected"].includes(decision)) {
+      throw new Error("Time return decision must be confirmed or rejected");
+    }
+    const confirmedBy = String(actor ?? "").trim();
+    if (!confirmedBy) throw new Error("Time return decision actor is required");
+    await this.transaction(async (client) => {
+      const result = await client.query(
+        `UPDATE time_return_entries
+         SET status = $3, confirmed_by = $4, updated_at = $5
+         WHERE tenant_id = $1 AND id = $2 AND status = 'proposed'`,
+        [this.tenantId, id, decision, confirmedBy, now],
+      );
+      if (result.rowCount !== 1) {
+        throw new Error("Time return is not awaiting confirmation");
+      }
+      await this.audit(client, {
+        eventType: `time_return.${decision}`,
+        actor: confirmedBy,
+        details: { timeReturnId: id },
+      });
+    });
+    return this.getTimeReturn(id);
   }
 
   async renewWorkPlanLease(id, owner, leaseExpiresAt, now = new Date()) {
@@ -3344,6 +3822,19 @@ export class PostgresStore {
         [...memoryRows, ...sourceMemories.rows].map((row) => [row.id, row]),
       ).values()];
     }
+    if (planRows.length > 0) {
+      const planHashes = new Set(planRows.map((row) => row.plan_hash));
+      const sourceMemories = await client.query(
+        `SELECT * FROM memory_items
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND source_type = 'work_plan'${suffix}`,
+        [this.tenantId],
+      );
+      memoryRows = [...new Map(
+        [...memoryRows, ...sourceMemories.rows.filter((row) =>
+          planHashes.has(this.cipher.decrypt(row.source_id_ciphertext)))].map((row) => [row.id, row]),
+      ).values()];
+    }
     let capabilityBudgetResult;
     if (selector.type === "project") {
       capabilityBudgetResult = await client.query(
@@ -3355,6 +3846,52 @@ export class PostgresStore {
       capabilityBudgetResult = { rows: [] };
     }
     const capabilityBudgetRows = capabilityBudgetResult.rows;
+    let timeReturnResult;
+    if (selector.type === "project") {
+      timeReturnResult = await client.query(
+        `SELECT * FROM time_return_entries
+         WHERE tenant_id = $1 AND project_id = $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    } else if (selector.type === "time") {
+      timeReturnResult = await client.query(
+        `SELECT * FROM time_return_entries
+         WHERE tenant_id = $1 AND updated_at < $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    } else {
+      timeReturnResult = planRows.length === 0
+        ? { rows: [] }
+        : await client.query(
+          `SELECT * FROM time_return_entries
+           WHERE tenant_id = $1 AND work_plan_id = ANY($2::text[])${suffix}`,
+          [this.tenantId, planRows.map((row) => row.id)],
+        );
+    }
+    const timeReturnRows = timeReturnResult.rows;
+    let workTriggerResult = { rows: [] };
+    if (selector.type === "project") {
+      workTriggerResult = await client.query(
+        `SELECT * FROM work_triggers
+         WHERE tenant_id = $1 AND project_id = $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    } else if (selector.type === "person") {
+      const allTriggers = await client.query(
+        `SELECT * FROM work_triggers WHERE tenant_id = $1${suffix}`,
+        [this.tenantId],
+      );
+      workTriggerResult = {
+        rows: allTriggers.rows.filter((row) => {
+          try {
+            return JSON.parse(this.cipher.decrypt(row.definition_ciphertext)).requesterId === selector.value;
+          } catch {
+            return false;
+          }
+        }),
+      };
+    }
+    const workTriggerRows = workTriggerResult.rows;
     const taskById = new Map(taskRows.map((row) => [row.id, row]));
     const eligibleTaskIds = new Set(
       taskRows.filter((row) => taskStatus.has(row.status)).map((row) => row.id),
@@ -3446,6 +3983,8 @@ export class PostgresStore {
       ...taskRows.map((row) => row.id),
       ...planRows.map((row) => row.id),
       ...memoryRows.map((row) => row.id),
+      ...timeReturnRows.map((row) => row.id),
+      ...workTriggerRows.map((row) => row.id),
     ]);
     if (selector.type !== "time") relatedValues.add(selector.value);
     const auditRows = selector.type === "time"
@@ -3473,6 +4012,8 @@ export class PostgresStore {
         row,
         `${row.project_key}:${row.authorization_hash}:${row.capability}`,
       )),
+      timeReturns: timeReturnRows.map(token),
+      workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map(token),
       auditEvents: auditRows.map(token),
       identityReferences: [...new Set(identityReferences)],
     };
@@ -3480,6 +4021,7 @@ export class PostgresStore {
       tasks: taskRows.filter((row) => !taskStatus.has(row.status)).map(token),
       messages: blockedMessages.map((row) => token(row, row.platform_message_id)),
       workPlans: planRows.filter((row) => !planStatus.has(row.status)).map(token),
+      workTriggers: workTriggerRows.filter((row) => row.status !== "disabled").map(token),
       scopedPauses: blockedCheckpoints.map((row) => `${row.key}:${row.updated_at.toISOString()}`),
     };
     return {
@@ -3500,6 +4042,8 @@ export class PostgresStore {
           authorizationHash: row.authorization_hash,
           capability: row.capability,
         })),
+        timeReturns: timeReturnRows.map((row) => row.id),
+        workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map((row) => row.id),
         auditEvents: auditRows.map((row) => row.id),
         checkpointRewrites,
       },
@@ -3517,7 +4061,9 @@ export class PostgresStore {
       await client.query(
         `LOCK TABLE tasks, messages, privacy_erased_messages, approvals, side_effects, decision_reviews,
            decision_review_events, work_plans, work_plan_approvals,
-           work_plan_steps, capability_budget_usage, memory_items, checkpoints, audit_events
+           work_plan_steps, capability_budget_usage, time_return_entries,
+           work_trigger_runs, work_triggers,
+           memory_items, checkpoints, audit_events
          IN SHARE ROW EXCLUSIVE MODE`,
       );
       const candidates = await this._privacyErasureCandidates(selector, now, client, { lock: true });
@@ -3633,6 +4179,20 @@ export class PostgresStore {
             budget.authorizationHash,
             budget.capability,
           ],
+        );
+      }
+      if (candidates.ids.timeReturns.length > 0) {
+        await client.query(
+          `DELETE FROM time_return_entries
+           WHERE tenant_id = $1 AND id = ANY($2::text[])`,
+          [this.tenantId, candidates.ids.timeReturns],
+        );
+      }
+      if (candidates.ids.workTriggers.length > 0) {
+        await client.query(
+          `DELETE FROM work_triggers
+           WHERE tenant_id = $1 AND id = ANY($2::text[])`,
+          [this.tenantId, candidates.ids.workTriggers],
         );
       }
       for (const id of candidates.ids.memories) {

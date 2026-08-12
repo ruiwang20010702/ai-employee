@@ -159,3 +159,32 @@ Liveness, service availability, strict business readiness, and rollout acceptanc
 | Rollout accepted | Quality samples, long-window SLOs, side-effect evidence, and memory conflict gates pass |
 
 For the complete entity model, SQL schema, concurrency rules, tests, and architecture decisions, see the [Chinese production design](../技术设计文档.md).
+
+## Personal project runtime
+
+```mermaid
+flowchart TD
+    A["ProjectProfile"] --> B["Versioned WorkRecipe"]
+    C["Message / WorkEvent / schedule"] --> B
+    B --> D["Normalized WorkPlan"]
+    D --> E["Capability policy, authorization snapshot, budget, risk"]
+    E --> F{"Allow / approve / deny"}
+    F -->|"Authorized"| G["Work adapters"]
+    G --> H["Target read-back evidence"]
+    H --> I["Project cockpit projection"]
+    H --> J["Proposed memory"]
+    H --> K["Proposed time return"]
+    J --> L["Human confirmation"]
+    K --> L
+```
+
+`WorkTrigger` does not execute adapters. It reserves an idempotent run, applies
+daily and cooldown limits, instantiates a recipe, and registers the resulting
+plan through the same policy path. SQLite and PostgreSQL implement the same
+project, trigger, memory-source, privacy, and time-return invariants. Migrations
+019 and 020 add the persistent project/time and trigger/run records.
+
+Extension boundaries are split into `MessageAdapter`, `WorkEventAdapter`,
+`WorkspaceAdapter`, `AgentRuntime`, `ModelProvider`, and `WorkRecipe`. A
+manifest describes permissions and runtime secret names; it never carries
+secret values or grants a capability.

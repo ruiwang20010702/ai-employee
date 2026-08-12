@@ -1,4 +1,6 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { validateProjectProfile } from "./project-profile.mjs";
+import { containsCredentialMaterial } from "./memory-candidate.mjs";
 
 const levels = ["L0", "L1", "L2", "L3", "L4"];
 const modes = new Set(["automatic", "approval_required", "disabled"]);
@@ -17,6 +19,7 @@ export const capabilityCatalog = Object.freeze({
   work_plan_proposal: { level: "L1", sideEffect: false, runtime: "codex" },
   reply_draft: { level: "L1", sideEffect: false, runtime: "builtin" },
   document_draft: { level: "L1", sideEffect: false, interruptible: true, runtime: "codex" },
+  project_memory_proposal: { level: "L2", sideEffect: true, runtime: "builtin" },
   code_patch: { level: "L1", sideEffect: false, interruptible: true, requiresProjectRoot: true, runtime: "codex" },
   local_test: { level: "L2", sideEffect: true, interruptible: true, requiresProjectRoot: true, runtime: "commands" },
   local_branch: { level: "L2", sideEffect: true, requiresProjectRoot: true, runtime: "git" },
@@ -26,6 +29,7 @@ export const capabilityCatalog = Object.freeze({
   dingtalk_calendar_create: { level: "L3", sideEffect: true, runtime: "dws", probe: ["calendar", "event", "create"] },
   dingtalk_report_submit: { level: "L3", sideEffect: true, runtime: "dws", probe: ["report", "entry", "submit"] },
   git_push: { level: "L3", sideEffect: true, requiresProjectRoot: true, runtime: "git" },
+  github_pr_draft: { level: "L3", sideEffect: true, requiresProjectRoot: true, runtime: "gh" },
   production_deploy: { level: "L4", sideEffect: true, requiresProjectRoot: true, runtime: "commands" },
   production_data_change: {
     level: "L4",
@@ -284,6 +288,59 @@ export function validateProjectManifest(input) {
       capabilities[name].branchPrefix = branchPrefix;
     }
     if (
+      name === "github_pr_draft" &&
+      (mode !== "disabled" || rule.repository != null || rule.baseBranches != null)
+    ) {
+      const repository = assertString(rule.repository, "github_pr_draft.repository");
+      if (!/^[a-z0-9_.-]{1,100}\/[a-z0-9_.-]{1,100}$/iu.test(repository)) {
+        throw new Error("github_pr_draft.repository is invalid");
+      }
+      const baseBranches = normalizedStringSet(
+        rule.baseBranches,
+        "github_pr_draft.baseBranches",
+        { min: 1, max: 10 },
+      );
+      if (baseBranches.some((branch) => (
+        branch.length > 200 || branch.startsWith("-") || branch.includes("..") || /[\s~^:?*\[\\]/u.test(branch)
+      ))) {
+        throw new Error("github_pr_draft.baseBranches is invalid");
+      }
+      capabilities[name].repository = repository;
+      capabilities[name].baseBranches = baseBranches;
+      capabilities[name].maxTitleChars = boundedInteger(
+        rule.maxTitleChars,
+        "github_pr_draft.maxTitleChars",
+        120,
+        200,
+      );
+      capabilities[name].maxBodyBytes = boundedInteger(
+        rule.maxBodyBytes,
+        "github_pr_draft.maxBodyBytes",
+        64 * 1024,
+        256 * 1024,
+      );
+    }
+    if (
+      name === "project_memory_proposal" &&
+      (mode !== "disabled" || rule.allowedFactKeyPrefixes != null)
+    ) {
+      const prefixes = normalizedStringSet(
+        rule.allowedFactKeyPrefixes,
+        "project_memory_proposal.allowedFactKeyPrefixes",
+        { min: 1, max: 20 },
+      );
+      if (prefixes.some((prefix) => !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*\.$/u.test(prefix))) {
+        throw new Error("project_memory_proposal.allowedFactKeyPrefixes is invalid");
+      }
+      capabilities[name].allowedFactKeyPrefixes = prefixes;
+      capabilities[name].maxRetentionDays = boundedInteger(
+        rule.maxRetentionDays,
+        "project_memory_proposal.maxRetentionDays",
+        90,
+        365,
+      );
+    }
+    if (
       name === "shared_document_write" &&
       (mode !== "disabled" ||
         rule.folderNodeId != null ||
@@ -427,6 +484,7 @@ export function validateProjectManifest(input) {
     name,
     rootDirectory: resolve(rootDirectory),
     requesters,
+    ...(input.profile == null ? {} : { profile: validateProjectProfile(input.profile) }),
     capabilities,
   };
 }
@@ -558,6 +616,44 @@ export function evaluatePlan({ manifest, requesterId, steps, now = new Date() })
       }
       if (due && Number.isNaN(due.getTime())) {
         return { decision: "DENY", reason: "待办截止时间格式无效。" };
+      }
+    }
+    if (capability === "github_pr_draft") {
+      const pushStepId = String(step.inputs?.pushStepId ?? "").trim();
+      const title = String(step.inputs?.title ?? "").trim();
+      const body = String(step.inputs?.body ?? "").trim();
+      const baseBranch = String(step.inputs?.baseBranch ?? "").trim();
+      const referencedPush = steps.slice(0, index).some(
+        (candidate) => candidate.id === pushStepId && candidate.capability === "git_push",
+      );
+      if (
+        !onlyInputKeys(step.inputs, new Set(["pushStepId", "title", "body", "baseBranch"])) ||
+        !referencedPush ||
+        !title || title.length > rule.maxTitleChars || /[\r\n]/u.test(title) ||
+        !body || Buffer.byteLength(body, "utf8") > rule.maxBodyBytes ||
+        !rule.baseBranches.includes(baseBranch)
+      ) {
+        return { decision: "DENY", reason: "GitHub PR 草稿超出项目授权范围。" };
+      }
+    }
+    if (capability === "project_memory_proposal") {
+      const statement = String(step.inputs?.statement ?? "").trim();
+      const factKey = String(step.inputs?.factKey ?? "").trim();
+      const retentionDays = Number(step.inputs?.retentionDays);
+      const documentStepId = String(step.inputs?.documentStepId ?? "").trim();
+      const referencedDocument = steps.slice(0, index).some(
+        (candidate) => candidate.id === documentStepId && candidate.capability === "document_draft",
+      );
+      if (
+        !onlyInputKeys(step.inputs, new Set(["statement", "factKey", "retentionDays", "documentStepId"])) ||
+        !referencedDocument || !statement || statement.length > 1_000 ||
+        containsCredentialMaterial(statement) ||
+        !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,4}$/u.test(factKey) ||
+        !rule.allowedFactKeyPrefixes.some((prefix) => factKey.startsWith(prefix)) ||
+        !Number.isSafeInteger(retentionDays) || retentionDays < 1 || retentionDays > rule.maxRetentionDays ||
+        !(project.profile?.memoryScope.allowedTypes ?? []).includes("project")
+      ) {
+        return { decision: "DENY", reason: "项目记忆候选超出项目记忆范围。" };
       }
     }
     if (capability === "dingtalk_calendar_create") {

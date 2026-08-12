@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "teams-graph",
+  "name": "Microsoft Teams Graph reference adapter",
+  "platform": "teams",
+  "contract": "message_adapter",
+  "contractVersion": "1.0",
+  "status": "reference",
+  "permissions": ["Chat.Read", "ChatMessage.Send"],
+  "runtimeSecrets": ["MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"],
+  "guarantees": { "allowlist": true, "idempotency": true, "humanTakeover": true, "targetReadback": true, "unknownOutcome": true }
+}

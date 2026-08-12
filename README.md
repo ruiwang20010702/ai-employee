@@ -44,17 +44,20 @@ automation like production software:
 ## How it works
 
 ```mermaid
-flowchart LR
-    A["DingTalk / Feishu / demo message"] --> B["MessageAdapter: scope, deduplication, bounded bundling"]
-    B --> C{"Ignore, ask, reply, or plan work"}
-    C -->|"Ask or reply"| D["Draft awaiting approval"]
-    C -->|"Work request"| E["Project plan and capability gateway"]
-    E --> F{"Allow, approve, or reject"}
-    F -->|"Allowed"| G["Codex / Claude Code / Git / office tools"]
-    G --> H["Read back and verify target state"]
-    H --> I["Result draft, memory candidate, audit trail"]
-    D --> J["Final manual-takeover check"]
-    J --> K["Channel-native send with receipt verification"]
+flowchart TD
+    A["Message, meeting, GitHub event, or schedule"] --> B["Scope check, deduplication, bounded context"]
+    B --> C{"Ignore, clarify, reply, or start a recipe"}
+    C -->|"Clarify / reply"| D["Draft awaiting review"]
+    C -->|"Work"| E["Project + recipe + requester binding"]
+    E --> F["Immutable plan, capability scope, budget, and risk"]
+    F --> G{"Allow, approve, or reject"}
+    G -->|"Allow / approve"| H["Codex / Claude Code / GitHub / office adapters"]
+    H --> I["Target-system read-back and evidence"]
+    I --> J["Result draft + proposed project memory"]
+    J --> K["User confirms memory and time returned"]
+    D --> L["Final human-takeover check"]
+    L --> M["Channel-native send with receipt verification"]
+    K --> N["Personal project cockpit"]
 ```
 
 ## Highlights
@@ -68,7 +71,27 @@ flowchart LR
 | Tools | Research, docs, code, tests, Git, release, DingTalk office actions | Explicit per-project authorization |
 | Memory | Automatic candidates, human confirmation, conflict replacement, expiry, erasure | Never auto-confirms formal memory |
 | Reliability | Side-effect ledger, idempotency, read-back verification, alerts, SLOs | Unknown outcomes fail closed |
-| Operations | PostgreSQL, encrypted backups, nine LaunchAgents, immutable releases | Sending and execution require separate rollout |
+| Operations | PostgreSQL, encrypted backups, ten service definitions, immutable releases | Sending, execution, and proactive work require separate rollout |
+
+## The personal work loop
+
+Foursday is personal-first. The local cockpit is not a team-management suite;
+it is the place where one person teaches a work twin what matters, reviews risk,
+and sees whether time was actually returned.
+
+| Capability | What the user gets | Current implementation |
+|---|---|---|
+| Project onboarding | Project goal, milestones, people, memory scope, recipes, and risk budgets in one safe draft | Implemented; side-effect capabilities start disabled |
+| Recipe library | Repeatable workflows instead of planning the same work from every message | Four versioned built-in recipes with validated inputs |
+| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, and triggers in one view | Implemented in the local personal console |
+| Time-return dashboard | Evidence-backed minutes saved, confirmed by the user | Implemented; estimates never count automatically |
+| Proactive mode | Scheduled or event-triggered work with daily limits, cooldowns, and idempotency | Implemented; every trigger is created disabled |
+| Meeting to execution | Notes → document → proposed decision memory → task → follow-up calendar | Implemented as an approval-bound recipe |
+| GitHub delivery | Change request → patch → branch → tests → push → draft PR → report | Implemented for approved repositories and commands |
+
+The adapter SDK also defines verifiable contracts and safe example manifests
+for Slack, Teams, Gmail, and Google Workspace. These are extension boundaries,
+not claims that production connectors are already shipped.
 
 ## Quick Start
 
@@ -179,6 +202,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 
 | Guide | What it covers |
 |---|---|
+| [Product requirements](./docs/en/product-requirements.md) | Personal-first outcome, V2.3 scope, and acceptance boundaries |
 | [Overview](./docs/en/overview.md) | Product model, principles, lifecycle, and non-goals |
 | [Architecture](./docs/en/architecture.md) | Components, states, side effects, security, and readiness |
 | [Integrations](./docs/en/integrations.md) | DingTalk/DWS, Feishu events, Codex, Claude Code, and provider contracts |
@@ -196,8 +220,12 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [ ] Easier desktop distribution
 - [x] Feishu Open Platform adapter without a DWS dependency
 - [x] Claude Code and direct model-provider runtime contracts
+- [x] Personal project onboarding, recipes, cockpit, and verified time-return ledger
+- [x] Proactive triggers, meeting-to-execution, and GitHub draft-PR delivery loops
+- [x] Versioned workspace/event adapter contracts and community examples
 - [ ] Production Feishu credential wizard and managed long-connection service
-- [ ] More message adapters and a community example library
+- [ ] Production Slack, Teams, Gmail, and Google Workspace connectors
+- [ ] Signed community package registry and trust review workflow
 
 ## Contributing
 

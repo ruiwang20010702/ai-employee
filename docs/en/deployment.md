@@ -131,3 +131,16 @@ Do not use the maintenance-forward mode unless you have read and accepted the co
 | `shadow:verify` | Quality, long-window SLO, effect evidence, and memory gates allow rollout |
 
 A deployed release may be service-available while business readiness is false. Deployment never turns on real sending or plan execution automatically.
+
+## V2.3 candidate rollout boundary
+
+The personal cockpit, recipes, proactive worker, meeting loop, GitHub Draft PR
+adapter, migrations 019/020, and community contracts are workspace-candidate
+features until an exact commit is submitted, pushed, passes both cloud gates,
+is deployed, and is read back from the running services. Deployment never
+enables `proactive_work`, sending, or work-plan execution. Triggers remain
+disabled unless a separate business rollout explicitly enables them.
+
+Slack, Teams, Gmail, and Google Workspace examples have no production service
+to deploy. Operators must not add their runtime secret names to production
+configuration until a reviewed implementation and credential procedure exist.

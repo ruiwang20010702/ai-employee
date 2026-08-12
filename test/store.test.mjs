@@ -1882,3 +1882,109 @@ test("计划终态会形成原会话待审批结果草稿且保持幂等", async
   assert.equal(first.payload.sourceWorkPlanId, plan.id);
   assert.equal(store.listTasks({ limit: 100 }).filter((task) => task.id === first.id).length, 1);
 });
+
+test("时间返还只统计带完整证据且经本人确认的配方计划", async (t) => {
+  const store = await fixture(t);
+  const manifest = {
+    version: 1,
+    projectId: "time_project",
+    name: "时间返还项目",
+    rootDirectory: "/workspace/time",
+    requesters: ["owner"],
+    capabilities: { research: { mode: "automatic" } },
+  };
+  const plan = store.registerWorkPlan(assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: manifest.projectId,
+      requesterId: "owner",
+      recipe: {
+        id: "project-follow-up",
+        version: 1,
+        baselineMinutes: 60,
+        baselineMethod: "user_confirmed",
+      },
+      objective: "完成项目跟进",
+      steps: [{
+        id: "research",
+        capability: "research",
+        description: "核对进展",
+        expectedEvidence: "已核对来源的项目进展",
+      }],
+    },
+  }));
+  store.consumeWorkPlanAuthorization(plan.id);
+  assert.throws(
+    () => store.proposeTimeReturn(plan.id, 15, "owner"),
+    /completed work plan/u,
+  );
+  store.updateWorkPlanStep(plan.id, "research", {
+    status: "completed",
+    evidence: { kind: "research", verification: "source_checked", sha256: "a".repeat(64) },
+  });
+  store.finishWorkPlan(plan.id, { success: true });
+  const proposal = store.proposeTimeReturn(plan.id, 15, "owner");
+  assert.equal(proposal.status, "proposed");
+  assert.equal(proposal.returnedMinutes, 45);
+  assert.equal(proposal.outcomeEvidence.planHash, plan.plan_hash);
+  assert.throws(
+    () => store.proposeTimeReturn(plan.id, 15, "owner"),
+    /already exists/u,
+  );
+  const confirmed = store.decideTimeReturn(proposal.id, "confirmed", "owner");
+  assert.equal(confirmed.status, "confirmed");
+  assert.equal(store.listTimeReturns({ projectId: manifest.projectId }).length, 1);
+
+  const preview = store.previewPrivacyErasure({ projectId: manifest.projectId });
+  assert.equal(preview.counts.timeReturns, 1);
+  store.erasePrivacyData(
+    { projectId: manifest.projectId },
+    preview.confirmation,
+    "owner",
+  );
+  assert.equal(store.listTimeReturns({ projectId: manifest.projectId }).length, 0);
+});
+
+test("项目记忆候选绑定计划哈希、保持幂等且必须人工确认", async (t) => {
+  const store = await fixture(t);
+  const manifest = {
+    version: 1, projectId: "memory_project", name: "项目记忆",
+    rootDirectory: "/workspace/memory", requesters: ["owner"],
+    profile: {
+      objective: "形成可追溯决策", successCriteria: [], milestones: [], collaborationObjects: [],
+      selectedRecipeIds: ["meeting-follow-up"],
+      memoryScope: { allowedTypes: ["project"], retentionDays: 90 },
+    },
+    capabilities: { research: { mode: "automatic" } },
+  };
+  const plan = store.registerWorkPlan(assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1, projectId: manifest.projectId, requesterId: "owner",
+      recipe: { id: "meeting-follow-up", version: 1, baselineMinutes: 40, baselineMethod: "user_confirmed" },
+      objective: "会议闭环",
+      steps: [{ id: "research", capability: "research", description: "核对", expectedEvidence: "事实" }],
+    },
+  }));
+  const input = {
+    type: "project", subject: manifest.projectId, projectId: manifest.projectId,
+    statement: "发布前必须完成安全检查。", sourceId: plan.plan_hash,
+    sourceVersion: "meeting-follow-up@1", scope: { factKey: "decision.release_gate" },
+    confidence: 1, sensitivity: "internal",
+    expiresAt: "2026-11-10T00:00:00.000Z", createdBy: "owner",
+  };
+  const first = store.proposeWorkPlanMemory(input, new Date("2026-08-12T00:00:00.000Z"));
+  const second = store.proposeWorkPlanMemory(input, new Date("2026-08-12T00:01:00.000Z"));
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
+  assert.equal(first.id, second.id);
+  assert.equal(store.getMemory(first.id).status, "proposed");
+  const personPreview = store.previewPrivacyErasure({ personId: "owner" });
+  assert.equal(personPreview.counts.memories, 1);
+  assert.equal(store.confirmMemory(first.id, "owner", new Date("2026-08-12T00:02:00.000Z")), "confirmed");
+  assert.throws(
+    () => store.proposeWorkPlanMemory({ ...input, sourceId: "f".repeat(64) }),
+    /not verifiable/u,
+  );
+});

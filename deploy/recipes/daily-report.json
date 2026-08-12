@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "id": "daily-report",
+  "name": "每日工作总结",
+  "description": "收集已授权项目证据，生成可审核的每日工作总结草稿。",
+  "category": "personal-operations",
+  "objective": "为 {{reportDate}} 生成基于项目证据的工作总结草稿",
+  "baselineMinutes": 30,
+  "baselineMethod": "user_confirmed",
+  "inputs": [
+    {
+      "name": "reportDate",
+      "type": "string",
+      "required": true,
+      "description": "报告日期，格式为 YYYY-MM-DD"
+    }
+  ],
+  "steps": [
+    {
+      "id": "research-evidence",
+      "capability": "research",
+      "description": "整理 {{reportDate}} 的已授权项目证据，区分已完成、进行中和阻塞项",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {},
+      "expectedEvidence": "返回包含来源路径、状态边界和未知项的研究证据",
+      "rollback": null
+    },
+    {
+      "id": "draft-report",
+      "capability": "document_draft",
+      "description": "根据研究证据起草 {{reportDate}} 工作总结",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {},
+      "expectedEvidence": "生成非空 Markdown 草稿及内容哈希",
+      "rollback": null
+    }
+  ]
+}

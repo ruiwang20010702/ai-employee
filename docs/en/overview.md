@@ -67,6 +67,17 @@ flowchart LR
 | Memory | Person, project, and principle candidates | Source-bound and human-confirmed |
 | Operations | Health, alerts, backups, migration checks, immutable releases | Separate deployment approval |
 
+## Personal work loop
+
+The V2.3 workspace candidate adds a personal project cockpit rather than a
+team-control console: ten-minute project onboarding, four versioned recipes,
+evidence-backed time return, disabled-by-default proactive triggers,
+meeting-to-execution, and a GitHub draft-PR loop. The user confirms formal
+memory and saved time; neither is accepted from a model estimate alone.
+
+Slack, Teams, Gmail, and Google Workspace currently have versioned extension
+contracts and example manifests only. They are not production connectors.
+
 Implemented capability does not mean enabled capability. Production environments start with `draft_reply`; sending and work-plan execution have separate global switches and project-level authorization.
 
 ## What it is not

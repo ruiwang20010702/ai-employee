@@ -228,6 +228,9 @@ export function loadConfig({
       "work_plan_execution requires executor in AI_EMPLOYEE_REQUIRED_COMPONENTS",
     );
   }
+  if (capabilities.has("proactive_work") && !requiredComponents.includes("proactive")) {
+    throw new Error("proactive_work requires proactive in AI_EMPLOYEE_REQUIRED_COMPONENTS");
+  }
   const quietWindowMs = positiveNumber("DINGTALK_QUIET_WINDOW_MS", 3_000);
   const bundleMaxWaitMs = positiveNumber(
     "AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS",
@@ -269,12 +272,16 @@ export function loadConfig({
       ["codex", "claude-code"],
     ),
     gbrainPath: process.env.GBRAIN_PATH ?? "gbrain",
+    ghPath: process.env.GH_PATH?.trim() || null,
     dingtalkRoot:
       process.env.DINGTALK_DATA_ROOT ??
       join(homedir(), "Library/Application Support/DingTalkMac"),
     projectsDirectory:
       process.env.AI_EMPLOYEE_PROJECTS_DIRECTORY ??
       join(projectRoot, ".runtime", "projects"),
+    recipesDirectory:
+      process.env.FOURSDAY_RECIPES_DIRECTORY ??
+      join(projectRoot, "deploy", "recipes"),
     databaseUrl,
     dataKey,
     tenantId,
@@ -300,6 +307,7 @@ export function loadConfig({
       "AI_EMPLOYEE_PLAN_EXECUTOR_POLL_MS",
       5_000,
     ),
+    proactivePollMs: positiveNumber("FOURSDAY_PROACTIVE_POLL_MS", 30_000),
     planExecutionLeaseMs,
     planExecutionLeaseRenewMs,
     manualReplyRecheckMs: positiveNumber(

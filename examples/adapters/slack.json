@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "slack-events",
+  "name": "Slack Events reference adapter",
+  "platform": "slack",
+  "contract": "message_adapter",
+  "contractVersion": "1.0",
+  "status": "reference",
+  "permissions": ["channels:history", "chat:write"],
+  "runtimeSecrets": ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],
+  "guarantees": { "allowlist": true, "idempotency": true, "humanTakeover": true, "targetReadback": true, "unknownOutcome": true }
+}

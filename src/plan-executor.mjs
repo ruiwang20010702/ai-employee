@@ -107,6 +107,8 @@ export async function runPlanExecutor({
     codexPath: config.codexPath,
     dwsPath: config.dwsPath,
     gbrainPath: config.gbrainPath,
+    ghPath: config.ghPath,
+    store,
   });
   let stopped = false;
   let heartbeatTimer;
