@@ -86,6 +86,7 @@
     "memory:sources": "node scripts/校验记忆来源.mjs",
     "graph:benchmark": "node scripts/基准受治理工作图.mjs",
     "pilot:verify": "node scripts/验证体验证据.mjs",
+    "public-install:verify": "node scripts/验证公开安装.mjs",
     "db:backup": "node scripts/备份数据库.mjs",
     "db:restore": "node scripts/恢复数据库.mjs",
     "db:restore:drill": "node scripts/隔离恢复演练.mjs",

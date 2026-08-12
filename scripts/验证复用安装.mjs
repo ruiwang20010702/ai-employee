@@ -88,6 +88,7 @@ async function packageFileGate(files, root) {
     "scripts/校验项目能力.mjs",
     "scripts/运行完整测试.mjs",
     "scripts/验证复用安装.mjs",
+    "scripts/验证公开安装.mjs",
     ...migrationFiles,
     "src/capability-policy.mjs",
     "src/adapter-contracts.mjs",
