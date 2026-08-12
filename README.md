@@ -23,7 +23,14 @@ impersonating you.
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[Start in 10 minutes](#quick-start) · [75-second demo contract](./docs/en/demo.md) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
+[Start in 10 minutes](#quick-start) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
+
+<a href="./assets/foursday-v0.5-demo.mp4">
+  <img src="./assets/foursday-v0.5-demo-poster.png" alt="Watch Foursday turn a synthetic GitHub Issue into a verified Draft PR" width="960">
+</a>
+
+**[Watch the real v0.5 candidate loop →](./assets/foursday-v0.5-demo.mp4)**<br>
+75 seconds · silent captions · synthetic [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) → verified [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39) · no merge · no deployment
 
 </div>
 
@@ -292,7 +299,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 | [Capabilities and Memory](./docs/en/capabilities.md) | Project authorization, plans, formal memory, and takeover |
 | [Deployment](./docs/en/deployment.md) | Safe setup, exact-SHA releases, verification, and forward-only boundaries |
 | [First contributions](./docs/en/first-contributions.md) | Five bounded, issue-ready tasks for new contributors |
-| [Authentic demo contract](./docs/en/demo.md) | The 75-second storyboard and evidence required before publishing the launch video |
+| [Authentic demo and evidence contract](./docs/en/demo.md) | The 75-second candidate video, storyboard, evidence boundary, and external-reproduction gate |
 | [Pilot validation](./docs/en/pilot-validation.md) | What counts toward 10 maintainer loops and 10 external testers |
 | [Security Policy](./SECURITY.md) | Private reporting and supported security boundaries |
 

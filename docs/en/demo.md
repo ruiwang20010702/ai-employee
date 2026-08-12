@@ -1,5 +1,11 @@
 # 75-second authentic demo
 
+[Watch the v0.5 candidate demo](../../assets/foursday-v0.5-demo.mp4). It uses
+synthetic [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) and
+the resulting verified [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39).
+Nothing was merged or deployed, and production sending, execution, and proactive
+work remained disabled.
+
 The v0.5 launch demo must show one real, reviewable handoff. It is not a motion mockup and must not splice a local preview together with an unrelated pull request.
 
 ## Recording contract
@@ -41,4 +47,7 @@ End the recording with a two-second slate containing:
 - evidence bundle status and integrity digest;
 - “No merge. No deploy. Production sending remains off.”
 
-The demo is publishable only after a second person reproduces it from the documented Quick Start. Until a real recording and public URLs exist, README copy must call this a recording plan rather than a finished video.
+The recording now proves the maintainer path and public Issue-to-Draft-PR
+read-back. It does not prove external reproducibility: the public v0.5 acceptance
+gate still requires ten independent testers to reproduce the documented Quick
+Start and publish privacy-safe feedback.

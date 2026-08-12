@@ -18,7 +18,14 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[10 分钟开始](#快速开始) · [75 秒真实演示契约](./docs/真实演示录制说明.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+[10 分钟开始](#快速开始) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+
+<a href="./assets/foursday-v0.5-demo.mp4">
+  <img src="./assets/foursday-v0.5-demo-poster.png" alt="观看 Foursday 将合成 GitHub Issue 转化为经过验证的 Draft PR" width="960">
+</a>
+
+**[观看 v0.5 候选版真实闭环 →](./assets/foursday-v0.5-demo.mp4)**<br>
+75 秒 · 静音字幕 · 合成 [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) → 已回读验证的 [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39) · 未合并 · 未部署
 
 </div>
 

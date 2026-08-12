@@ -447,15 +447,19 @@ test("首批贡献任务可发布、范围受限且进入复用安装包", async
   assert.ok(JSON.parse(packageText).files.includes(".github/ISSUE_DRAFTS/"));
 });
 
-test("真实演示文档要求同一次闭环和可复核证据，不冒充成片", async () => {
+test("真实演示来自同一次闭环并保留外部复现边界", async () => {
   const [readme, chineseReadme, demo, chineseDemo] = await Promise.all([
     projectText("README.md"),
     projectText("README_ZH.md"),
     projectText("docs/en/demo.md"),
     projectText("docs/真实演示录制说明.md"),
   ]);
-  assert.match(readme, /75-second demo contract/u);
-  assert.match(chineseReadme, /75 秒真实演示契约/u);
+  assert.match(readme, /Watch the 75-second demo/u);
+  assert.match(readme, /Issue #29/u);
+  assert.match(readme, /Draft PR #39/u);
+  assert.match(chineseReadme, /观看 75 秒真实演示/u);
+  assert.match(chineseReadme, /Issue #29/u);
+  assert.match(chineseReadme, /Draft PR #39/u);
   for (const value of [
     "public, synthetic GitHub Issue",
     "complete plan hash",
@@ -463,11 +467,13 @@ test("真实演示文档要求同一次闭环和可复核证据，不冒充成�
     "memory: proposed → confirmed",
     "No merge. No deploy.",
   ]) assert.match(demo, new RegExp(value, "u"));
-  assert.match(demo, /recording plan rather than a finished video/u);
+  assert.match(demo, /does not prove external reproducibility/u);
+  assert.match(demo, /ten independent testers/u);
   assert.match(demo, /verified_closed_loop/u);
   assert.match(demo, /integrity digest/u);
   assert.match(chineseDemo, /不能把本地预览、无关 PR 和模拟结果剪接/u);
-  assert.match(chineseDemo, /在此之前统一称为录制计划/u);
+  assert.match(chineseDemo, /不代表外部可复现性已经验收/u);
+  assert.match(chineseDemo, /10 位独立测试者/u);
   assert.match(chineseDemo, /verified_closed_loop/u);
 });
 
