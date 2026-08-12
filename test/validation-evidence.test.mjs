@@ -63,6 +63,18 @@ function evidence(index = 1, { confirmed = true } = {}) {
       productionSendingEnabled: false,
       proactiveWorkEnabled: false,
     },
+    ...(confirmed ? {
+      timing: {
+        schema: "foursday-local-journey-timing/v1",
+        scope: "server_start_to_confirmed_loop",
+        installToPreviewMeasured: false,
+        serverStartToPlanMs: 60_000,
+        planReviewMs: 60_000,
+        approvedExecutionMs: 180_000,
+        outcomeReviewMs: 120_000,
+        serverStartToConfirmedMs: 420_000,
+      },
+    } : {}),
   });
 }
 
@@ -77,9 +89,17 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
   assert.equal(summary.draftPrBase, "main");
   assert.equal(summary.draftPrState, "OPEN");
   assert.equal(summary.draftPrIsDraft, true);
+  assert.equal(summary.localJourney.serverStartToConfirmedMs, 420_000);
   assert.throws(
     () => validateValidationEvidence(evidence(2, { confirmed: false })),
     /not a confirmed closed loop/u,
+  );
+  const invalidTiming = evidence();
+  const { integrity: ignoredTiming, ...timingCore } = invalidTiming;
+  timingCore.timing.serverStartToConfirmedMs += 1;
+  assert.throws(
+    () => validateValidationEvidence(sealValidationEvidence(timingCore)),
+    /stages do not equal/u,
   );
   const tampered = structuredClone(valid);
   tampered.evidence[0].status = "failed";
@@ -151,9 +171,18 @@ test("public pilot proof is derived from confirmed evidence and excludes private
   assert.equal(proof.evidenceDigest, value.integrity.digest);
   assert.equal(proof.unsignedSelfReport, true);
   assert.equal(proof.maintainerReadbackRequired, true);
+  assert.deepEqual(proof.localJourney, {
+    scope: "server_start_to_confirmed_loop",
+    serverStartToConfirmedSeconds: 420,
+    serverJourneyWithinTenMinutes: true,
+    installToPreviewMeasured: false,
+  });
   assert.deepEqual(validatePublicPilotProof(proof), proof);
   assert.match(markdown, /Alias: tester-XX/u);
   assert.match(markdown, /maintainer target readback required: yes/iu);
+  assert.match(markdown, /Measured server-start-to-confirmed seconds: 420/u);
+  assert.match(markdown, /Server journey within 10 minutes: yes/u);
+  assert.match(markdown, /Package download included in measured journey: no/u);
   const serialized = JSON.stringify({ proof, markdown });
   for (const forbidden of [
     "memory-1",
@@ -175,6 +204,23 @@ test("public pilot proof is derived from confirmed evidence and excludes private
   assert.throws(
     () => validatePublicPilotProof({ ...proof, unexpected: true }),
     /fields are invalid/u,
+  );
+  assert.throws(
+    () => validatePublicPilotProof({
+      ...proof,
+      localJourney: { ...proof.localJourney, serverJourneyWithinTenMinutes: false },
+    }),
+    /timing scope or value is invalid/u,
+  );
+
+  const legacyValue = evidence(3);
+  const { integrity: ignoredLegacy, ...legacyCore } = legacyValue;
+  delete legacyCore.timing;
+  const legacyProof = createPublicPilotProof(sealValidationEvidence(legacyCore));
+  assert.equal(legacyProof.localJourney, undefined);
+  assert.match(
+    publicPilotProofMarkdown(legacyProof),
+    /Measured server-start-to-confirmed seconds: unavailable/u,
   );
 });
 

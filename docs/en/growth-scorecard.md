@@ -53,6 +53,13 @@ confirmed project memory, and separately confirmed returned time. The maintainer
 still independently re-reads the public Issue and Draft PR. The complete local
 bundle is never posted publicly.
 
+For the ten-minute activation funnel, use two honest measurements: the tester's
+install-to-preview observation and the integrity-bound local
+server-start-to-confirmed monotonic-clock duration. The latter is automatically
+segmented into plan creation, review, approved execution, and outcome review,
+but explicitly excludes package download. Neither timing alone proves the full
+promise.
+
 ### External contributor
 
 Count a distinct non-maintainer only after a contribution is accepted into the

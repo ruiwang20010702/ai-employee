@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { access, constants, mkdir, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 import { validateProjectManifest } from "./capability-policy.mjs";
 import { buildActivationPreview } from "./activation.mjs";
@@ -26,6 +27,58 @@ function text(value, name, maximum = 4_000) {
     throw new Error(`${name} must contain 1-${maximum} characters`);
   }
   return normalized;
+}
+
+function monotonicMilliseconds(value) {
+  const milliseconds = Math.round(Number(value));
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+    throw new Error("Activation timing clock must return non-negative milliseconds");
+  }
+  return milliseconds;
+}
+
+function localJourneyTiming(session) {
+  const timeline = session.timeline;
+  for (const field of [
+    "serverStartedAtMs",
+    "planCreatedAtMs",
+    "approvedAtMs",
+    "deliveryCompletedAtMs",
+    "outcomesConfirmedAtMs",
+  ]) {
+    if (!Number.isSafeInteger(timeline?.[field])) {
+      throw new Error("Confirmed activation is missing local journey timing");
+    }
+  }
+  const points = [
+    timeline.serverStartedAtMs,
+    timeline.planCreatedAtMs,
+    timeline.approvedAtMs,
+    timeline.deliveryCompletedAtMs,
+    timeline.outcomesConfirmedAtMs,
+  ];
+  if (points.some((value, index) => index > 0 && value < points[index - 1])) {
+    throw new Error("Activation local journey timing is not monotonic");
+  }
+  return Object.freeze({
+    schema: "foursday-local-journey-timing/v1",
+    scope: "server_start_to_confirmed_loop",
+    installToPreviewMeasured: false,
+    serverStartToPlanMs: points[1] - points[0],
+    planReviewMs: points[2] - points[1],
+    approvedExecutionMs: points[3] - points[2],
+    outcomeReviewMs: points[4] - points[3],
+    serverStartToConfirmedMs: points[4] - points[0],
+  });
+}
+
+function publicLocalJourney(timing) {
+  return Object.freeze({
+    scope: timing.scope,
+    serverStartToConfirmedSeconds: Math.ceil(timing.serverStartToConfirmedMs / 1_000),
+    serverJourneyWithinTenMinutes: timing.serverStartToConfirmedMs <= 10 * 60_000,
+    installToPreviewMeasured: false,
+  });
 }
 
 function githubRepositoryFromRemote(value) {
@@ -237,6 +290,7 @@ export class ActivationExecutionCoordinator {
     ghPath = null,
     ghPathProvider = null,
     repositoryInspector = inspectActivationRepository,
+    monotonicNow = () => performance.now(),
   }) {
     if (!isAbsolute(sessionRoot)) throw new Error("Activation session root must be absolute");
     if (typeof artifactRuntimeFactory !== "function") {
@@ -250,7 +304,16 @@ export class ActivationExecutionCoordinator {
     this.ghPath = ghPath;
     this.ghPathProvider = ghPathProvider;
     this.repositoryInspector = repositoryInspector;
+    if (typeof monotonicNow !== "function") {
+      throw new Error("Activation timing clock is required");
+    }
+    this.monotonicNow = monotonicNow;
+    this.serverStartedAtMs = monotonicMilliseconds(monotonicNow());
     this.sessions = new Map();
+  }
+
+  readMonotonicTime() {
+    return monotonicMilliseconds(this.monotonicNow());
   }
 
   async create(input) {
@@ -273,6 +336,13 @@ export class ActivationExecutionCoordinator {
         running: false,
         memoryId: null,
         timeReturnId: null,
+        timeline: {
+          serverStartedAtMs: this.serverStartedAtMs,
+          planCreatedAtMs: this.readMonotonicTime(),
+          approvedAtMs: null,
+          deliveryCompletedAtMs: null,
+          outcomesConfirmedAtMs: null,
+        },
       };
       this.sessions.set(id, session);
       return {
@@ -319,6 +389,7 @@ export class ActivationExecutionCoordinator {
         throw new Error("Repository identity changed after plan review");
       }
     }
+    session.timeline.approvedAtMs = this.readMonotonicTime();
     session.running = true;
     try {
       await session.store.decideWorkPlan(planId, {
@@ -343,6 +414,7 @@ export class ActivationExecutionCoordinator {
       let memory = null;
       let timeReturn = null;
       if (execution.status === "completed") {
+        session.timeline.deliveryCompletedAtMs = this.readMonotonicTime();
         const pr = steps.find((step) => step.evidence?.kind === "verified_github_pr_draft")?.evidence;
         if (!pr) throw new Error("Completed activation is missing Draft PR read-back evidence");
         memory = await session.store.proposeWorkPlanMemory({
@@ -399,6 +471,15 @@ export class ActivationExecutionCoordinator {
     const timeReturn = timeReturnId
       ? await session.store.decideTimeReturn(timeReturnId, "confirmed", actor)
       : null;
+    const [currentMemory, currentTimeReturn] = await Promise.all([
+      session.memoryId ? session.store.getMemory(session.memoryId) : null,
+      session.timeReturnId ? session.store.getTimeReturn(session.timeReturnId) : null,
+    ]);
+    const outcomesConfirmed = currentMemory?.status === "confirmed" &&
+      currentTimeReturn?.status === "confirmed";
+    if (outcomesConfirmed && session.timeline.outcomesConfirmedAtMs === null) {
+      session.timeline.outcomesConfirmedAtMs = this.readMonotonicTime();
+    }
     return {
       memory: memoryStatus ? { id: memoryId, status: memoryStatus } : null,
       timeReturn: timeReturn ? {
@@ -406,6 +487,9 @@ export class ActivationExecutionCoordinator {
         status: timeReturn.status,
         returnedMinutes: timeReturn.returnedMinutes,
       } : null,
+      localJourney: outcomesConfirmed
+        ? publicLocalJourney(localJourneyTiming(session))
+        : null,
     };
   }
 
@@ -466,6 +550,7 @@ export class ActivationExecutionCoordinator {
         productionSendingEnabled: false,
         proactiveWorkEnabled: false,
       },
+      ...(outcomesConfirmed ? { timing: localJourneyTiming(session) } : {}),
     };
     return sealValidationEvidence(core);
   }

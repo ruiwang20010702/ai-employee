@@ -222,12 +222,14 @@ test("activation coordinator executes only the approved hash then proposes confi
       isDraft: true,
     },
   };
+  const monotonicTimes = [0, 60_000, 120_000, 420_000, 540_000];
   const coordinator = new ActivationExecutionCoordinator({
     sessionRoot: join(directory, "sessions"),
     prepare: async () => prepared,
     repositoryInspector: async () => snapshot,
     artifactRuntimeFactory: async () => ({ id: "fake" }),
     ghPath: "/usr/bin/true",
+    monotonicNow: () => monotonicTimes.shift(),
     adapterFactory: () => Object.fromEntries(
       Object.entries(evidence).map(([capability, value]) => [capability, {
         async execute() { return { verified: true, evidence: value }; },
@@ -279,6 +281,7 @@ test("activation coordinator executes only the approved hash then proposes confi
   assert.equal(proposedEvidence.safeguards.deploymentPerformed, false);
   assert.match(proposedEvidence.integrity.digest, /^[a-f0-9]{64}$/u);
   assert.equal(proposedEvidence.integrity.signed, false);
+  assert.equal(proposedEvidence.timing, undefined);
   await assert.rejects(
     () => coordinator.exportPublicProof(created.sessionId),
     /not a confirmed closed loop/u,
@@ -292,14 +295,33 @@ test("activation coordinator executes only the approved hash then proposes confi
   });
   assert.equal(confirmed.memory.status, "confirmed");
   assert.equal(confirmed.timeReturn.status, "confirmed");
+  assert.deepEqual(confirmed.localJourney, {
+    scope: "server_start_to_confirmed_loop",
+    serverStartToConfirmedSeconds: 540,
+    serverJourneyWithinTenMinutes: true,
+    installToPreviewMeasured: false,
+  });
   const confirmedEvidence = await coordinator.exportEvidence(created.sessionId);
   assert.equal(confirmedEvidence.validationStatus, "verified_closed_loop");
   assert.equal(confirmedEvidence.outcomes.memory.status, "confirmed");
   assert.equal(confirmedEvidence.outcomes.timeReturn.status, "confirmed");
+  assert.deepEqual(confirmedEvidence.timing, {
+    schema: "foursday-local-journey-timing/v1",
+    scope: "server_start_to_confirmed_loop",
+    installToPreviewMeasured: false,
+    serverStartToPlanMs: 60_000,
+    planReviewMs: 60_000,
+    approvedExecutionMs: 300_000,
+    outcomeReviewMs: 120_000,
+    serverStartToConfirmedMs: 540_000,
+  });
   const publicProof = await coordinator.exportPublicProof(created.sessionId);
   assert.equal(publicProof.proof.schema, "foursday-public-pilot-proof/v1");
   assert.equal(publicProof.proof.draftPrUrl, "https://github.com/example/project/pull/42");
+  assert.deepEqual(publicProof.proof.localJourney, confirmed.localJourney);
   assert.match(publicProof.markdown, /Alias: tester-XX/u);
+  assert.match(publicProof.markdown, /Measured server-start-to-confirmed seconds: 540/u);
+  assert.match(publicProof.markdown, /Package download included in measured journey: no/u);
   assert.doesNotMatch(publicProof.markdown, /memory_|time_/u);
   await assert.rejects(
     () => coordinator.confirmOutcomes(created.sessionId, { memoryId: "memory_other" }),

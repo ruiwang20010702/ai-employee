@@ -195,12 +195,18 @@ download the JSON evidence bundle; download it again after confirmation to
 capture the final `verified_closed_loop` status. The bundle omits local paths,
 remotes, action tokens, credentials, and model output while retaining the
 Issue, source and target repository identities, plan hash, target read-back,
-memory status, time-return status, and explicit safety boundaries.
+memory status, time-return status, explicit safety boundaries, and a locally
+measured server-start-to-confirmed journey. The measurement uses a monotonic
+process clock and is covered by the evidence digest. It deliberately excludes
+the initial package download, which remains a separate self-reported field.
 
 After confirming memory and returned time, use **Copy privacy-safe pilot proof**
 to copy a public Issue comment template derived from that verified bundle. The
 template contains only public GitHub target identities, governed hashes,
-runtime, confirmed returned minutes, and explicit feedback placeholders. It is
+runtime, confirmed returned minutes, the rounded local journey duration, and
+explicit feedback placeholders. It says whether the server-side journey stayed
+within ten minutes and explicitly says that package download time was not
+measured. It is
 an unsigned self-report, so it never replaces maintainer read-back of the Issue
 and Draft PR. Keep the complete JSON bundle local unless a maintainer requests
 it through an agreed private channel. The adjacent **Open pilot Issue #49** link

@@ -606,6 +606,29 @@ test("外部体验入口使用 fork 推送并把来源与上游目标纳入审�
   }
 });
 
+test("十分钟接入证据区分服务侧自动计时与首次包下载", async () => {
+  const [readme, chineseReadme, pilot, chinesePilot, scorecard, chineseScorecard] =
+    await Promise.all([
+      projectText("README.md"),
+      projectText("README_ZH.md"),
+      projectText("docs/en/pilot-validation.md"),
+      projectText("docs/体验验证说明.md"),
+      projectText("docs/en/growth-scorecard.md"),
+      projectText("docs/公开增长记分卡.md"),
+    ]);
+  for (const value of [readme, pilot, scorecard]) {
+    assert.match(value, /server-start-to-confirmed/u);
+    assert.match(value, /monotonic/u);
+    assert.match(value, /package download/u);
+  }
+  for (const value of [chineseReadme, chinesePilot, chineseScorecard]) {
+    assert.match(value, /服务启动/u);
+    assert.match(value, /单调时钟/u);
+    assert.match(value, /包下载/u);
+    assert.match(value, /不能.*单独|不能拿.*冒充/u);
+  }
+});
+
 test("英文核心文档覆盖产品、架构、能力记忆和部署边界", async () => {
   const [readme, overview, architecture, capabilities, deployment] = await Promise.all([
     projectText("README.md"),

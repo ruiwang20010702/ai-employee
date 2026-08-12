@@ -103,6 +103,74 @@ function rejectPrivateFields(value, path = "bundle") {
   }
 }
 
+function validateLocalJourneyTiming(value) {
+  const timing = object(value, "timing");
+  const expectedKeys = [
+    "approvedExecutionMs",
+    "installToPreviewMeasured",
+    "outcomeReviewMs",
+    "planReviewMs",
+    "schema",
+    "scope",
+    "serverStartToConfirmedMs",
+    "serverStartToPlanMs",
+  ];
+  if (JSON.stringify(Object.keys(timing).sort()) !== JSON.stringify(expectedKeys)) {
+    throw new Error("Evidence timing fields are invalid");
+  }
+  if (
+    timing.schema !== "foursday-local-journey-timing/v1" ||
+    timing.scope !== "server_start_to_confirmed_loop" ||
+    timing.installToPreviewMeasured !== false
+  ) {
+    throw new Error("Evidence timing scope is invalid");
+  }
+  const durationFields = [
+    "serverStartToPlanMs",
+    "planReviewMs",
+    "approvedExecutionMs",
+    "outcomeReviewMs",
+    "serverStartToConfirmedMs",
+  ];
+  for (const field of durationFields) {
+    if (!Number.isSafeInteger(timing[field]) || timing[field] < 0 || timing[field] > 30 * 86_400_000) {
+      throw new Error(`Evidence timing ${field} is invalid`);
+    }
+  }
+  if (
+    timing.serverStartToConfirmedMs !==
+      timing.serverStartToPlanMs + timing.planReviewMs +
+      timing.approvedExecutionMs + timing.outcomeReviewMs
+  ) {
+    throw new Error("Evidence timing stages do not equal the total journey");
+  }
+  return timing;
+}
+
+function publicJourneyTiming(value) {
+  const timing = object(value, "publicProof.localJourney");
+  const expectedKeys = [
+    "installToPreviewMeasured",
+    "scope",
+    "serverJourneyWithinTenMinutes",
+    "serverStartToConfirmedSeconds",
+  ];
+  if (JSON.stringify(Object.keys(timing).sort()) !== JSON.stringify(expectedKeys)) {
+    throw new Error("Public pilot timing fields are invalid");
+  }
+  if (
+    timing.scope !== "server_start_to_confirmed_loop" ||
+    timing.installToPreviewMeasured !== false ||
+    !Number.isSafeInteger(timing.serverStartToConfirmedSeconds) ||
+    timing.serverStartToConfirmedSeconds < 0 ||
+    timing.serverStartToConfirmedSeconds > 30 * 86_400 ||
+    timing.serverJourneyWithinTenMinutes !== (timing.serverStartToConfirmedSeconds <= 600)
+  ) {
+    throw new Error("Public pilot timing scope or value is invalid");
+  }
+  return timing;
+}
+
 export function validationEvidenceDigest(core) {
   return createHash("sha256").update(JSON.stringify(core)).digest("hex");
 }
@@ -208,6 +276,9 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
   if (requireConfirmed && !confirmed) {
     throw new Error("Evidence outcomes are not a confirmed closed loop");
   }
+  const localJourney = bundle.timing === undefined
+    ? null
+    : validateLocalJourneyTiming(bundle.timing);
   return {
     planHash,
     projectId: bounded(project.id, "project.id", 64),
@@ -227,6 +298,7 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
     runtime: bounded(bundle.runtime, "runtime", 100),
     returnedMinutes: Number(outcomes.timeReturn?.returnedMinutes ?? 0),
     confirmed,
+    localJourney,
     integrityDigest: integrity.digest,
   };
 }
@@ -253,6 +325,17 @@ export function createPublicPilotProof(value) {
     outcomesConfirmed: true,
     unsignedSelfReport: true,
     maintainerReadbackRequired: true,
+    ...(summary.localJourney ? {
+      localJourney: {
+        scope: summary.localJourney.scope,
+        serverStartToConfirmedSeconds: Math.ceil(
+          summary.localJourney.serverStartToConfirmedMs / 1_000,
+        ),
+        serverJourneyWithinTenMinutes:
+          summary.localJourney.serverStartToConfirmedMs <= 10 * 60_000,
+        installToPreviewMeasured: false,
+      },
+    } : {}),
   });
 }
 
@@ -278,7 +361,8 @@ export function validatePublicPilotProof(proof) {
     "startingCommit",
     "unsignedSelfReport",
     "validationStatus",
-  ];
+    ...(Object.hasOwn(value, "localJourney") ? ["localJourney"] : []),
+  ].sort();
   if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(expectedKeys)) {
     throw new Error("Public pilot proof fields are invalid");
   }
@@ -324,6 +408,9 @@ export function validatePublicPilotProof(proof) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/u.test(runtime)) {
     throw new Error("Public pilot proof runtime is invalid");
   }
+  const localJourney = Object.hasOwn(value, "localJourney")
+    ? publicJourneyTiming(value.localJourney)
+    : null;
   return {
     ...value,
     repository,
@@ -339,6 +426,7 @@ export function validatePublicPilotProof(proof) {
     planHash: exactSha(value.planHash, "publicProof.planHash", 64),
     evidenceDigest: exactSha(value.evidenceDigest, "publicProof.evidenceDigest", 64),
     returnedMinutes,
+    ...(localJourney ? { localJourney } : {}),
   };
 }
 
@@ -348,6 +436,11 @@ export function publicPilotProofMarkdown(proof) {
     "Alias: tester-XX",
     "Install-to-preview minutes:",
     "Preview-to-Draft-PR minutes:",
+    ...(value.localJourney ? [
+      `Measured server-start-to-confirmed seconds: ${value.localJourney.serverStartToConfirmedSeconds}`,
+      `Server journey within 10 minutes: ${value.localJourney.serverJourneyWithinTenMinutes ? "yes" : "no"}`,
+      "Package download included in measured journey: no",
+    ] : ["Measured server-start-to-confirmed seconds: unavailable"]),
     `Validation: ${value.validationStatus}`,
     `Issue: ${value.issueUrl}`,
     `Draft PR: ${value.draftPrUrl}`,

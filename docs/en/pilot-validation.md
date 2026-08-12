@@ -8,8 +8,8 @@ Foursday v0.5 is not launch-proven because the code passes tests. It becomes lau
 2. Use one real synthetic GitHub Issue and one exact-hash approval.
 3. Complete patch, isolated branch, registered test, verified push, and verified Draft PR.
 4. Confirm project memory and time return separately.
-5. Download the evidence bundle after confirmation. It must report `verified_closed_loop`.
-6. Copy the privacy-safe pilot proof, replace `tester-XX`, add timings and feedback, and post it to Issue #49.
+5. Download the evidence bundle after confirmation. It must report `verified_closed_loop` and bind the local server-start-to-confirmed stage timings to the integrity digest.
+6. Copy the privacy-safe pilot proof, replace `tester-XX`, add the separately observed install-to-preview timing and feedback, and post it to Issue #49. The generated proof already contains the rounded server-side journey and states that package download was not measured.
 7. Keep the resulting Draft PR unmerged and do not deploy it as part of the pilot.
 
 The Web page places an **Open pilot Issue #49** link beside the copy action.
@@ -20,6 +20,14 @@ signal and does not count as an external closed loop.
 See the [sanitized validation evidence example](../examples/validation-evidence.example.json) for the expected bundle structure. Its `github.com/example` URLs are fictional, and the example does not count as pilot evidence.
 
 An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed outcome, or self-written JSON does not count.
+
+The automatic timer starts inside the launched Foursday process and covers plan
+creation, review, approved execution, and outcome confirmation. It uses a
+monotonic local clock and never phones home. It does not cover the package
+download that happened before the process started, so the full ten-minute claim
+requires both the generated server-side duration and the tester's separate
+install-to-preview observation. Missing or over-ten-minute evidence is retained
+as real funnel data; it is not rewritten into a passing result.
 
 ## External tester fork path
 

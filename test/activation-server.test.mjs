@@ -57,10 +57,12 @@ test("public proof is copied only after outcome confirmation with bounded status
   assert.match(activationHtml, /<p id="public-proof-status" class="hint" role="status" aria-live="polite" aria-atomic="true"><\/p>/u);
   assert.deepEqual(announcements, [
     "Copying privacy-safe pilot proof...",
-    "Pilot proof copied. Replace tester-XX and add your timings and feedback before posting.",
+    "Pilot proof copied. Replace tester-XX and add your install timing and feedback before posting.",
     "Pilot proof copy failed. Download the private evidence bundle and try again.",
   ]);
   assert.match(script, /await copyPublicProof\(\)/u);
+  assert.match(script, /Measured server-start-to-confirmed journey/u);
+  assert.match(script, /Package download time is not included/u);
   assert.match(script, /navigator\.clipboard\?\.writeText/u);
   assert.doesNotMatch(script, /proofStatus\.textContent=error\.(?:message|stack)/u);
 });
