@@ -266,7 +266,7 @@ test("中英文快速开始提供不可变的一条命令 Web 体验入口", asy
     projectText("README_ZH.md"),
   ]);
   const immutableStart =
-    /npx --yes --package "github:ruiwang20010702\/foursday#([a-f0-9]{40})" foursday start --pilot-sha \1/u;
+    /npx --yes --ignore-scripts --package "github:ruiwang20010702\/foursday#([a-f0-9]{40})" foursday start --pilot-sha \1/u;
   for (const text of [readme, chinese]) {
     assert.match(text, immutableStart);
     assert.match(text, /Node\.js 22 (?:or|或) 24/u);
@@ -279,6 +279,25 @@ test("中英文快速开始提供不可变的一条命令 Web 体验入口", asy
   assert.match(chinese, /不触碰外部系统/u);
   assert.match(chinese, /Prepare my pilot fork/u);
   assert.match(chinese, /再次批准完整计划哈希/u);
+});
+
+test("公开安装验收使用隔离无凭据环境且不冒充外部用户", async () => {
+  const [pilot, chinesePilot, scorecard, chineseScorecard] = await Promise.all([
+    projectText("docs/en/pilot-validation.md"),
+    projectText("docs/体验验证说明.md"),
+    projectText("docs/en/growth-scorecard.md"),
+    projectText("docs/公开增长记分卡.md"),
+  ]);
+  for (const text of [pilot, scorecard]) {
+    assert.match(text, /public-install:verify/u);
+    assert.match(text, /credential token/u);
+    assert.match(text, /does not count as an external tester|do not count/u);
+  }
+  for (const text of [chinesePilot, chineseScorecard]) {
+    assert.match(text, /public-install:verify/u);
+    assert.match(text, /不转发.*令牌|转发凭据令牌 0/u);
+    assert.match(text, /不能冒充外部用户|外部用户.*不计数/u);
+  }
 });
 
 test("外部体验入口为每位体验者使用唯一合成 Issue", async () => {

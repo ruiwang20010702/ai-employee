@@ -10,7 +10,7 @@ Snapshot: **2026-08-12**. A dated snapshot is intentionally not presented as liv
 
 | Outcome | 90-day target | Verified baseline | What currently proves it |
 |---|---:|---:|---|
-| Successful installations | 200 | 1 | Maintainer reproduced the immutable public `npx` command from a fresh temporary directory; CI and reusable-install fixtures do not count |
+| Successful installations | 200 | 1 | Maintainer reproduced the immutable public `npx` command with isolated HOME/Git/npm configuration, SSH and lifecycle scripts disabled, and no credential tokens forwarded; CI and reusable-install fixtures do not count |
 | Distinct users with a verified closed loop | 50 | 1 | One maintainer identity completed ten independently re-read loops; ten loops by one person still count as one user |
 | Completed external contributors | 10 | 0 | No non-maintainer contribution has been merged; one contributor has claimed [Issue #3](https://github.com/ruiwang20010702/foursday/issues/3) |
 | Community recipes or adapters | 5 | 0 | Maintainer-authored examples do not count as community contributions |
@@ -30,6 +30,10 @@ Count one installation only when a person voluntarily reports a successful
 immutable one-command launch, or a maintainer directly reproduces it in a fresh
 workspace and records bounded evidence. Package downloads, CI jobs, repeated
 retries, and the two workspaces created by `reuse:verify` do not count.
+The repeatable maintainer acceptance command is
+`npm run public-install:verify -- --sha <reviewed-feature-sha>`; its JSON result
+must report zero forwarded credential tokens, zero external effects, and zero
+production writes.
 
 External users can use the bounded template in Issue #50. A setup report never
 counts as a verified closed-loop user and never grants repository or production

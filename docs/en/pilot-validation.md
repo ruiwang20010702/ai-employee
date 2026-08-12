@@ -54,6 +54,19 @@ An external tester must not need upstream write access. The supported path is:
 The manual fork and exact-checkout commands in the README are a fallback, not a
 different evidence path. Both routes must start from the same immutable SHA.
 
+Maintainers verify the public first command separately from the private cohort:
+
+```bash
+npm run public-install:verify -- --sha <reviewed-40-character-feature-sha>
+```
+
+This networked check creates a dedicated temporary HOME and npm cache, ignores
+system and user Git/npm configuration, disables SSH and lifecycle scripts,
+forwards no GitHub/npm credential tokens, starts only the loopback page, checks
+the unique-task and timing boundaries, and removes the temporary workspace. A
+passing maintainer check is installation evidence for that maintainer only; it
+does not count as an external tester or a verified closed loop.
+
 Foursday suggests a random pseudonymous alias locally and deterministically
 derives the bounded synthetic change from that alias and the immutable
 candidate. It only prepares a GitHub composer URL; the tester must review and
