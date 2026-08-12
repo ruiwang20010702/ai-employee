@@ -87,6 +87,8 @@ test("readiness UI is read-only, accessible, and does not expose command errors"
   assert.match(script, /Setup changed after pilot preparation/u);
   assert.match(script, /esc\(readiness\.setupCheckin\.issueUrl\)/u);
   assert.match(script, /api\('\/api\/pilot-task-draft',\{participantAlias:/u);
+  assert.match(script, /suggestedPilotAlias/u);
+  assert.match(activationHtml, /without waiting for a maintainer/u);
   assert.match(script, /No Issue has been created yet/u);
   assert.match(script, /form\.elements\.namedItem\('changeRequest'\)\.value=task\.changeRequest/u);
   assert.match(script, /No fork, branch, push, or PR was created/u);
@@ -115,12 +117,12 @@ test("pilot task draft endpoint requires the local token and never creates an Is
     },
   );
   try {
-    assert.equal((await post({ participantAlias: "tester-01" }, "wrong")).status, 403);
-    assert.equal((await post({ participantAlias: "tester-01" }, actionToken, "text/plain")).status, 415);
+    assert.equal((await post({ participantAlias: "tester-bluebird" }, "wrong")).status, 403);
+    assert.equal((await post({ participantAlias: "tester-bluebird" }, actionToken, "text/plain")).status, 415);
     const invalid = await post({ participantAlias: "tester-XX" });
     assert.equal(invalid.status, 400);
     assert.deepEqual(await invalid.json(), { error: "pilot_task_draft_failed" });
-    const response = await post({ participantAlias: "tester-01" });
+    const response = await post({ participantAlias: "tester-bluebird" });
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.schema, "foursday-pilot-task-draft/v1");

@@ -1,11 +1,13 @@
 const candidatePattern = /^[a-f0-9]{40}$/u;
-const participantAliasPattern = /^tester-(?:0[1-9]|10)$/u;
+const participantAliasPattern = /^tester-[a-z0-9][a-z0-9-]{2,23}$/u;
 const issueComposer = "https://github.com/ruiwang20010702/foursday/issues/new";
 
 export function buildPilotTaskDraft({ participantAlias, candidateSha }) {
   const alias = String(participantAlias ?? "").trim();
   if (!participantAliasPattern.test(alias)) {
-    throw new Error("Pilot task requires an assigned alias from tester-01 through tester-10");
+    throw new Error(
+      "Pilot task requires a self-chosen alias using tester- plus 3-24 lowercase letters, numbers, or hyphens",
+    );
   }
   if (!candidatePattern.test(String(candidateSha ?? ""))) {
     throw new Error("Pilot task requires an immutable candidate SHA");

@@ -228,16 +228,20 @@ npm start
 ```
 
 Use [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49)
-only to claim a pseudonymous slot and post final feedback. After readiness,
-enter that alias under **Create your unique pilot task**. Foursday prepares a
-bounded GitHub Issue composer and fills the change request, base branch
+only for optional intent and final feedback. You do not need to wait for a
+maintainer assignment. After readiness, **Create your unique pilot task**
+generates a random local pseudonym; you may keep it or choose another safe
+`tester-` alias. Foursday prepares a bounded GitHub Issue composer and fills the change request, base branch
 `codex/v0.5-candidate`, registered test `check`, and Draft PR title locally. It
 does not create the Issue: review and submit it yourself, then paste that new,
 unique Issue URL into the form. Before approval, verify that the Web page names
 your fork as the push source and `ruiwang20010702/foursday` as the Issue and
 Draft PR target. Keep the PR open and Draft; never merge or deploy it. After
 confirming the outcomes, copy the privacy-safe pilot proof, replace the
-`tester-XX` placeholder, add timings and feedback, and post it to Issue #49.
+`tester-XX` placeholder with the alias you used, add timings and feedback, and
+post it to Issue #49. The cohort verifier still requires ten distinct aliases,
+Issues, plan hashes, evidence files, and Draft PRs; self-service removes waiting,
+not the evidence boundary.
 
 ### Troubleshoot Web onboarding
 

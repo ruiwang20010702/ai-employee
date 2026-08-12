@@ -30,10 +30,12 @@ An external tester must not need upstream write access. The supported path is:
    may create or reuse only the tester's personal fork, clone the exact commit
    under `~/FoursdayPilot/`, and install lockfile dependencies without lifecycle
    scripts. It does not run a model, push, create a PR, merge, or deploy.
-3. Claim an alias in public pilot Issue #49. Enter it under **Create your unique
-   pilot task**, open the bounded GitHub Issue composer, review and submit the
+3. Under **Create your unique pilot task**, keep the random browser-generated
+   pseudonym or choose another safe `tester-` alias. No maintainer assignment is
+   required. Open the bounded GitHub Issue composer, review and submit the
    synthetic task, then paste that new Issue URL into Foursday. Issue #49 is
-   intake and feedback only; it must not be reused as the work Issue.
+   optional intake and final feedback only; it must not be reused as the work
+   Issue.
 4. Verify the generated defaults: base branch `codex/v0.5-candidate`, registered
    test `check`, the alias-bound change request, and Draft PR title.
 5. Before approval, verify that Foursday shows the fork as the push source and
@@ -44,9 +46,12 @@ An external tester must not need upstream write access. The supported path is:
 The manual fork and exact-checkout commands in the README are a fallback, not a
 different evidence path. Both routes must start from the same immutable SHA.
 
-The maintainer assigns a pseudonymous slot. Foursday deterministically derives
-the bounded synthetic change from that alias and the immutable candidate, but
-only prepares a GitHub composer URL; the tester must review and submit it.
+Foursday suggests a random pseudonymous alias locally and deterministically
+derives the bounded synthetic change from that alias and the immutable
+candidate. It only prepares a GitHub composer URL; the tester must review and
+submit it. The verifier rejects duplicate external aliases, Issues, plans,
+evidence files, and Draft PRs, so removing the assignment wait does not weaken
+cohort independence.
 Never publish the complete local evidence bundle. Post only the generated
 privacy-safe proof: it is a strict whitelist of public GitHub identities,
 governed hashes, runtime, confirmed returned minutes, and feedback placeholders.

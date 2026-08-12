@@ -290,7 +290,7 @@ test("外部体验入口为每位体验者使用唯一合成 Issue", async () =>
   ]);
   for (const text of [readme, contract]) {
     assert.match(text, /Create your unique\s+pilot task/u);
-    assert.match(text, /Issue #49.+(?:intake|claim).+feedback/su);
+    assert.match(text, /Issue #49.+(?:intake|claim|optional intent).+feedback/su);
     assert.match(text, /unique Issue/u);
   }
   for (const text of [chinese, chineseContract]) {
@@ -583,12 +583,14 @@ test("外部体验入口使用 fork 推送并把来源与上游目标纳入审�
     assert.match(value, /upstream/u);
     assert.match(value, /codex\/v0\.5-candidate/u);
     assert.match(value, /Issue #49/u);
+    assert.match(value, /do not need to wait for a\s+maintainer|No maintainer assignment is\s+required/u);
   }
   for (const value of [chineseReadme, chinesePilot]) {
     assert.match(value, /fork/u);
     assert.match(value, /upstream/u);
     assert.match(value, /来源/u);
     assert.match(value, /Draft/u);
+    assert.match(value, /不再要求等待维护者分配名额|不再要求等待维护者分配/u);
   }
   assert.match(readme, /never merge or deploy/u);
   assert.match(chineseReadme, /禁止合并或部署/u);
