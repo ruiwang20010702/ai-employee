@@ -96,6 +96,13 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
   if (exactSha(integrity.digest, "integrity.digest", 64) !== validationEvidenceDigest(core)) {
     throw new Error("Evidence integrity digest does not match the bundle");
   }
+  if (typeof bundle.generatedAt !== "string") {
+    throw new Error("generatedAt must be a canonical ISO 8601 UTC timestamp");
+  }
+  const generatedAt = new Date(bundle.generatedAt);
+  if (Number.isNaN(generatedAt.getTime()) || generatedAt.toISOString() !== bundle.generatedAt) {
+    throw new Error("generatedAt must be a canonical ISO 8601 UTC timestamp");
+  }
   if (!Array.isArray(bundle.evidence) || bundle.evidence.length !== capabilities.length) {
     throw new Error("Evidence bundle must contain the complete five-step delivery");
   }

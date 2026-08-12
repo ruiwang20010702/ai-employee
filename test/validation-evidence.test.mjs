@@ -10,14 +10,14 @@ import {
   validationEvidenceCapabilities,
 } from "../src/validation-evidence.mjs";
 
-function evidence(index = 1, { confirmed = true } = {}) {
+function evidence(index = 1, { confirmed = true, generatedAt = "2026-08-12T00:00:00.000Z" } = {}) {
   const hex = index.toString(16);
   const commit = hex.padStart(40, "0");
   const planHash = hex.padStart(64, "0");
   return sealValidationEvidence({
     schema: "foursday-validation-evidence/v1",
     validationStatus: confirmed ? "verified_closed_loop" : "awaiting_outcome_confirmation",
-    generatedAt: "2026-08-12T00:00:00.000Z",
+    generatedAt,
     project: { id: "foursday", repository: "example/foursday", startingCommit: commit },
     issue: { url: `https://github.com/example/foursday/issues/${index}`, number: index },
     runtime: index % 2 ? "codex" : "claude-code",
@@ -71,6 +71,25 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
   });
   assert.throws(() => validateValidationEvidence(privateBundle), /forbidden private field/u);
 });
+
+test("validation evidence requires canonical ISO 8601 UTC generatedAt", () => {
+  assert.doesNotThrow(() => validateValidationEvidence(evidence(1, {
+    generatedAt: "2026-08-12T00:00:00.000Z",
+  })));
+  for (const generatedAt of [
+    "2026-08-12T00:00:00Z",
+    "2026-08-12T08:00:00.000+08:00",
+  ]) {
+    assert.throws(
+      () => validateValidationEvidence(evidence(1, { generatedAt })),
+      /generatedAt must be a canonical ISO 8601 UTC timestamp/u,
+    );
+  }
+  const tampered = evidence();
+  tampered.generatedAt = "not-a-timestamp";
+  assert.throws(() => validateValidationEvidence(tampered), /digest does not match/u);
+});
+
 test("pilot verification requires ten self loops and ten distinct external testers", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "foursday-pilot-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
