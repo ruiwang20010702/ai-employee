@@ -136,17 +136,20 @@ With Node.js 22 or 24 installed, launch the reviewed v0.5 Web flow directly
 from its immutable GitHub commit:
 
 ```bash
-npx --yes --package "github:ruiwang20010702/foursday#24d34a65f4292549ec367a0a402b5c2e2725c2b4" foursday start --pilot-sha 24d34a65f4292549ec367a0a402b5c2e2725c2b4
+npx --yes --package "github:ruiwang20010702/foursday#18b4677fee305fbed9c932275340e45c17eb2ede" foursday start --pilot-sha 18b4677fee305fbed9c932275340e45c17eb2ede
 ```
 
 Open the printed loopback URL. The command downloads and runs that exact public
 commit; it does not install a production service, read DingTalk, connect to a
 production database, or touch an external system at startup. Preview needs only
-Node.js. To join the real public pilot, install and authenticate GitHub CLI,
-then review the fixed commit and select **Prepare my pilot fork**. Only after
-that separate checkbox confirmation may Foursday create or reuse your personal
-fork, clone the exact commit under `~/FoursdayPilot/`, bind the credential-free
-official upstream, and install lockfile dependencies without lifecycle scripts.
+Node.js. Before authorizing any write, select **Check pilot readiness**. This
+read-only check reports only whether GitHub CLI authentication and a supported
+agent runtime are available; it creates no fork, branch, push, or PR. To join
+the real public pilot, review the fixed commit and select **Prepare my pilot
+fork**. Only after that separate checkbox confirmation may Foursday create or
+reuse your personal fork, clone the exact commit under `~/FoursdayPilot/`, bind
+the credential-free official upstream, and install lockfile dependencies
+without lifecycle scripts.
 It still does not run a model, create a delivery branch, push, open a PR, merge,
 or deploy. Those delivery effects require an authorized runtime and a second
 approval bound to the complete plan hash.
@@ -212,8 +215,8 @@ The equivalent manual fallback is:
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
 git fetch upstream codex/v0.5-candidate
-git merge-base --is-ancestor 24d34a65f4292549ec367a0a402b5c2e2725c2b4 FETCH_HEAD
-git switch --create pilot-v0.5-24d34a65 24d34a65f4292549ec367a0a402b5c2e2725c2b4
+git merge-base --is-ancestor 18b4677fee305fbed9c932275340e45c17eb2ede FETCH_HEAD
+git switch --create pilot-v0.5-18b4677 18b4677fee305fbed9c932275340e45c17eb2ede
 npm ci --ignore-scripts
 npm start
 ```
