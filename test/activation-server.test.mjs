@@ -14,6 +14,8 @@ test("activation UI is parseable, responsive, and honest about preview boundarie
   assert.match(activationHtml, /Building the plan/u);
   assert.match(activationHtml, /blockedCapabilities/u);
   assert.match(activationHtml, /Download evidence bundle/u);
+  assert.match(activationHtml, /retains Issue and PR URLs, plan and commit evidence, and confirmed outcomes/u);
+  assert.match(activationHtml, /omitting local paths, remotes, tokens, credentials, and model output/u);
   assert.match(activationHtml, /foursday-evidence-/u);
   assert.match(activationHtml, /@media\(max-width:820px\)/u);
   assert.match(activationHtml, /prefers-reduced-motion/u);
