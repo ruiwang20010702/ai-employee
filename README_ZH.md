@@ -140,15 +140,15 @@ Loop Engineering 继续负责“一个任务如何反复做到有证据地完成
 
 ## 快速开始
 
-### 1. 用一条命令启动 Web 接入体验
+### 1. 用一条命令启动 Web 接入与真实体验
 
 安装 Node.js 22 或 24 后，可以直接从经过审核的不可变 GitHub 提交启动 v0.5 Web 体验：
 
 ```bash
-npx --yes --package "github:ruiwang20010702/foursday#565023486271bfc4d3280113b130362e55bea050" foursday start
+npx --yes --package "github:ruiwang20010702/foursday#24d34a65f4292549ec367a0a402b5c2e2725c2b4" foursday start --pilot-sha 24d34a65f4292549ec367a0a402b5c2e2725c2b4
 ```
 
-打开命令输出的回环地址。这条命令只下载并运行上述精确公开提交，不安装生产服务、不读取钉钉、不连接生产数据库，也不触碰外部系统。若要继续真实 GitHub 交付，仍须在 Web 表单中绑定另一个干净的本地仓库、选择已获授权的运行时，并再次批准完整计划。
+打开命令输出的回环地址。启动本身只下载并运行上述精确公开提交，不安装生产服务、不读取钉钉、不连接生产数据库，也不触碰外部系统；只看预览仅需 Node.js。若要加入真实公开体验，请先安装并登录 GitHub CLI，再核对页面显示的固定提交，勾选独立确认并点击 **Prepare my pilot fork**。只有这次确认才允许 Foursday 创建或复用你的个人 fork，在 `~/FoursdayPilot/` 私有目录克隆精确提交、绑定无凭据的官方 upstream，并以禁用生命周期脚本的方式安装锁定依赖。它仍不会调用模型、创建交付分支、推送、创建 PR、合并或部署；这些交付副作用还需要选择已获授权的运行时，并再次批准完整计划哈希。
 
 #### 从源码启动
 
@@ -169,16 +169,19 @@ npm start
 
 确认项目记忆和时间返还后，可以点击 **Copy privacy-safe pilot proof**。系统只从已验证证据包中提取公开 GitHub 目标身份、受治理哈希、运行时、已确认返还时间和反馈占位符，不复制记忆正文、内部编号、本机路径、令牌或模型输出。公开证明属于未签名的本人陈述，不能替代维护者对 Issue 与 Draft PR 的独立回读；除非维护者另行约定私密传输方式，完整 JSON 证据包继续保留在本机。
 
-#### 从 fork 加入外部体验
+#### 加入外部体验
 
-外部体验者不需要 Foursday 上游仓库写权限。使用 GitHub CLI 创建自己的 fork，从自动生成的 `upstream` 远端检出候选版，再启动 Web 接入页：
+外部体验者不需要 Foursday 上游仓库写权限。推荐直接使用上面固定提交的一条命令，并在 Web 中独立批准 **Prepare my pilot fork**。Foursday 会回读 GitHub 账号与 fork 的上游身份，在固定私有目录准备精确候选提交并自动填写仓库路径；若同名仓库并非 `ruiwang20010702/foursday` 的真实 fork，将安全拒绝。
+
+等价的手工备用路径如下：
 
 ```bash
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
 git fetch upstream codex/v0.5-candidate
-git switch --create pilot-v0.5 --track upstream/codex/v0.5-candidate
-npm ci
+git merge-base --is-ancestor 24d34a65f4292549ec367a0a402b5c2e2725c2b4 FETCH_HEAD
+git switch --create pilot-v0.5-24d34a65 24d34a65f4292549ec367a0a402b5c2e2725c2b4
+npm ci --ignore-scripts
 npm start
 ```
 

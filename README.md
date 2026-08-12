@@ -130,20 +130,26 @@ proves that a dedicated graph database is necessary.
 
 ## Quick Start
 
-### Start the Web onboarding preview with one command
+### Start the Web onboarding and pilot with one command
 
-With Node.js 22 or 24 installed, launch the reviewed v0.5 Web preview directly
+With Node.js 22 or 24 installed, launch the reviewed v0.5 Web flow directly
 from its immutable GitHub commit:
 
 ```bash
-npx --yes --package "github:ruiwang20010702/foursday#565023486271bfc4d3280113b130362e55bea050" foursday start
+npx --yes --package "github:ruiwang20010702/foursday#24d34a65f4292549ec367a0a402b5c2e2725c2b4" foursday start --pilot-sha 24d34a65f4292549ec367a0a402b5c2e2725c2b4
 ```
 
 Open the printed loopback URL. The command downloads and runs that exact public
 commit; it does not install a production service, read DingTalk, connect to a
-production database, or touch an external system. A real GitHub delivery still
-requires you to bind a separate clean local repository in the Web form, choose
-an authorized runtime, and approve the complete plan a second time.
+production database, or touch an external system at startup. Preview needs only
+Node.js. To join the real public pilot, install and authenticate GitHub CLI,
+then review the fixed commit and select **Prepare my pilot fork**. Only after
+that separate checkbox confirmation may Foursday create or reuse your personal
+fork, clone the exact commit under `~/FoursdayPilot/`, bind the credential-free
+official upstream, and install lockfile dependencies without lifecycle scripts.
+It still does not run a model, create a delivery branch, push, open a PR, merge,
+or deploy. Those delivery effects require an authorized runtime and a second
+approval bound to the complete plan hash.
 
 ### Start from a source checkout
 
@@ -191,18 +197,24 @@ an unsigned self-report, so it never replaces maintainer read-back of the Issue
 and Draft PR. Keep the complete JSON bundle local unless a maintainer requests
 it through an agreed private channel.
 
-### Join the external pilot from a fork
+### Join the external pilot
 
-External testers do not need write access to Foursday. Fork the repository with
-GitHub CLI, check out the candidate from the generated `upstream` remote, and
-start the Web onboarding page:
+External testers do not need upstream write access. Use the immutable one-command
+flow above and approve **Prepare my pilot fork**. Foursday reads back the GitHub
+account and fork parent, prepares the exact candidate in a fixed private local
+directory, and fills the repository field. If a fork already exists, it must be
+an actual fork of `ruiwang20010702/foursday`; an unrelated repository with the
+same name is rejected.
+
+The equivalent manual fallback is:
 
 ```bash
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
 git fetch upstream codex/v0.5-candidate
-git switch --create pilot-v0.5 --track upstream/codex/v0.5-candidate
-npm ci
+git merge-base --is-ancestor 24d34a65f4292549ec367a0a402b5c2e2725c2b4 FETCH_HEAD
+git switch --create pilot-v0.5-24d34a65 24d34a65f4292549ec367a0a402b5c2e2725c2b4
+npm ci --ignore-scripts
 npm start
 ```
 

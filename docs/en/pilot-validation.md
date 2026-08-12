@@ -20,14 +20,19 @@ An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed
 
 An external tester must not need upstream write access. The supported path is:
 
-1. Fork `ruiwang20010702/foursday` with GitHub CLI so the fork is `origin` and
-   the public repository is the credential-free `upstream` remote.
-2. Check out `upstream/codex/v0.5-candidate` in a clean local branch.
+1. Run the immutable one-command Quick Start and review the exact candidate SHA.
+2. In the loopback Web page, explicitly approve **Prepare my pilot fork**. This
+   may create or reuse only the tester's personal fork, clone the exact commit
+   under `~/FoursdayPilot/`, and install lockfile dependencies without lifecycle
+   scripts. It does not run a model, push, create a PR, merge, or deploy.
 3. Use public pilot Issue #49 and base branch `codex/v0.5-candidate`.
 4. Before approval, verify that Foursday shows the fork as the push source and
    `ruiwang20010702/foursday` as the Issue and Draft PR target.
 5. After execution, verify that the evidence binds the fork head repository,
    governed branch, exact commit, upstream PR target, open state, and Draft flag.
+
+The manual fork and exact-checkout commands in the README are a fallback, not a
+different evidence path. Both routes must start from the same immutable SHA.
 
 The maintainer assigns a pseudonymous slot and a bounded synthetic change.
 Never publish the complete local evidence bundle. Post only the generated
