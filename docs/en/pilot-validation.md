@@ -55,6 +55,15 @@ Local bundle integrity and online GitHub proof are separate checks:
   - **Issue:** repository, number, URL, state, title, and body must match the approved change request.
   - **Draft PR:** repository, number, URL, open state, draft flag, head branch, head commit SHA, base branch, title, and body must match the approved plan and verified push.
 
+The public validation bundle retains these non-sensitive target identity fields:
+
+| Target | Retained identity fields |
+| --- | --- |
+| Issue | Repository, number, and URL |
+| Draft PR | Repository, number, URL, open state, draft flag, head branch, head commit SHA, and base branch |
+
+Issue and Draft PR titles and bodies are checked during the online read-back but are not stored in the public bundle.
+
 A passing local report therefore keeps `targetReadbackReverificationRequired: true` until this separate online read-back is complete.
 
 ## Feedback decision
