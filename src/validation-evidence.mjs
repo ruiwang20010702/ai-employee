@@ -183,6 +183,13 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
   ]) {
     if (safeguards[key] !== false) throw new Error(`Evidence safeguard ${key} must remain false`);
   }
+  const returnedMinutes = outcomes.timeReturn?.returnedMinutes;
+  if (
+    outcomes.timeReturn?.status === "confirmed" &&
+    (!Number.isSafeInteger(returnedMinutes) || returnedMinutes < 0)
+  ) {
+    throw new Error("outcomes.timeReturn.returnedMinutes must be a finite non-negative safe integer");
+  }
   const confirmed = outcomes.memory?.status === "confirmed" &&
     outcomes.timeReturn?.status === "confirmed" &&
     bundle.validationStatus === "verified_closed_loop";

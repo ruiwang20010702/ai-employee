@@ -82,6 +82,28 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
   assert.throws(() => validateValidationEvidence(privateBundle), /forbidden private field/u);
 });
 
+test("confirmed time-return minutes must be finite non-negative safe integers", () => {
+  const cases = [
+    ["negative", -1],
+    ["fractional", 0.5],
+    ["NaN", Number.NaN],
+    ["positive infinity", Number.POSITIVE_INFINITY],
+    ["negative infinity", Number.NEGATIVE_INFINITY],
+    ["unsafe integer", Number.MAX_SAFE_INTEGER + 1],
+  ];
+
+  for (const [name, returnedMinutes] of cases) {
+    const value = evidence();
+    const { integrity: ignored, ...core } = value;
+    core.outcomes.timeReturn.returnedMinutes = returnedMinutes;
+    assert.throws(
+      () => validateValidationEvidence(sealValidationEvidence(core)),
+      /returnedMinutes must be a finite non-negative safe integer/u,
+      name,
+    );
+  }
+});
+
 test("validation evidence binds canonical time and GitHub target identity", () => {
   const invalidTime = evidence();
   const { integrity: ignoredTime, ...timeCore } = invalidTime;
