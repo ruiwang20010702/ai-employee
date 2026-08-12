@@ -23,7 +23,7 @@ impersonating you.
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[Start in 10 minutes](#quick-start) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
+[Start in 10 minutes](#quick-start) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Join the v0.5 pilot](https://github.com/ruiwang20010702/foursday/issues/49) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
 
 <a href="./assets/foursday-v0.5-demo.mp4">
   <img src="./assets/foursday-v0.5-demo-poster.png" alt="Watch Foursday turn a synthetic GitHub Issue into a verified Draft PR" width="960">
@@ -149,24 +149,52 @@ branch, tests, push, and Draft PR—and shows the plan hash, risk levels, and
 disabled capabilities. Building this preview touches zero external systems.
 
 To continue beyond the preview, choose Codex or Claude Code. Foursday then
-requires a clean Git repository whose origin matches the Issue, a registered
+requires a clean Git repository whose origin matches the Issue, or whose
+credential-free `upstream` remote matches it. It also requires a registered
 `package.json` test script, an authenticated GitHub CLI, and a second approval
-bound to the exact plan hash. Only that approval can generate a patch, create a
-`foursday/` branch, run the registered test, push the branch, and open a Draft
-PR. It cannot merge or deploy. Execution state is stored in an encrypted local
-SQLite session; project memory and returned time remain proposals until you
-confirm them. After completion, download the JSON evidence bundle; download it
-again after confirmation to capture the final `verified_closed_loop` status.
-The bundle omits local paths, remotes, action tokens, credentials, and model
-output while retaining the Issue, plan hash, target read-back, memory status,
-time-return status, and explicit safety boundaries.
+bound to the exact plan hash. The approval screen shows the push-source
+repository, Issue/PR target repository, mode, and starting commit. Only that
+approval can generate a patch, create a `foursday/` branch, run the registered
+test, push the branch, and open a Draft PR. A fork delivery pushes only to the
+contributor fork and opens the Draft PR against the approved upstream. The
+read-back must match the source repository, branch, commit, target repository,
+base, title, open state, and draft state. It cannot merge or deploy.
+
+Execution state is stored in an encrypted local SQLite session; project memory
+and returned time remain proposals until you confirm them. After completion,
+download the JSON evidence bundle; download it again after confirmation to
+capture the final `verified_closed_loop` status. The bundle omits local paths,
+remotes, action tokens, credentials, and model output while retaining the
+Issue, source and target repository identities, plan hash, target read-back,
+memory status, time-return status, and explicit safety boundaries.
+
+### Join the external pilot from a fork
+
+External testers do not need write access to Foursday. Fork the repository with
+GitHub CLI, check out the candidate from the generated `upstream` remote, and
+start the Web onboarding page:
+
+```bash
+gh repo fork ruiwang20010702/foursday --clone
+cd foursday
+git fetch upstream codex/v0.5-candidate
+git switch --create pilot-v0.5 --track upstream/codex/v0.5-candidate
+npm ci
+npm start
+```
+
+Use [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49),
+base branch `codex/v0.5-candidate`, registered test `check`, and the synthetic
+task assigned to your pseudonymous slot. Before approval, verify that the Web
+page names your fork as the push source and `ruiwang20010702/foursday` as the
+Issue and Draft PR target. Keep the PR open and Draft; never merge or deploy it.
 
 ### Troubleshoot Web onboarding
 
 | Check | Safe next action |
 |---|---|
 | Dirty worktree | Stop and inspect `git status`; commit or stash changes intentionally, then retry. |
-| Repository mismatch | Select a local checkout whose repository owner and name match the GitHub Issue. |
+| Repository mismatch | Use the same repository, or a fork whose credential-free `upstream` remote exactly matches the Issue repository. |
 | Missing registered test script | Register the existing project test command in `package.json`, run it manually, then retry. |
 
 Foursday does not clean the worktree or switch repositories automatically.

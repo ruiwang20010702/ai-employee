@@ -5,6 +5,7 @@
   "project": {
     "id": "example-project",
     "repository": "example/foursday",
+    "sourceRepository": "example/foursday",
     "startingCommit": "1111111111111111111111111111111111111111"
   },
   "issue": {
@@ -55,6 +56,7 @@
       "number": 8,
       "url": "https://github.com/example/foursday/pull/8",
       "head": "foursday/example-8",
+      "headRepository": "example/foursday",
       "base": "main",
       "state": "OPEN",
       "isDraft": true
@@ -81,7 +83,7 @@
   },
   "integrity": {
     "algorithm": "sha256",
-    "digest": "dc3c57fa7c512e377843af6012a26aa79a624ae47bb1cf1eaff30329b4d74574",
+    "digest": "32169a8d343e2a141039832d999ac6db03683f55a4c7af3f797bc29e3dfbaa24",
     "signed": false
   }
 }

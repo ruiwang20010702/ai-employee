@@ -56,19 +56,28 @@ async function git(root, args) {
 export async function inspectActivationRepository(rootDirectory, {
   gitRun = git,
 } = {}) {
-  const [head, remoteUrl, status] = await Promise.all([
+  const [head, remoteUrl, status, remotes] = await Promise.all([
     gitRun(rootDirectory, ["rev-parse", "HEAD"]),
     gitRun(rootDirectory, ["remote", "get-url", "origin"]),
     gitRun(rootDirectory, ["status", "--porcelain=v1", "--untracked-files=all"]),
+    gitRun(rootDirectory, ["remote"]),
   ]);
   if (!/^[a-f0-9]{40}$/u.test(head)) throw new Error("Project must have a valid Git HEAD");
   if (status !== "") {
     throw new Error("Project worktree must be clean before a governed delivery starts");
   }
+  const hasUpstream = remotes.split(/\r?\n/u).map((value) => value.trim()).includes("upstream");
+  const upstreamRemoteUrl = hasUpstream
+    ? await gitRun(rootDirectory, ["remote", "get-url", "upstream"])
+    : null;
   return {
     head,
     remoteUrl,
     repository: githubRepositoryFromRemote(remoteUrl),
+    upstreamRemoteUrl,
+    upstreamRepository: upstreamRemoteUrl
+      ? githubRepositoryFromRemote(upstreamRemoteUrl)
+      : null,
   };
 }
 
@@ -104,8 +113,14 @@ export async function prepareActivationExecution(input, {
     throw new Error("Choose a real agent runtime before creating an execution session");
   }
   const snapshot = await repositoryInspector(preview.project.rootDirectory);
-  if (snapshot.repository !== preview.issue.repositorySlug.toLowerCase()) {
-    throw new Error("GitHub Issue repository does not match the local origin remote");
+  const issueRepository = preview.issue.repositorySlug.toLowerCase();
+  const sameRepository = snapshot.repository === issueRepository;
+  const governedFork = snapshot.repository !== issueRepository &&
+    snapshot.upstreamRepository === issueRepository;
+  if (!sameRepository && !governedFork) {
+    throw new Error(
+      "GitHub Issue repository must match origin or the configured upstream of a fork",
+    );
   }
   const testCommandId = text(input?.testCommandId ?? "check", "testCommandId", 64);
   const testCommand = await commandBuilder({
@@ -137,7 +152,8 @@ export async function prepareActivationExecution(input, {
         mode: "approval_required",
         maxRuns: 1,
         timeoutMs: 120_000,
-        repository: preview.issue.repositorySlug,
+        repository: issueRepository,
+        headRepository: snapshot.repository,
         baseBranches: [text(input?.baseBranch ?? "main", "baseBranch", 200)],
         maxTitleChars: 120,
         maxBodyBytes: 64 * 1024,
@@ -156,6 +172,7 @@ export async function prepareActivationExecution(input, {
       ...snapshot,
       rootDirectory: preview.project.rootDirectory,
     },
+    deliveryMode: sameRepository ? "same_repository" : "fork_to_upstream",
   };
 }
 
@@ -176,6 +193,16 @@ function publicPlan(plan) {
   };
 }
 
+function publicRepositoryBinding(candidate) {
+  return {
+    mode: candidate.deliveryMode,
+    issueRepository: candidate.preview.issue.repositorySlug.toLowerCase(),
+    sourceRepository: candidate.snapshot.repository,
+    upstreamRepository: candidate.snapshot.upstreamRepository,
+    startingCommit: candidate.snapshot.head,
+  };
+}
+
 function publicEvidence(steps) {
   return steps.map((step) => ({
     stepId: step.step_id,
@@ -188,6 +215,7 @@ function publicEvidence(steps) {
     url: step.evidence?.url ?? null,
     number: step.evidence?.number ?? null,
     head: step.evidence?.head ?? null,
+    headRepository: step.evidence?.headRepository ?? null,
     base: step.evidence?.base ?? null,
     state: step.evidence?.state ?? null,
     isDraft: step.evidence?.isDraft ?? null,
@@ -243,7 +271,12 @@ export class ActivationExecutionCoordinator {
         timeReturnId: null,
       };
       this.sessions.set(id, session);
-      return { sessionId: id, plan: publicPlan(plan), externalSystemsTouched: false };
+      return {
+        sessionId: id,
+        plan: publicPlan(plan),
+        repositoryBinding: publicRepositoryBinding(candidate),
+        externalSystemsTouched: false,
+      };
     } catch (error) {
       await store.close();
       throw error;
@@ -254,7 +287,12 @@ export class ActivationExecutionCoordinator {
     const session = this.sessions.get(id);
     if (!session) return null;
     const plan = await session.store.getWorkPlan(`plan_${session.candidate.assessment.planHash.slice(0, 24)}`);
-    return { sessionId: id, plan: publicPlan(plan), running: session.running };
+    return {
+      sessionId: id,
+      plan: publicPlan(plan),
+      repositoryBinding: publicRepositoryBinding(session.candidate),
+      running: session.running,
+    };
   }
 
   async approveAndExecute(id, { planHash, approved, reason, humanActiveMinutes }) {
@@ -270,7 +308,9 @@ export class ActivationExecutionCoordinator {
     const currentSnapshot = await this.repositoryInspector(
       session.candidate.snapshot.rootDirectory,
     );
-    for (const field of ["head", "remoteUrl", "repository"]) {
+    for (const field of [
+      "head", "remoteUrl", "repository", "upstreamRemoteUrl", "upstreamRepository",
+    ]) {
       if (currentSnapshot[field] !== session.candidate.snapshot[field]) {
         throw new Error("Repository identity changed after plan review");
       }
@@ -393,7 +433,8 @@ export class ActivationExecutionCoordinator {
       generatedAt: new Date().toISOString(),
       project: {
         id: session.candidate.preview.project.projectId,
-        repository: session.candidate.snapshot.repository,
+        repository: session.candidate.preview.issue.repositorySlug.toLowerCase(),
+        sourceRepository: session.candidate.snapshot.repository,
         startingCommit: session.candidate.snapshot.head,
       },
       issue: {

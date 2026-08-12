@@ -18,7 +18,12 @@ function evidence(index = 1, { confirmed = true } = {}) {
     schema: "foursday-validation-evidence/v1",
     validationStatus: confirmed ? "verified_closed_loop" : "awaiting_outcome_confirmation",
     generatedAt: "2026-08-12T00:00:00.000Z",
-    project: { id: "foursday", repository: "example/foursday", startingCommit: commit },
+    project: {
+      id: "foursday",
+      repository: "example/foursday",
+      sourceRepository: "example/foursday",
+      startingCommit: commit,
+    },
     issue: { url: `https://github.com/example/foursday/issues/${index}`, number: index },
     runtime: index % 2 ? "codex" : "claude-code",
     plan: { planHash, status: "completed" },
@@ -34,6 +39,7 @@ function evidence(index = 1, { confirmed = true } = {}) {
         ? `https://github.com/example/foursday/pull/${index}`
         : null,
       head: capability === "github_pr_draft" ? `foursday/self-${index}` : null,
+      headRepository: capability === "github_pr_draft" ? "example/foursday" : null,
       base: capability === "github_pr_draft" ? "main" : null,
       state: capability === "github_pr_draft" ? "OPEN" : null,
       isDraft: capability === "github_pr_draft" ? true : null,
@@ -64,6 +70,7 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
   assert.equal(summary.draftPrUrl, "https://github.com/example/foursday/pull/1");
   assert.equal(summary.draftPrNumber, 1);
   assert.equal(summary.draftPrHead, "foursday/self-1");
+  assert.equal(summary.draftPrHeadRepository, "example/foursday");
   assert.equal(summary.draftPrBase, "main");
   assert.equal(summary.draftPrState, "OPEN");
   assert.equal(summary.draftPrIsDraft, true);
@@ -100,6 +107,9 @@ test("validation evidence binds canonical time and GitHub target identity", () =
     ["PR repository", (core) => {
       core.evidence[4].url = "https://github.com/other/foursday/pull/1";
     }, /project repository/u],
+    ["PR head repository", (core) => {
+      core.evidence[4].headRepository = "other/foursday";
+    }, /approved source repository/u],
     ["PR URL query", (core) => {
       core.evidence[4].url = "https://github.com/example/foursday/pull/1?token=unsafe";
     }, /credential-free GitHub HTTPS/u],
@@ -114,6 +124,17 @@ test("validation evidence binds canonical time and GitHub target identity", () =
       name,
     );
   }
+});
+
+test("validation evidence supports a bound fork head without changing the Issue or PR target", () => {
+  const value = evidence();
+  const { integrity: ignored, ...core } = value;
+  core.project.sourceRepository = "tester/foursday";
+  core.evidence[4].headRepository = "tester/foursday";
+  const summary = validateValidationEvidence(sealValidationEvidence(core));
+  assert.equal(summary.repository, "example/foursday");
+  assert.equal(summary.sourceRepository, "tester/foursday");
+  assert.equal(summary.draftPrHeadRepository, "tester/foursday");
 });
 
 test("committed validation evidence example stays sanitized and valid", async () => {

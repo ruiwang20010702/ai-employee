@@ -995,8 +995,10 @@ export function createControlledWorkAdapters({
         if (!rule?.repository || !pushRule?.expectedRemoteUrl) {
           throw new Error("github_pr_draft project rule is incomplete");
         }
-        if (githubRepositoryFromRemote(pushRule.expectedRemoteUrl) !== rule.repository.toLowerCase()) {
-          throw new Error("GitHub repository differs from the approved Git remote");
+        const pushRepository = githubRepositoryFromRemote(pushRule.expectedRemoteUrl);
+        const headRepository = String(rule.headRepository ?? rule.repository).toLowerCase();
+        if (pushRepository !== headRepository) {
+          throw new Error("GitHub PR head repository differs from the approved Git remote");
         }
       },
       async execute({ plan, step, manifest, priorEvidence }) {
@@ -1011,6 +1013,11 @@ export function createControlledWorkAdapters({
           throw new Error("GitHub PR draft requires verified push evidence");
         }
         const rule = manifest.capabilities.github_pr_draft;
+        const headRepository = String(rule.headRepository ?? rule.repository).toLowerCase();
+        const headOwner = headRepository.split("/")[0];
+        const headArgument = headRepository === rule.repository.toLowerCase()
+          ? pushEvidence.branch
+          : `${headOwner}:${pushEvidence.branch}`;
         const title = String(step.inputs.title).trim();
         const body = String(step.inputs.body).trim();
         const baseBranch = String(step.inputs.baseBranch).trim();
@@ -1023,7 +1030,7 @@ export function createControlledWorkAdapters({
           await writeFile(bodyPath, `${body}\n`, { mode: 0o600, flag: "wx" });
           const createdUrl = await gh(ghPath, [
             "pr", "create", "--draft", "--repo", rule.repository,
-            "--head", pushEvidence.branch, "--base", baseBranch,
+            "--head", headArgument, "--base", baseBranch,
             "--title", title, "--body-file", bodyPath,
           ], rule.timeoutMs ?? 120_000);
           const parsed = new URL(createdUrl);
@@ -1047,12 +1054,16 @@ export function createControlledWorkAdapters({
           }
           const readback = JSON.parse(await gh(ghPath, [
             "pr", "view", createdUrl, "--repo", rule.repository,
-            "--json", "number,url,state,isDraft,headRefName,headRefOid,baseRefName,title",
+            "--json", "number,url,state,isDraft,headRefName,headRefOid,headRepository,baseRefName,title",
           ], rule.timeoutMs ?? 120_000));
+          const readbackHeadRepository = String(
+            readback.headRepository?.nameWithOwner ?? "",
+          ).toLowerCase();
           if (
             readback.url !== createdUrl || readback.number !== createdNumber ||
             readback.state !== "OPEN" || readback.isDraft !== true ||
             readback.headRefName !== pushEvidence.branch || readback.headRefOid !== pushEvidence.commit ||
+            readbackHeadRepository !== headRepository ||
             readback.baseRefName !== baseBranch || readback.title !== title
           ) {
             throw new Error("GitHub PR readback did not match the approved intent");
@@ -1065,6 +1076,7 @@ export function createControlledWorkAdapters({
               number: readback.number,
               url: readback.url,
               head: readback.headRefName,
+              headRepository: readbackHeadRepository,
               base: readback.baseRefName,
               state: readback.state,
               isDraft: readback.isDraft,

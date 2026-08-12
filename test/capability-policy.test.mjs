@@ -222,6 +222,7 @@ test("GitHub PR 草稿必须引用已推送步骤并固定仓库与基础分支"
   value.capabilities.github_pr_draft = {
     mode: "approval_required",
     repository: "example/project",
+    headRepository: "contributor/project",
     baseBranches: ["main"],
   };
   const result = evaluatePlan({
@@ -237,6 +238,10 @@ test("GitHub PR 草稿必须引用已推送步骤并固定仓库与基础分支"
     ],
   });
   assert.equal(result.decision, "REQUIRE_APPROVAL");
+  assert.equal(
+    validateProjectManifest(value).capabilities.github_pr_draft.headRepository,
+    "contributor/project",
+  );
   const denied = structuredClone(result);
   assert.equal(evaluatePlan({
     manifest: value,

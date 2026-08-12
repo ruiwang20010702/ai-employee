@@ -527,6 +527,7 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
     isDraft: true,
     headRefName: branch,
     headRefOid: commit,
+    headRepository: { nameWithOwner: "example/project" },
     baseRefName: "main",
     title: "修复问题",
   };
@@ -586,6 +587,7 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
   assert.equal(result.evidence.state, "OPEN");
   assert.equal(result.evidence.isDraft, true);
   assert.equal(result.evidence.commit, commit);
+  assert.equal(result.evidence.headRepository, "example/project");
   assert.equal(await readFile(bodyRecord, "utf8"), "变更与测试说明\n");
   const invocations = (await readFile(argumentsPath, "utf8")).trim().split("\n").map(JSON.parse);
   assert.equal(invocations.length, 2);
@@ -603,6 +605,27 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
       /GitHub PR readback did not match the approved intent/u,
     );
   }
+
+  const forkProject = structuredClone(project);
+  forkProject.capabilities.git_push.expectedRemoteUrl =
+    "https://github.com/tester/project.git";
+  forkProject.capabilities.github_pr_draft.headRepository = "tester/project";
+  await adapter.preflight({ plan, step: plan.steps[1], manifest: forkProject });
+  await writeFile(readbackPath, JSON.stringify({
+    ...readback,
+    headRepository: { nameWithOwner: "tester/project" },
+  }));
+  const forkResult = await adapter.execute({
+    plan,
+    step: plan.steps[1],
+    manifest: forkProject,
+    priorEvidence: { push: { kind: "verified_git_push", branch, commit } },
+  });
+  assert.equal(forkResult.evidence.headRepository, "tester/project");
+  const forkInvocations = (await readFile(argumentsPath, "utf8"))
+    .trim().split("\n").map(JSON.parse);
+  const forkCreate = forkInvocations.at(-2);
+  assert.equal(forkCreate[forkCreate.indexOf("--head") + 1], `tester:${branch}`);
 });
 
 test("共享文档只写固定目标并通过 DWS 回读哈希验收", async (t) => {

@@ -64,6 +64,14 @@ function githubIdentity(value, kind) {
   };
 }
 
+function repositorySlug(value, name) {
+  const normalized = bounded(value, name, 300).toLowerCase();
+  if (!/^[a-z0-9_.-]{1,100}\/[a-z0-9_.-]{1,100}$/u.test(normalized)) {
+    throw new Error(`${name} must be an owner/repository slug`);
+  }
+  return normalized;
+}
+
 function branch(value, name, { prefix = null } = {}) {
   const normalized = bounded(value, name, 200);
   if (
@@ -162,9 +170,20 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
   const planHash = exactSha(plan.planHash, "plan.planHash", 64);
   exactSha(project.startingCommit, "project.startingCommit", 40);
   exactSha(pr.commit, "draftPr.commit", 40);
-  const repository = bounded(project.repository, "project.repository", 300).toLowerCase();
+  const repository = repositorySlug(project.repository, "project.repository");
+  const sourceRepository = repositorySlug(
+    project.sourceRepository ?? repository,
+    "project.sourceRepository",
+  );
   if (issueIdentity.repository !== repository || prIdentity.repository !== repository) {
     throw new Error("Evidence Issue and Draft PR must belong to the project repository");
+  }
+  const draftPrHeadRepository = repositorySlug(
+    pr.headRepository ?? repository,
+    "draftPr.headRepository",
+  );
+  if (draftPrHeadRepository !== sourceRepository) {
+    throw new Error("Evidence Draft PR head repository must match the approved source repository");
   }
   const draftPrHead = branch(pr.head, "draftPr.head", { prefix: "foursday/" });
   const draftPrBase = branch(pr.base, "draftPr.base");
@@ -193,11 +212,13 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
     planHash,
     projectId: bounded(project.id, "project.id", 64),
     repository,
+    sourceRepository,
     issueUrl: issueIdentity.url,
     issueNumber: issueIdentity.number,
     draftPrUrl: prIdentity.url,
     draftPrNumber: prIdentity.number,
     draftPrHead,
+    draftPrHeadRepository,
     draftPrBase,
     draftPrState: pr.state,
     draftPrIsDraft: pr.isDraft,

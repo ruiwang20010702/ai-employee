@@ -15,6 +15,23 @@ See the [sanitized validation evidence example](../examples/validation-evidence.
 
 An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed outcome, or self-written JSON does not count.
 
+## External tester fork path
+
+An external tester must not need upstream write access. The supported path is:
+
+1. Fork `ruiwang20010702/foursday` with GitHub CLI so the fork is `origin` and
+   the public repository is the credential-free `upstream` remote.
+2. Check out `upstream/codex/v0.5-candidate` in a clean local branch.
+3. Use public pilot Issue #49 and base branch `codex/v0.5-candidate`.
+4. Before approval, verify that Foursday shows the fork as the push source and
+   `ruiwang20010702/foursday` as the Issue and Draft PR target.
+5. After execution, verify that the evidence binds the fork head repository,
+   governed branch, exact commit, upstream PR target, open state, and Draft flag.
+
+The maintainer assigns a pseudonymous slot and a bounded synthetic change.
+Never publish the local evidence bundle; send it privately for verification and
+leave only the privacy-safe feedback template on the public Issue.
+
 ## Cohort manifest
 
 Keep evidence files and `pilot.json` in one private local directory that is not committed. Use pseudonymous external aliases and never collect a name, email address, token, repository credential, or private model output.

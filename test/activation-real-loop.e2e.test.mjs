@@ -65,7 +65,7 @@ test("public activation runs the real governed patch-to-Draft-PR loop", async (t
     "} else if (args[0] === 'pr' && args[1] === 'view') {",
     "  const state = JSON.parse(fs.readFileSync(statePath));",
     "  const commit = cp.execFileSync('/usr/bin/git', ['--git-dir', remote, 'rev-parse', 'refs/heads/' + state.branch], { encoding: 'utf8' }).trim();",
-    "  console.log(JSON.stringify({ number: 42, url: 'https://github.com/example/project/pull/42', state: 'OPEN', isDraft: true, headRefName: state.branch, headRefOid: commit, baseRefName: state.base, title: state.title }));",
+    "  console.log(JSON.stringify({ number: 42, url: 'https://github.com/example/project/pull/42', state: 'OPEN', isDraft: true, headRefName: state.branch, headRefOid: commit, headRepository: { nameWithOwner: 'example/project' }, baseRefName: state.base, title: state.title }));",
     "} else process.exit(2);",
     "",
   ].join("\n"), { mode: 0o700 });

@@ -295,6 +295,13 @@ export function validateProjectManifest(input) {
       if (!/^[a-z0-9_.-]{1,100}\/[a-z0-9_.-]{1,100}$/iu.test(repository)) {
         throw new Error("github_pr_draft.repository is invalid");
       }
+      const headRepository = assertString(
+        rule.headRepository ?? repository,
+        "github_pr_draft.headRepository",
+      );
+      if (!/^[a-z0-9_.-]{1,100}\/[a-z0-9_.-]{1,100}$/iu.test(headRepository)) {
+        throw new Error("github_pr_draft.headRepository is invalid");
+      }
       const baseBranches = normalizedStringSet(
         rule.baseBranches,
         "github_pr_draft.baseBranches",
@@ -306,6 +313,7 @@ export function validateProjectManifest(input) {
         throw new Error("github_pr_draft.baseBranches is invalid");
       }
       capabilities[name].repository = repository;
+      capabilities[name].headRepository = headRepository;
       capabilities[name].baseBranches = baseBranches;
       capabilities[name].maxTitleChars = boundedInteger(
         rule.maxTitleChars,

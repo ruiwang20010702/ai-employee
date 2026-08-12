@@ -477,6 +477,29 @@ test("真实演示来自同一次闭环并保留外部复现边界", async () =>
   assert.match(chineseDemo, /verified_closed_loop/u);
 });
 
+test("外部体验入口使用 fork 推送并把来源与上游目标纳入审批证据", async () => {
+  const [readme, chineseReadme, pilot, chinesePilot] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/pilot-validation.md"),
+    projectText("docs/体验验证说明.md"),
+  ]);
+  for (const value of [readme, pilot]) {
+    assert.match(value, /gh repo fork ruiwang20010702\/foursday|fork as the push source/u);
+    assert.match(value, /upstream/u);
+    assert.match(value, /codex\/v0\.5-candidate/u);
+    assert.match(value, /Issue #49/u);
+  }
+  for (const value of [chineseReadme, chinesePilot]) {
+    assert.match(value, /fork/u);
+    assert.match(value, /upstream/u);
+    assert.match(value, /来源/u);
+    assert.match(value, /Draft/u);
+  }
+  assert.match(readme, /never merge or deploy/u);
+  assert.match(chineseReadme, /禁止合并或部署/u);
+});
+
 test("英文核心文档覆盖产品、架构、能力记忆和部署边界", async () => {
   const [readme, overview, architecture, capabilities, deployment] = await Promise.all([
     projectText("README.md"),

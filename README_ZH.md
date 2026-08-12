@@ -18,7 +18,7 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[10 分钟开始](#快速开始) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+[10 分钟开始](#快速开始) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入 v0.5 外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
 
 <a href="./assets/foursday-v0.5-demo.mp4">
   <img src="./assets/foursday-v0.5-demo-poster.png" alt="观看 Foursday 将合成 GitHub Issue 转化为经过验证的 Draft PR" width="960">
@@ -153,14 +153,31 @@ npm start
 
 打开 `http://127.0.0.1:4173`，绑定一个本地 Git 仓库并填写 GitHub Issue。Foursday 会使用真实的五步代码交付配方生成补丁、隔离分支、测试、推送和 Draft PR 计划，并展示计划哈希、风险等级和被锁定能力。生成预览不会触碰任何外部系统。
 
-如果要继续真实执行，请选择 Codex 或 Claude Code。Foursday 会再次检查工作区干净、Git 远端与 Issue 仓库一致、测试命令已登记、GitHub CLI 已登录，然后要求你对完整计划哈希进行第二次审批。只有这次审批才能生成补丁、创建 `foursday/` 分支、运行登记测试、推送分支并创建 Draft PR；它不能合并或部署。执行状态写入本地加密 SQLite 会话，项目记忆和时间返还仍只是候选，必须由你再次确认。
+如果要继续真实执行，请选择 Codex 或 Claude Code。Foursday 会再次检查工作区干净、`origin` 与 Issue 仓库相同，或者当前仓库是通过无凭据 `upstream` 精确绑定 Issue 仓库的 fork；同时核对测试命令已登记、GitHub CLI 已登录，然后要求你对完整计划哈希进行第二次审批。审批页会明确展示推送来源仓库、Issue/PR 目标仓库、交付模式和起始提交。只有这次审批才能生成补丁、创建 `foursday/` 分支、运行登记测试、推送分支并创建 Draft PR；fork 模式只向体验者自己的 fork 推送，再向获批的上游仓库创建 Draft PR。回读必须逐项匹配来源仓库、分支、提交、目标仓库、基础分支、标题、打开状态和草稿状态。它不能合并或部署。
+
+执行状态写入本地加密 SQLite 会话，项目记忆和时间返还仍只是候选，必须由你再次确认。证据包不会记录本机路径、远端 URL 或凭据，但会保留脱敏后的来源与目标仓库身份。
+
+#### 从 fork 加入外部体验
+
+外部体验者不需要 Foursday 上游仓库写权限。使用 GitHub CLI 创建自己的 fork，从自动生成的 `upstream` 远端检出候选版，再启动 Web 接入页：
+
+```bash
+gh repo fork ruiwang20010702/foursday --clone
+cd foursday
+git fetch upstream codex/v0.5-candidate
+git switch --create pilot-v0.5 --track upstream/codex/v0.5-candidate
+npm ci
+npm start
+```
+
+填写[体验 Issue #49](https://github.com/ruiwang20010702/foursday/issues/49)，基础分支使用 `codex/v0.5-candidate`，登记测试填写 `check`，变更任务使用化名名额对应的合成任务。批准前必须确认页面把你的 fork 显示为推送来源，把 `ruiwang20010702/foursday` 显示为 Issue 和 Draft PR 目标。PR 必须保持打开和 Draft，禁止合并或部署。
 
 #### Web 接入排障
 
 创建真实执行会话时如果前置检查失败，先修复对应的本地条件，再重新创建会话；不要绕过检查或扩大权限：
 
 - **工作区不干净：** 用 `git status --short` 识别已跟踪和未跟踪变更。保留并审查现有工作；提交应保留的变更，或改用单独的干净克隆/工作树。不要用会丢失更改的命令强行清理。
-- **仓库不一致：** 用 `git remote get-url origin` 对照 Issue URL 中的 `owner/repository`。绑定与 Issue 相同且已获授权的仓库；`origin` 必须是 GitHub 地址且不能内嵌凭据。不要为了通过检查改写 Issue 或远端身份。
+- **仓库不一致：** 用 `git remote get-url origin` 和 `git remote get-url upstream` 对照 Issue URL 中的 `owner/repository`。同仓库模式要求 `origin` 一致；fork 模式要求 `upstream` 精确一致。两者都必须是无内嵌凭据的 GitHub 地址。不要为了通过检查伪造 Issue 或远端身份。
 - **缺少登记的测试脚本：** 检查 `package.json` 的 `scripts`，把“Registered test command ID”填写为已有脚本名（例如本仓库的 `check`）。如果项目没有所需脚本，应先由仓库维护者在 `package.json` 中登记固定、可审查的脚本；不要填写任意 shell 命令，也不要跳过测试。
 
 闭环完成后可以下载 JSON 证据包；确认记忆和时间返还后再次下载，状态才会变为 `verified_closed_loop`。证据包不包含本机路径、Git 远端、操作令牌、凭据或模型原始输出，只保留 Issue、计划哈希、目标回读、记忆与时间返还状态以及明确的安全边界。

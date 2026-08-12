@@ -69,8 +69,13 @@ test("activation repository inspection requires a clean credential-free GitHub o
   await execFileAsync("/usr/bin/git", ["-C", directory, "add", "README.md"]);
   await execFileAsync("/usr/bin/git", ["-C", directory, "commit", "-m", "initial"]);
   await execFileAsync("/usr/bin/git", ["-C", directory, "remote", "add", "origin", "git@github.com:Example/Project.git"]);
+  await execFileAsync("/usr/bin/git", [
+    "-C", directory, "remote", "add", "upstream",
+    "https://github.com/Upstream/Project.git",
+  ]);
   const snapshot = await inspectActivationRepository(directory);
   assert.equal(snapshot.repository, "example/project");
+  assert.equal(snapshot.upstreamRepository, "upstream/project");
   assert.match(snapshot.head, /^[a-f0-9]{40}$/u);
   await writeFile(join(directory, "untracked.txt"), "must block\n");
   await assert.rejects(
@@ -95,6 +100,8 @@ test("activation execution binds Issue, clean repository, command, remote, and f
   assert.equal(result.manifest.capabilities.local_test.mode, "approval_required");
   assert.equal(result.manifest.capabilities.git_push.expectedRemoteUrl, snapshot.remoteUrl);
   assert.equal(result.manifest.capabilities.github_pr_draft.repository, "example/project");
+  assert.equal(result.manifest.capabilities.github_pr_draft.headRepository, "example/project");
+  assert.equal(result.deliveryMode, "same_repository");
   assert.deepEqual(result.manifest.capabilities.github_pr_draft.baseBranches, ["main"]);
   await assert.rejects(
     () => prepareActivationExecution(input, {
@@ -102,7 +109,37 @@ test("activation execution binds Issue, clean repository, command, remote, and f
       repositoryInspector: async () => ({ ...snapshot, repository: "other/project" }),
       commandBuilder: async () => ({ executable: "/usr/bin/true", args: [] }),
     }),
-    /does not match/u,
+    /must match origin or the configured upstream/u,
+  );
+});
+
+test("activation execution binds a fork origin to the exact upstream Issue repository", async () => {
+  const forkSnapshot = {
+    ...snapshot,
+    remoteUrl: "https://github.com/tester/foursday.git",
+    repository: "tester/foursday",
+    upstreamRemoteUrl: "https://github.com/example/project.git",
+    upstreamRepository: "example/project",
+  };
+  const result = await prepareActivationExecution(input, {
+    previewBuilder,
+    repositoryInspector: async () => forkSnapshot,
+    commandBuilder: async () => ({ executable: "/usr/bin/true", args: [] }),
+  });
+  assert.equal(result.deliveryMode, "fork_to_upstream");
+  assert.equal(result.manifest.capabilities.git_push.expectedRemoteUrl, forkSnapshot.remoteUrl);
+  assert.equal(result.manifest.capabilities.github_pr_draft.repository, "example/project");
+  assert.equal(result.manifest.capabilities.github_pr_draft.headRepository, "tester/foursday");
+  await assert.rejects(
+    () => prepareActivationExecution(input, {
+      previewBuilder,
+      repositoryInspector: async () => ({
+        ...forkSnapshot,
+        upstreamRepository: "other/upstream",
+      }),
+      commandBuilder: async () => ({ executable: "/usr/bin/true", args: [] }),
+    }),
+    /configured upstream/u,
   );
 });
 
@@ -122,6 +159,7 @@ test("activation coordinator executes only the approved hash then proposes confi
       number: 42,
       url: "https://github.com/example/project/pull/42",
       head: "foursday/change-42",
+      headRepository: "example/project",
       base: "main",
       state: "OPEN",
       isDraft: true,
@@ -143,6 +181,13 @@ test("activation coordinator executes only the approved hash then proposes confi
   const created = await coordinator.create(input);
   assert.equal(created.plan.status, "awaiting_approval");
   assert.equal(created.externalSystemsTouched, false);
+  assert.deepEqual(created.repositoryBinding, {
+    mode: "same_repository",
+    issueRepository: "example/project",
+    sourceRepository: "example/project",
+    upstreamRepository: undefined,
+    startingCommit: snapshot.head,
+  });
   await assert.rejects(
     () => coordinator.approveAndExecute(created.sessionId, {
       planHash: "0".repeat(64),
@@ -168,6 +213,8 @@ test("activation coordinator executes only the approved hash then proposes confi
   assert.equal(proposedEvidence.plan.planHash, created.plan.planHash);
   assert.equal(proposedEvidence.evidence.length, 5);
   assert.equal(proposedEvidence.evidence[4].head, "foursday/change-42");
+  assert.equal(proposedEvidence.evidence[4].headRepository, "example/project");
+  assert.equal(proposedEvidence.project.sourceRepository, "example/project");
   assert.equal(proposedEvidence.evidence[4].base, "main");
   assert.equal(proposedEvidence.evidence[4].state, "OPEN");
   assert.equal(proposedEvidence.evidence[4].isDraft, true);
