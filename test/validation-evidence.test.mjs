@@ -10,7 +10,10 @@ import {
   validationEvidenceCapabilities,
 } from "../src/validation-evidence.mjs";
 
-function evidence(index = 1, { confirmed = true } = {}) {
+function evidence(
+  index = 1,
+  { confirmed = true, runtime = index % 2 ? "codex" : "claude-code" } = {},
+) {
   const hex = index.toString(16);
   const commit = hex.padStart(40, "0");
   const planHash = hex.padStart(64, "0");
@@ -20,7 +23,7 @@ function evidence(index = 1, { confirmed = true } = {}) {
     generatedAt: "2026-08-12T00:00:00.000Z",
     project: { id: "foursday", repository: "example/foursday", startingCommit: commit },
     issue: { url: `https://github.com/example/foursday/issues/${index}`, number: index },
-    runtime: index % 2 ? "codex" : "claude-code",
+    runtime,
     plan: { planHash, status: "completed" },
     evidence: validationEvidenceCapabilities.map((capability, step) => ({
       stepId: `step-${step + 1}`,
@@ -80,6 +83,34 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
     rootDirectory: "/private/project",
   });
   assert.throws(() => validateValidationEvidence(privateBundle), /forbidden private field/u);
+});
+
+test("validation evidence allows each supported runtime", () => {
+  for (const runtime of ["codex", "claude-code", "openai-compatible"]) {
+    assert.equal(
+      validateValidationEvidence(evidence(1, { runtime })).runtime,
+      runtime,
+    );
+  }
+});
+
+test("validation evidence denies runtimes outside the exact allowlist", () => {
+  for (const runtime of ["demo", "codex-preview", " codex ", "CODEX", null]) {
+    assert.throws(
+      () => validateValidationEvidence(evidence(1, { runtime })),
+      /runtime must be exactly codex, claude-code, or openai-compatible/u,
+      String(runtime),
+    );
+  }
+});
+
+test("validation evidence verifies integrity before checking runtime", () => {
+  const tampered = evidence();
+  tampered.runtime = "demo";
+  assert.throws(
+    () => validateValidationEvidence(tampered),
+    /digest does not match/u,
+  );
 });
 
 test("validation evidence binds canonical time and GitHub target identity", () => {

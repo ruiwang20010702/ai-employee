@@ -8,6 +8,12 @@ const capabilities = Object.freeze([
   "github_pr_draft",
 ]);
 
+const runtimes = Object.freeze([
+  "codex",
+  "claude-code",
+  "openai-compatible",
+]);
+
 function object(value, name) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${name} must be an object`);
@@ -125,6 +131,9 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
   if (exactSha(integrity.digest, "integrity.digest", 64) !== validationEvidenceDigest(core)) {
     throw new Error("Evidence integrity digest does not match the bundle");
   }
+  if (!runtimes.includes(bundle.runtime)) {
+    throw new Error("runtime must be exactly codex, claude-code, or openai-compatible");
+  }
   if (typeof bundle.generatedAt !== "string") {
     throw new Error("generatedAt must be a canonical ISO 8601 UTC timestamp");
   }
@@ -202,7 +211,7 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
     draftPrState: pr.state,
     draftPrIsDraft: pr.isDraft,
     draftPrCommit: pr.commit,
-    runtime: bounded(bundle.runtime, "runtime", 100),
+    runtime: bundle.runtime,
     returnedMinutes: Number(outcomes.timeReturn?.returnedMinutes ?? 0),
     confirmed,
     integrityDigest: integrity.digest,
