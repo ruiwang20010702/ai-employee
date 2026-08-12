@@ -30,16 +30,23 @@ An external tester must not need upstream write access. The supported path is:
    may create or reuse only the tester's personal fork, clone the exact commit
    under `~/FoursdayPilot/`, and install lockfile dependencies without lifecycle
    scripts. It does not run a model, push, create a PR, merge, or deploy.
-3. Use public pilot Issue #49 and base branch `codex/v0.5-candidate`.
-4. Before approval, verify that Foursday shows the fork as the push source and
+3. Claim an alias in public pilot Issue #49. Enter it under **Create your unique
+   pilot task**, open the bounded GitHub Issue composer, review and submit the
+   synthetic task, then paste that new Issue URL into Foursday. Issue #49 is
+   intake and feedback only; it must not be reused as the work Issue.
+4. Verify the generated defaults: base branch `codex/v0.5-candidate`, registered
+   test `check`, the alias-bound change request, and Draft PR title.
+5. Before approval, verify that Foursday shows the fork as the push source and
    `ruiwang20010702/foursday` as the Issue and Draft PR target.
-5. After execution, verify that the evidence binds the fork head repository,
+6. After execution, verify that the evidence binds the unique Issue, fork head repository,
    governed branch, exact commit, upstream PR target, open state, and Draft flag.
 
 The manual fork and exact-checkout commands in the README are a fallback, not a
 different evidence path. Both routes must start from the same immutable SHA.
 
-The maintainer assigns a pseudonymous slot and a bounded synthetic change.
+The maintainer assigns a pseudonymous slot. Foursday deterministically derives
+the bounded synthetic change from that alias and the immutable candidate, but
+only prepares a GitHub composer URL; the tester must review and submit it.
 Never publish the complete local evidence bundle. Post only the generated
 privacy-safe proof: it is a strict whitelist of public GitHub identities,
 governed hashes, runtime, confirmed returned minutes, and feedback placeholders.

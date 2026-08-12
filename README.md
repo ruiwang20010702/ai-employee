@@ -227,12 +227,16 @@ npm ci --ignore-scripts
 npm start
 ```
 
-Use [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49),
-base branch `codex/v0.5-candidate`, registered test `check`, and the synthetic
-task assigned to your pseudonymous slot. Before approval, verify that the Web
-page names your fork as the push source and `ruiwang20010702/foursday` as the
-Issue and Draft PR target. Keep the PR open and Draft; never merge or deploy it.
-After confirming the outcomes, copy the privacy-safe pilot proof, replace the
+Use [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49)
+only to claim a pseudonymous slot and post final feedback. After readiness,
+enter that alias under **Create your unique pilot task**. Foursday prepares a
+bounded GitHub Issue composer and fills the change request, base branch
+`codex/v0.5-candidate`, registered test `check`, and Draft PR title locally. It
+does not create the Issue: review and submit it yourself, then paste that new,
+unique Issue URL into the form. Before approval, verify that the Web page names
+your fork as the push source and `ruiwang20010702/foursday` as the Issue and
+Draft PR target. Keep the PR open and Draft; never merge or deploy it. After
+confirming the outcomes, copy the privacy-safe pilot proof, replace the
 `tester-XX` placeholder, add timings and feedback, and post it to Issue #49.
 
 ### Troubleshoot Web onboarding

@@ -18,6 +18,8 @@ test("activation UI is parseable, responsive, and honest about preview boundarie
   assert.match(activationHtml, /Copy setup check-in/u);
   assert.match(activationHtml, /Open setup Issue #50/u);
   assert.match(activationHtml, /Open pilot Issue #49/u);
+  assert.match(activationHtml, /Prepare unique task link/u);
+  assert.match(activationHtml, /Open my unique task Issue/u);
   assert.match(activationHtml, /Repository authority/u);
   assert.match(activationHtml, /sourceRepository/u);
   assert.match(activationHtml, /issueRepository/u);
@@ -84,8 +86,50 @@ test("readiness UI is read-only, accessible, and does not expose command errors"
   assert.match(script, /Setup check-in copied\. Choose your platform/u);
   assert.match(script, /Setup changed after pilot preparation/u);
   assert.match(script, /esc\(readiness\.setupCheckin\.issueUrl\)/u);
+  assert.match(script, /api\('\/api\/pilot-task-draft',\{participantAlias:/u);
+  assert.match(script, /No Issue has been created yet/u);
+  assert.match(script, /form\.elements\.namedItem\('changeRequest'\)\.value=task\.changeRequest/u);
   assert.match(script, /No fork, branch, push, or PR was created/u);
   assert.doesNotMatch(script, /pilot-readiness-status[^;]*error\.(?:message|stack)/u);
+});
+
+test("pilot task draft endpoint requires the local token and never creates an Issue", async () => {
+  const actionToken = "f".repeat(64);
+  const service = await startActivationServer({
+    port: 0,
+    actionToken,
+    pilotWorkspace: {
+      sourceSha: "a".repeat(40),
+      async prepare() { throw new Error("not called"); },
+    },
+  });
+  const post = (body, token = actionToken, contentType = "application/json") => fetch(
+    new URL("/api/pilot-task-draft", service.url),
+    {
+      method: "POST",
+      headers: {
+        "content-type": contentType,
+        "x-foursday-action-token": token,
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  try {
+    assert.equal((await post({ participantAlias: "tester-01" }, "wrong")).status, 403);
+    assert.equal((await post({ participantAlias: "tester-01" }, actionToken, "text/plain")).status, 415);
+    const invalid = await post({ participantAlias: "tester-XX" });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await invalid.json(), { error: "pilot_task_draft_failed" });
+    const response = await post({ participantAlias: "tester-01" });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.schema, "foursday-pilot-task-draft/v1");
+    assert.equal(body.candidateSha, "a".repeat(40));
+    assert.equal(body.externalSystemsModified, false);
+    assert.match(body.newIssueUrl, /^https:\/\/github\.com\/ruiwang20010702\/foursday\/issues\/new\?/u);
+  } finally {
+    await service.stop();
+  }
 });
 
 test("activation server exposes only loopback preview endpoints", async () => {

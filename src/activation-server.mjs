@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { buildActivationPreview } from "./activation.mjs";
 import { activationHtml } from "./activation-ui.mjs";
+import { buildPilotTaskDraft } from "./pilot-task-draft.mjs";
 import { buildSetupCheckin } from "./setup-checkin.mjs";
 
 const securityHeaders = Object.freeze({
@@ -105,6 +106,26 @@ export async function startActivationServer({
       } catch (error) {
         json(response, error.status ?? 400, {
           error: error.status ? String(error.message) : "readiness_check_failed",
+        });
+      }
+      return;
+    }
+    if (pilotWorkspace && request.method === "POST" && url.pathname === "/api/pilot-task-draft") {
+      try {
+        if (!equalToken(request.headers["x-foursday-action-token"], actionToken)) {
+          throw Object.assign(new Error("action_token_invalid"), { status: 403 });
+        }
+        if (!String(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+          throw Object.assign(new Error("content_type_must_be_application_json"), { status: 415 });
+        }
+        const body = await readJson(request);
+        json(response, 200, buildPilotTaskDraft({
+          participantAlias: body.participantAlias,
+          candidateSha: pilotWorkspace.sourceSha,
+        }));
+      } catch (error) {
+        json(response, error.status ?? 400, {
+          error: error.status ? String(error.message) : "pilot_task_draft_failed",
         });
       }
       return;

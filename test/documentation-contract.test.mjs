@@ -281,6 +281,27 @@ test("中英文快速开始提供不可变的一条命令 Web 体验入口", asy
   assert.match(chinese, /再次批准完整计划哈希/u);
 });
 
+test("外部体验入口为每位体验者使用唯一合成 Issue", async () => {
+  const [readme, chinese, contract, chineseContract] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/pilot-validation.md"),
+    projectText("docs/体验验证说明.md"),
+  ]);
+  for (const text of [readme, contract]) {
+    assert.match(text, /Create your unique\s+pilot task/u);
+    assert.match(text, /Issue #49.+(?:intake|claim).+feedback/su);
+    assert.match(text, /unique Issue/u);
+  }
+  for (const text of [chinese, chineseContract]) {
+    assert.match(text, /Create your unique pilot task/u);
+    assert.match(text, /Issue #49.+只用于.+反馈/su);
+    assert.match(text, /唯一 Issue/u);
+  }
+  assert.doesNotMatch(contract, /Use public pilot Issue #49 and base branch/u);
+  assert.doesNotMatch(chineseContract, /随后使用公开体验 Issue #49/u);
+});
+
 test("公开增长记分卡不把重复自测和社区意向冒充用户或贡献", async () => {
   const [readme, chineseReadme, scorecard, chineseScorecard] = await Promise.all([
     projectText("README.md"),

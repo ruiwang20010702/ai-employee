@@ -185,7 +185,7 @@ npm ci --ignore-scripts
 npm start
 ```
 
-填写[体验 Issue #49](https://github.com/ruiwang20010702/foursday/issues/49)，基础分支使用 `codex/v0.5-candidate`，登记测试填写 `check`，变更任务使用化名名额对应的合成任务。批准前必须确认页面把你的 fork 显示为推送来源，把 `ruiwang20010702/foursday` 显示为 Issue 和 Draft PR 目标。PR 必须保持打开和 Draft，禁止合并或部署。
+公开[体验 Issue #49](https://github.com/ruiwang20010702/foursday/issues/49)只用于领取化名名额和提交最终反馈。完成 readiness 后，在 **Create your unique pilot task** 中输入分配的化名；Foursday 会在本机生成有界的 GitHub Issue 编辑链接，并自动填写变更任务、基础分支 `codex/v0.5-candidate`、登记测试 `check` 和 Draft PR 标题。它不会自动创建 Issue：请自行复核并提交，再把这个新的唯一 Issue URL 粘贴到表单。批准前必须确认页面把你的 fork 显示为推送来源，把 `ruiwang20010702/foursday` 显示为 Issue 和 Draft PR 目标。PR 必须保持打开和 Draft，禁止合并或部署。
 
 确认结果后复制隐私安全体验证明，把 `tester-XX` 替换为分配的化名，补充耗时与反馈，再粘贴到 Issue #49。
 
