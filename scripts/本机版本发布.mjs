@@ -2130,11 +2130,12 @@ export function createLocalReleaseDependencies({
       return receipt;
     },
     async cleanupServices(context) {
-      await runReleaseScript({
+      await runControllerScript({
         ...context,
         relativePath: "scripts/清理版本外常驻服务.mjs",
         args: ["--release", context.releaseDirectory],
         description: "清理版本外常驻服务",
+        command,
       });
     },
     async verifyService(context) {

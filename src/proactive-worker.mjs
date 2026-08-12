@@ -4,8 +4,12 @@ import { createProductionStore } from "./production-store.mjs";
 import { loadProjectManifests } from "./project-manifests.mjs";
 import { loadWorkRecipes } from "./recipe-library.mjs";
 import { runDueProactiveTrigger } from "./proactive-runtime.mjs";
-import { log, safeErrorCode } from "./logging.mjs";
+import { safeErrorCode } from "./logging.mjs";
 import { isMainModule } from "./main-module.mjs";
+
+function log(type, fields = {}) {
+  console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
+}
 
 export async function runProactiveWorker({
   config = loadConfig({ requireTargets: false, production: true }),

@@ -16,6 +16,8 @@ test("版本服务对账会备份并卸载目标版本不再包含的服务", as
   await writeFile(join(destination, "com.foursday.listener.plist"), "current");
   await writeFile(join(destination, "com.ai-employee.listener.plist"), "legacy");
   await writeFile(join(destination, "com.ai-employee.memory-source.plist"), "stale");
+  await writeFile(join(destination, "com.foursday.proactive.plist"), "newer-version");
+  await writeFile(join(destination, "com.ai-employee.proactive.plist"), "legacy-newer-version");
   await writeFile(join(destination, "com.ai-employee.postgresql.plist"), "database");
   await writeFile(join(destination, "com.example.unrelated.plist"), "keep");
 
@@ -32,11 +34,14 @@ test("版本服务对账会备份并卸载目标版本不再包含的服务", as
   assert.deepEqual(result.removed, [
     "com.ai-employee.listener",
     "com.ai-employee.memory-source",
+    "com.ai-employee.proactive",
+    "com.foursday.proactive",
   ]);
   assert.equal(await readFile(join(destination, "com.foursday.listener.plist"), "utf8"), "current");
   assert.equal(await readFile(join(destination, "com.example.unrelated.plist"), "utf8"), "keep");
   assert.equal(await readFile(join(destination, "com.ai-employee.postgresql.plist"), "utf8"), "database");
   assert.equal((await readdir(destination)).includes("com.ai-employee.memory-source.plist"), false);
+  assert.equal((await readdir(destination)).includes("com.foursday.proactive.plist"), false);
   assert.equal(await readFile(join(result.backupDirectory, "com.ai-employee.memory-source.plist"), "utf8"), "stale");
   assert.equal(calls.some((args) => args[0] === "bootout"), true);
 });
