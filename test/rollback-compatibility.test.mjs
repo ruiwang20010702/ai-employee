@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   assertCapabilityBudgetPersistenceRejection,
   assertLegacyCompatibilityBoundary,
+  assertPostGuardBaseline,
   assertRollbackBaselineObject,
   buildRollbackVerificationPlan,
   countForwardMigrationFiles,
@@ -83,6 +84,15 @@ test("服务回退基线绑定完整提交、迁移数量和固定测试入口",
     reason: "迁移前兼容基线",
   };
   assert.equal(validateRollbackManifest(manifest), manifest);
+  assert.equal(validateRollbackManifest({
+    ...manifest,
+    postGuardBaseline: {
+      commit: "b".repeat(40),
+      expectedMigrations: 18,
+      testFile: manifest.testFile,
+      reason: "状态门禁后生产基线",
+    },
+  }).postGuardBaseline.expectedMigrations, 18);
   assert.throws(
     () => validateRollbackManifest({ ...manifest, commit: "abc" }),
     /完整 SHA/u,
@@ -90,6 +100,37 @@ test("服务回退基线绑定完整提交、迁移数量和固定测试入口",
   assert.throws(
     () => validateRollbackManifest({ ...manifest, testFile: "test/other.test.mjs" }),
     /不受支持/u,
+  );
+  assert.throws(
+    () => validateRollbackManifest({
+      ...manifest,
+      postGuardBaseline: {
+        commit: "b".repeat(40),
+        expectedMigrations: 14,
+        testFile: manifest.testFile,
+        reason: "无效顺序",
+      },
+    }),
+    /必须晚于/u,
+  );
+});
+
+test("状态门禁后回退基线必须精确包含017和018", () => {
+  const files = Array.from({ length: 18 }, (_, index) =>
+    `db/migrations/${String(index + 1).padStart(3, "0")}_${
+      index === 16 ? "等待信息任务链" : index === 17 ? "能力次数预算" : "迁移"
+    }.sql`
+  );
+  assert.equal(assertPostGuardBaseline({
+    baselineMigrationFiles: files,
+    expectedMigrations: 18,
+  }).length, 18);
+  assert.throws(
+    () => assertPostGuardBaseline({
+      baselineMigrationFiles: files.slice(0, 17),
+      expectedMigrations: 18,
+    }),
+    /精确支持/u,
   );
 });
 

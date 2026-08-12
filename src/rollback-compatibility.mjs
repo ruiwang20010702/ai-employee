@@ -53,19 +53,29 @@ export function validateRollbackManifest(value) {
   if (!value || value.schemaVersion !== schemaVersion) {
     throw new Error("回退基线清单版本无效");
   }
-  if (!/^[0-9a-f]{40}$/u.test(String(value.commit ?? ""))) {
-    throw new Error("回退基线提交必须是完整 SHA");
-  }
-  if (!Number.isSafeInteger(value.expectedMigrations) || value.expectedMigrations < 1) {
-    throw new Error("回退基线迁移数量无效");
-  }
-  if (value.testFile !== "test/postgres-store.integration.test.mjs") {
-    throw new Error("回退基线测试入口不受支持");
-  }
-  if (!String(value.reason ?? "").trim()) {
-    throw new Error("回退基线必须说明选择原因");
+  validateRollbackBaseline(value, "回退基线");
+  if (value.postGuardBaseline !== undefined) {
+    validateRollbackBaseline(value.postGuardBaseline, "状态门禁后回退基线");
+    if (value.postGuardBaseline.expectedMigrations <= value.expectedMigrations) {
+      throw new Error("状态门禁后回退基线必须晚于历史回退基线");
+    }
   }
   return value;
+}
+
+function validateRollbackBaseline(value, label) {
+  if (!/^[0-9a-f]{40}$/u.test(String(value.commit ?? ""))) {
+    throw new Error(`${label}提交必须是完整 SHA`);
+  }
+  if (!Number.isSafeInteger(value.expectedMigrations) || value.expectedMigrations < 1) {
+    throw new Error(`${label}迁移数量无效`);
+  }
+  if (value.testFile !== "test/postgres-store.integration.test.mjs") {
+    throw new Error(`${label}测试入口不受支持`);
+  }
+  if (!String(value.reason ?? "").trim()) {
+    throw new Error(`${label}必须说明选择原因`);
+  }
 }
 
 export function countForwardMigrationFiles(output) {
@@ -80,6 +90,21 @@ export function listForwardMigrationFiles(output) {
 
 function migrationFilename(path) {
   return String(path).split("/").at(-1);
+}
+
+export function assertPostGuardBaseline({
+  baselineMigrationFiles,
+  expectedMigrations,
+}) {
+  const versions = baselineMigrationFiles.map(migrationFilename);
+  if (
+    versions.length !== expectedMigrations ||
+    !versions.includes(continuationMigration) ||
+    !versions.includes(capabilityBudgetMigration)
+  ) {
+    throw new Error("状态门禁后回退基线必须精确支持第 017 和 018 号迁移");
+  }
+  return versions;
 }
 
 export function buildRollbackVerificationPlan({
@@ -409,17 +434,53 @@ export async function verifyRollbackCompatibility({
     throw new Error("回退基线迁移数量与清单不一致");
   }
 
+  let postGuardBaselineMigrationFiles = [];
+  if (manifest.postGuardBaseline) {
+    assertRollbackBaselineObject({
+      root: projectRoot,
+      commit: manifest.postGuardBaseline.commit,
+      runner,
+    });
+    postGuardBaselineMigrationFiles = listForwardMigrationFiles(runner(
+      "git",
+      [
+        "ls-tree",
+        "-r",
+        "-z",
+        "--name-only",
+        manifest.postGuardBaseline.commit,
+        "db/migrations",
+      ],
+      { cwd: projectRoot },
+    ));
+    assertPostGuardBaseline({
+      baselineMigrationFiles: postGuardBaselineMigrationFiles,
+      expectedMigrations: manifest.postGuardBaseline.expectedMigrations,
+    });
+  }
+
   const migrationsDirectory = join(projectRoot, "db", "migrations");
   const migrations = await listExpectedMigrations({ migrationsDirectory });
   const compatibilityPolicy = JSON.parse(await readFile(
     join(migrationsDirectory, "兼容性策略.json"),
     "utf8",
   ));
+  const historicalMigrations = manifest.postGuardBaseline
+    ? migrations.slice(0, manifest.postGuardBaseline.expectedMigrations)
+    : migrations;
   const verificationPlan = buildRollbackVerificationPlan({
-    migrations,
+    migrations: historicalMigrations,
     baselineMigrationFiles,
     compatibilityPolicy,
   });
+
+  const postGuardVerificationPlan = manifest.postGuardBaseline
+    ? buildRollbackVerificationPlan({
+      migrations,
+      baselineMigrationFiles: postGuardBaselineMigrationFiles,
+      compatibilityPolicy,
+    })
+    : null;
 
   const verification = await withTemporaryRollbackDatabase({
     databaseUrl: safeDatabaseUrl,
@@ -427,9 +488,18 @@ export async function verifyRollbackCompatibility({
       const legacyApplied = await migrate(pool, {
         migrationLoader: async () => verificationPlan.legacyTestMigrations,
       });
-      const legacyStatus = await inspectMigrationStatus(pool, {
+      const fullLegacyStatus = await inspectMigrationStatus(pool, {
         migrationsDirectory,
       });
+      const historicalVersions = new Set(
+        historicalMigrations.map((migration) => migration.version),
+      );
+      const legacyStatus = {
+        ...fullLegacyStatus,
+        pending: fullLegacyStatus.pending.filter((version) =>
+          historicalVersions.has(version)
+        ),
+      };
       assertMigrationStatus(legacyStatus, { allowPending: true });
       assertLegacyCompatibilityBoundary(legacyStatus, verificationPlan);
       await runBaselineServiceTests({
@@ -452,11 +522,11 @@ export async function verifyRollbackCompatibility({
       };
       const serviceRollbackGuards = [];
       for (const guardedMigration of verificationPlan.guardedMigrations) {
-        const migrationIndex = migrations.findIndex(
+        const migrationIndex = historicalMigrations.findIndex(
           (migration) => migration.version === guardedMigration.version,
         );
         const applied = await migrate(pool, {
-          migrationLoader: async () => migrations.slice(0, migrationIndex + 1),
+          migrationLoader: async () => historicalMigrations.slice(0, migrationIndex + 1),
         });
         guardedApplied.push(...applied);
         if (guardedMigration.guard === capabilityBudgetGuard) {
@@ -508,7 +578,11 @@ export async function verifyRollbackCompatibility({
           ...await verifyCapabilityBudgetPersistence(pool),
         };
       }
-      const status = await inspectMigrationStatus(pool, { migrationsDirectory });
+      const fullStatus = await inspectMigrationStatus(pool, { migrationsDirectory });
+      const status = {
+        ...fullStatus,
+        pending: fullStatus.pending.filter((version) => historicalVersions.has(version)),
+      };
       assertMigrationStatus(status);
       return {
         baselineServiceTestRuns,
@@ -521,6 +595,37 @@ export async function verifyRollbackCompatibility({
     },
   });
 
+  let postGuardVerification = null;
+  if (manifest.postGuardBaseline) {
+    postGuardVerification = await withTemporaryRollbackDatabase({
+      databaseUrl: safeDatabaseUrl,
+      async operation({ pool, databaseUrl: scopedDatabaseUrl }) {
+        const applied = await migrate(pool, {
+          migrationLoader: async () => postGuardVerificationPlan.legacyTestMigrations,
+        });
+        const status = await inspectMigrationStatus(pool, { migrationsDirectory });
+        assertMigrationStatus(status);
+        assertLegacyCompatibilityBoundary(status, postGuardVerificationPlan);
+        await runBaselineServiceTests({
+          projectRoot,
+          databaseUrl: scopedDatabaseUrl,
+          manifest: manifest.postGuardBaseline,
+          runner,
+        });
+        return {
+          applied,
+          currentMigrationCount: status.applied,
+          baselineServiceTestRun: {
+            passed: true,
+            throughMigration: migrations.at(-1)?.version,
+            schemaMigrations: status.applied,
+            reason: "post_guard_backward_compatibility",
+          },
+        };
+      },
+    });
+  }
+
   const rollbackAllowed = verification.serviceRollbackGuards.every(
     (guard) => guard.rollbackAllowed,
   );
@@ -528,14 +633,20 @@ export async function verifyRollbackCompatibility({
     valid: true,
     baselineCommit: manifest.commit,
     baselineMigrations: manifest.expectedMigrations,
-    currentMigrationsApplied:
+    currentMigrationsApplied: postGuardVerification?.applied.length ??
       verification.legacyApplied.length + verification.guardedApplied.length,
-    currentMigrationCount: verification.currentMigrationCount,
+    currentMigrationCount: postGuardVerification?.currentMigrationCount ??
+      verification.currentMigrationCount,
     legacyServiceTests: {
       passed: true,
       schemaMigrations: verificationPlan.legacyTestMigrations.length,
     },
-    baselineServiceTestRuns: verification.baselineServiceTestRuns,
+    baselineServiceTestRuns: postGuardVerification
+      ? [
+        ...verification.baselineServiceTestRuns,
+        postGuardVerification.baselineServiceTestRun,
+      ]
+      : verification.baselineServiceTestRuns,
     guardedMigrations: verificationPlan.guardedMigrations,
     capabilityBudgetPersistence: verification.capabilityBudgetPersistence,
     serviceRollbackGuards: verification.serviceRollbackGuards,

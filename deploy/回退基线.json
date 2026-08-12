@@ -3,5 +3,11 @@
   "commit": "07383a216d9b17ac0f9246dc4c8c728ac3012942",
   "expectedMigrations": 14,
   "testFile": "test/postgres-store.integration.test.mjs",
-  "reason": "迁移 015 和 016 引入前的 14 迁移兼容基线；固定时间条件，并补齐只读迁移状态以兼容统一发布门禁"
+  "reason": "迁移 015 和 016 引入前的 14 迁移兼容基线；固定时间条件，并补齐只读迁移状态以兼容统一发布门禁",
+  "postGuardBaseline": {
+    "commit": "37e24463204a73266530f5186277bc5603fa9514",
+    "expectedMigrations": 18,
+    "testFile": "test/postgres-store.integration.test.mjs",
+    "reason": "迁移 019 和 020 引入前、已支持 017/018 状态门禁与持久能力预算的生产服务基线"
+  }
 }
