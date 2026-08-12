@@ -2,7 +2,7 @@
 
 | Item | Decision |
 |---|---|
-| Status | Accepted for the V2.3 workspace candidate; not committed, pushed, or deployed |
+| Status | Accepted and deployed in production commit `34d04326d1d16ba92994107eb2f44bf89d74c759`; business capabilities remain disabled |
 | Date | 2026-08-12 |
 | Scope | Graph Contract v1 append-only projections, four bounded explanations, and the personal project cockpit |
 
@@ -36,7 +36,7 @@ The four explanation queries remain application-level and are limited to one ten
 
 ## Evidence
 
-The 2026-08-12 workspace candidate produced this evidence:
+The 2026-08-12 release produced this evidence:
 
 - `npm run check:full`: 665 tests passed across SQLite and an isolated temporary PostgreSQL instance, with no failures or skips.
 - `npm run graph:benchmark`: 30 plans, 242 nodes, 331 edges, and 100 iterations. On the local SQLite candidate, storage reads plus all four explanations measured 19.015 ms P50, 22.114 ms P95, and 26.918 ms maximum.

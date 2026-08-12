@@ -132,12 +132,12 @@ Do not use the maintenance-forward mode unless you have read and accepted the co
 
 A deployed release may be service-available while business readiness is false. Deployment never turns on real sending or plan execution automatically.
 
-## V2.3 candidate rollout boundary
+## V2.3 deployed-code rollout boundary
 
 The personal cockpit, recipes, proactive worker, meeting loop, GitHub Draft PR
-adapter, migrations 019/020/021, governed graph projection, and community contracts are workspace-candidate
-features until an exact commit is submitted, pushed, passes both cloud gates,
-is deployed, and is read back from the running services. Deployment never
+adapter, migrations 019/020/021, governed graph projection, and community contracts were deployed in
+production commit `34d04326d1d16ba92994107eb2f44bf89d74c759` after both cloud gates and
+running-service read-back passed. Deployment never
 enables `proactive_work`, sending, or work-plan execution. Triggers remain
 disabled unless a separate business rollout explicitly enables them.
 

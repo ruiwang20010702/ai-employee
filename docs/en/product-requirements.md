@@ -34,6 +34,6 @@ flowchart LR
     G --> H["Human-confirmed memory and time return"]
 ```
 
-Implemented capability does not mean deployed or enabled capability. The V2.3
-code remains a workspace candidate until exact-SHA release evidence proves the
-running version; production enablement remains a separate decision.
+Implemented capability does not mean enabled capability. The V2.3 code is
+deployed at exact production SHA `34d04326d1d16ba92994107eb2f44bf89d74c759`;
+project authorization and production enablement remain separate decisions.

@@ -241,12 +241,12 @@ The graph layer must preserve the existing dependency direction:
   existing transactions. A specialized graph database requires benchmarked
   relationship queries and an explicit migration decision.
 
-Stages 1–4 are now implemented as a workspace candidate: Graph Contract v1 and
+Stages 1–4 are deployed in production commit `34d04326d1d16ba92994107eb2f44bf89d74c759`: Graph Contract v1 and
 its public Schema, encrypted append-only SQLite/PostgreSQL projections from
 migration 021, intended/runtime capture, deterministic terminal replay, and
-four bounded cockpit explanations. This is not a production deployment or a
-generic graph API. [ADR 001](adr-001-governed-work-graph-storage.md) records why
-the candidate keeps the transactional stores instead of adding a graph database.
+four bounded cockpit explanations. This is a bounded explanatory projection,
+not a generic graph API or authorization source. [ADR 001](adr-001-governed-work-graph-storage.md) records why
+the deployed implementation keeps the transactional stores instead of adding a graph database.
 
 ### Current-state audit
 
@@ -353,8 +353,8 @@ tenant and project and with explicit depth/result limits:
 
 | Stage | Deliverable | Exit criterion |
 |---|---|---|
-| 0 — design baseline | Audit, vocabulary, edge allowlist, invariants, and public roadmap | Complete: English/Chinese contracts distinguish candidate and production state |
+| 0 — design baseline | Audit, vocabulary, edge allowlist, invariants, and public roadmap | Complete: English/Chinese contracts distinguish technical deployment and business rollout state |
 | 1 — projection contract | Pure validators, JSON Schema, recipe binding, and deterministic fixtures | Complete: identical SQLite/PostgreSQL record shapes from one domain fixture |
-| 2 — intended/runtime capture | Migration 021, encrypted append, pre-effect gate, and deterministic terminal replay | Candidate complete: retry, concurrency, scope, stale authorization, missing evidence, and erasure tests pass |
-| 3 — cockpit explanations | Four bounded queries with evidence links | Candidate complete: tenant/project/depth/result limits apply and answers are non-authoritative |
-| 4 — storage decision | Benchmark and ADR | Candidate complete: local P95 22.114 ms; keep SQLite/PostgreSQL. This is not a production SLO |
+| 2 — intended/runtime capture | Migration 021, encrypted append, pre-effect gate, and deterministic terminal replay | Deployed: retry, concurrency, scope, stale authorization, missing evidence, and erasure tests pass |
+| 3 — cockpit explanations | Four bounded queries with evidence links | Deployed: tenant/project/depth/result limits apply and answers are non-authoritative |
+| 4 — storage decision | Benchmark and ADR | Accepted and deployed: local P95 22.114 ms; keep SQLite/PostgreSQL. This is not a production SLO |

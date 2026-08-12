@@ -69,7 +69,7 @@ flowchart LR
 
 ## Personal work loop
 
-The V2.3 workspace candidate adds a personal project cockpit rather than a
+The V2.3 production implementation adds a personal project cockpit rather than a
 team-control console: ten-minute project onboarding, four versioned recipes,
 evidence-backed time return, disabled-by-default proactive triggers,
 meeting-to-execution, and a GitHub draft-PR loop. The user confirms formal

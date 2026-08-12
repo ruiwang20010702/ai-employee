@@ -109,12 +109,12 @@ control plane that connects three bounded graphs:
 | Knowledge graph | Project ↔ message, document, decision, deliverable, and formal memory | What does this work know, and which source supports it? |
 | Governance graph | Person ↔ project, capability, policy, budget, approval, and audit record | Who authorized this transition, within which scope and version? |
 
-The workspace candidate now implements stable node identities, versioned edge
-contracts, encrypted SQLite/PostgreSQL projections, intended-versus-runtime
-capture, and four bounded explanations in the personal project cockpit. This
-is not a claim that a graph database or the V2.3 production release is already
-shipped. Domain services remain authoritative, and graph reachability never
-grants permission. The [architecture guide](docs/en/architecture.md#governed-work-graph-direction)
+Production release `34d04326d1d16ba92994107eb2f44bf89d74c759` implements stable
+node identities, versioned edge contracts, encrypted SQLite/PostgreSQL
+projections, intended-versus-runtime capture, and four bounded explanations in
+the personal project cockpit. This does not add a graph database or grant
+production authority to projects, recipes, or proactive work. Domain services
+remain authoritative, and graph reachability never grants permission. The [architecture guide](docs/en/architecture.md#governed-work-graph-direction)
 defines the contract and safety boundaries; [ADR 001](docs/en/adr-001-governed-work-graph-storage.md)
 records why PostgreSQL remains the default until production-shaped evidence
 proves that a dedicated graph database is necessary.
@@ -250,7 +250,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [x] Personal project onboarding, recipes, cockpit, and verified time-return ledger
 - [x] Proactive triggers, meeting-to-execution, and GitHub draft-PR delivery loops
 - [x] Versioned workspace/event adapter contracts and community examples
-- [x] Governed Work Graph v1 workspace candidate: typed nodes, allowlisted edges, recipe content binding, public Schema, and deterministic SQLite/PostgreSQL projections
+- [x] Governed Work Graph v1 production implementation: typed nodes, allowlisted edges, recipe content binding, public Schema, and deterministic SQLite/PostgreSQL projections
 - [x] Intended-versus-runtime graph capture with replay-safe drift, approval, source, evidence, memory, and time-return observations
 - [x] Four bounded graph explanations in the project cockpit without weakening tenant, project, authorization, or privacy boundaries
 - [ ] Production Feishu credential wizard and managed long-connection service

@@ -69,7 +69,7 @@ test("技术部署与业务自动化放量的状态口径不互相冒充", async
     projectText("docs/验收报告.md"),
     projectText("docs/统一审查报告.md"),
   ]);
-  assert.match(matrix, /V2\.2 技术版本已部署/u);
+  assert.match(matrix, /V2\.3 技术版本已部署/u);
   assert.match(matrix, /技术发布完成，业务自动化尚未放量/u);
   assert.match(acceptance, /技术发布完成不等于业务自动化放量/u);
   assert.match(review, /技术版本已部署.+业务自动化尚未放量/u);
@@ -91,7 +91,7 @@ test("完成度矩阵明确区分目标能力、当前授权和已部署闭环",
   assert.doesNotMatch(matrix, /第 01[78] 号迁移尚未应用生产/u);
 });
 
-test("权威文档区分当前产品候选与已部署生产版本", async () => {
+test("权威文档区分当前技术部署与业务放量状态", async () => {
   const [readme, requirements, matrix, acceptance, review, technical, overview, operations] =
     await Promise.all([
       projectText("README_ZH.md"),
@@ -108,9 +108,9 @@ test("权威文档区分当前产品候选与已部署生产版本", async () =>
   assert.ok(version);
   assert.ok(productionSha);
   assert.equal(version, "V2.3");
-  assert.match(matrix, /V2\.3 工作区候选已实现，尚未提交、推送或部署/u);
-  assert.match(matrix, /V2\.2 技术版本已部署/u);
-  assert.match(review, /V2\.2 提交/u);
+  assert.match(matrix, /V2\.3 技术版本已部署/u);
+  assert.match(matrix, /业务自动化尚未放量/u);
+  assert.match(review, /V2\.3 提交/u);
   assert.ok(technical.includes(`当前生产提交为 \`${productionSha}\``));
   for (const text of [readme, matrix, acceptance, review, technical, overview, operations]) {
     assert.doesNotMatch(
@@ -119,8 +119,8 @@ test("权威文档区分当前产品候选与已部署生产版本", async () =>
     );
     assert.doesNotMatch(text, /当前主机仍安装[^\n|]*0\.2\.0/u);
   }
-  for (const text of [matrix, technical, overview, operations]) {
-    assert.doesNotMatch(text, /V2\.3 技术版本已部署/u);
+  for (const text of [matrix, acceptance, review, technical, overview, operations]) {
+    assert.doesNotMatch(text, /V2\.3[^\n|]*(?:尚未提交|尚未推送|尚未部署)/u);
   }
 });
 
@@ -153,10 +153,10 @@ test("V2.3 个人工作闭环和社区扩展在中英文文档统一", async () 
   }
   assert.match(architecture, /WorkTrigger/u);
   assert.match(capabilities, /Draft PR/u);
-  assert.match(deployment, /workspace-candidate/u);
+  assert.match(deployment, /deployed-code rollout boundary/u);
 });
 
-test("Graph Engineering 工作区候选把领域权威、图解释和生产状态明确区分", async () => {
+test("Graph Engineering 生产实现把领域权威、图解释和业务权限明确区分", async () => {
   const [readme, chinese, architecture, overview, adr, chineseAdr] = await Promise.all([
     projectText("README.md"),
     projectText("README_ZH.md"),
@@ -173,8 +173,8 @@ test("Graph Engineering 工作区候选把领域权威、图解释和生产状�
     assert.match(chinese, new RegExp(value, "u"));
     assert.match(overview, new RegExp(value, "u"));
   }
-  assert.match(readme, /not a claim that a graph database or the V2\.3 production release is already\s+shipped/u);
-  assert.match(chinese, /不代表图数据库或 V2\.3 已经发布生产/u);
+  assert.match(readme, /does not add a graph database or grant\s+production authority/u);
+  assert.match(chinese, /不代表已经引入图数据库，也不代表项目、配方或主动工作已经获得生产权限/u);
   assert.match(architecture, /intended graph.+runtime graph/su);
   assert.match(overview, /Loop 是执行单元，Graph 是控制平面/u);
   for (const edge of [
@@ -213,12 +213,12 @@ test("Graph Engineering 工作区候选把领域权威、图解释和生产状�
   assert.match(overview, /“图上可达”永远不等于“获得授权”/u);
   assert.match(architecture, /edgeId.+Deterministic hash/u);
   assert.match(overview, /edgeId.+确定性生成/u);
-  assert.match(architecture, /Stages 1–4 are now implemented as a workspace candidate/u);
-  assert.match(overview, /当前工作区已经完成 Stage 1—4 候选/u);
+  assert.match(architecture, /Stages 1–4 are deployed in production commit/u);
+  assert.match(overview, /Stage 1—4 已随生产提交/u);
   assert.match(architecture, /terminal capture failures are replayed by the executor/u);
   assert.match(overview, /终态采集失败由执行器自动补齐/u);
-  assert.match(readme, /\[x\] Governed Work Graph v1 workspace candidate/u);
-  assert.match(chinese, /\[x\] 受治理工作图 V1 工作区候选/u);
+  assert.match(readme, /\[x\] Governed Work Graph v1 production implementation/u);
+  assert.match(chinese, /\[x\] 受治理工作图 V1 生产实现/u);
   assert.match(readme, /Four bounded graph explanations/u);
   assert.match(chinese, /四类项目驾驶舱图解释/u);
   assert.match(adr, /Keep the Governed Work Graph in transactional stores/u);
