@@ -15,6 +15,9 @@ test("activation UI is parseable, responsive, and honest about preview boundarie
   assert.match(activationHtml, /blockedCapabilities/u);
   assert.match(activationHtml, /Download evidence bundle/u);
   assert.match(activationHtml, /Copy privacy-safe pilot proof/u);
+  assert.match(activationHtml, /Copy setup check-in/u);
+  assert.match(activationHtml, /Open setup Issue #50/u);
+  assert.match(activationHtml, /Open pilot Issue #49/u);
   assert.match(activationHtml, /Repository authority/u);
   assert.match(activationHtml, /sourceRepository/u);
   assert.match(activationHtml, /issueRepository/u);
@@ -77,6 +80,10 @@ test("readiness UI is read-only, accessible, and does not expose command errors"
   assert.match(activationHtml, /id="pilot-readiness-status"[^>]*role="status"[^>]*aria-live="polite"/u);
   assert.match(script, /api\('\/api\/readiness',\{\}\)/u);
   assert.match(script, /Ready for fork preparation and governed execution/u);
+  assert.match(script, /copyText\(readiness\.setupCheckin\.markdown\)/u);
+  assert.match(script, /Setup check-in copied\. Choose your platform/u);
+  assert.match(script, /Setup changed after pilot preparation/u);
+  assert.match(script, /esc\(readiness\.setupCheckin\.issueUrl\)/u);
   assert.match(script, /No fork, branch, push, or PR was created/u);
   assert.doesNotMatch(script, /pilot-readiness-status[^;]*error\.(?:message|stack)/u);
 });
@@ -206,6 +213,10 @@ test("readiness endpoint is token protected, read-only, and error bounded", asyn
   const service = await startActivationServer({
     port: 0,
     actionToken,
+    pilotWorkspace: {
+      sourceSha: "e".repeat(40),
+      async prepare() { throw new Error("not called"); },
+    },
     readinessChecker: async () => {
       calls += 1;
       return {
@@ -241,6 +252,10 @@ test("readiness endpoint is token protected, read-only, and error bounded", asyn
     const body = await response.json();
     assert.equal(body.externalSystemsModified, false);
     assert.equal(body.readyForGovernedExecution, true);
+    assert.equal(body.setupCheckin.schema, "foursday-setup-checkin/v1");
+    assert.match(body.setupCheckin.markdown, /immutable candidate: e{40}/u);
+    assert.match(body.setupCheckin.issueUrl, /issues\/50#new_comment_field$/u);
+    assert.doesNotMatch(body.setupCheckin.markdown, /\/Users\/|token|credential/iu);
     assert.equal(calls, 1);
   } finally {
     await service.stop();

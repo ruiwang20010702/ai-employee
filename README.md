@@ -144,7 +144,12 @@ commit; it does not install a production service, read DingTalk, connect to a
 production database, or touch an external system at startup. Preview needs only
 Node.js. Before authorizing any write, select **Check pilot readiness**. This
 read-only check reports only whether GitHub CLI authentication and a supported
-agent runtime are available; it creates no fork, branch, push, or PR. To join
+agent runtime are available; it creates no fork, branch, push, or PR. After it
+finishes, **Copy setup check-in** produces the bounded, editable template for
+[Issue #50](https://github.com/ruiwang20010702/foursday/issues/50); opening the
+Issue is a separate click and Foursday never posts automatically. The copy
+action is disabled once pilot preparation begins because the no-fork setup
+claim is no longer sufficient. To join
 the real public pilot, review the fixed commit and select **Prepare my pilot
 fork**. Only after that separate checkbox confirmation may Foursday create or
 reuse your personal fork, clone the exact commit under `~/FoursdayPilot/`, bind
@@ -198,7 +203,8 @@ template contains only public GitHub target identities, governed hashes,
 runtime, confirmed returned minutes, and explicit feedback placeholders. It is
 an unsigned self-report, so it never replaces maintainer read-back of the Issue
 and Draft PR. Keep the complete JSON bundle local unless a maintainer requests
-it through an agreed private channel.
+it through an agreed private channel. The adjacent **Open pilot Issue #49** link
+only opens the voluntary submission page; it does not publish the clipboard.
 
 ### Join the external pilot
 

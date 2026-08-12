@@ -12,6 +12,11 @@ Foursday v0.5 is not launch-proven because the code passes tests. It becomes lau
 6. Copy the privacy-safe pilot proof, replace `tester-XX`, add timings and feedback, and post it to Issue #49.
 7. Keep the resulting Draft PR unmerged and do not deploy it as part of the pilot.
 
+The Web page places an **Open pilot Issue #49** link beside the copy action.
+Opening the page never posts the clipboard; review and submit the comment
+yourself. The earlier setup check-in in Issue #50 is a separate installation
+signal and does not count as an external closed loop.
+
 See the [sanitized validation evidence example](../examples/validation-evidence.example.json) for the expected bundle structure. Its `github.com/example` URLs are fictional, and the example does not count as pilot evidence.
 
 An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed outcome, or self-written JSON does not count.

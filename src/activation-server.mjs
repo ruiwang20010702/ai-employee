@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { buildActivationPreview } from "./activation.mjs";
 import { activationHtml } from "./activation-ui.mjs";
+import { buildSetupCheckin } from "./setup-checkin.mjs";
 
 const securityHeaders = Object.freeze({
   "cache-control": "no-store",
@@ -90,7 +91,17 @@ export async function startActivationServer({
           throw Object.assign(new Error("content_type_must_be_application_json"), { status: 415 });
         }
         await readJson(request);
-        json(response, 200, await readinessChecker());
+        const readiness = await readinessChecker();
+        json(response, 200, {
+          ...readiness,
+          setupCheckin: pilotWorkspace
+            ? buildSetupCheckin({
+              candidateSha: pilotWorkspace.sourceSha,
+              nodeVersion: process.versions.node,
+              readiness,
+            })
+            : null,
+        });
       } catch (error) {
         json(response, error.status ?? 400, {
           error: error.status ? String(error.message) : "readiness_check_failed",

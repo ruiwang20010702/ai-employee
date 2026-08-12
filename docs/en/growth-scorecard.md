@@ -35,6 +35,11 @@ External users can use the bounded template in Issue #50. A setup report never
 counts as a verified closed-loop user and never grants repository or production
 authority.
 
+The immutable Web flow derives that same bounded template only after the
+read-only readiness check returns `externalSystemsModified: false`. Copying is
+local; opening Issue #50 and posting remain separate voluntary user actions.
+Once fork preparation starts, the no-fork setup copy action is disabled.
+
 The proof must contain no username, email, local path, token, model output, private
 repository identity, or company data. A successful preview does not claim that a
 fork, branch, PR, merge, deployment, message send, or plan execution occurred.
