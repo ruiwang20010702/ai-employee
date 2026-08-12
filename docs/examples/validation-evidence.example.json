@@ -1,0 +1,90 @@
+{
+  "schema": "foursday-validation-evidence/v1",
+  "validationStatus": "verified_closed_loop",
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "project": {
+    "id": "example-project",
+    "repository": "example/foursday",
+    "startingCommit": "1111111111111111111111111111111111111111"
+  },
+  "issue": {
+    "url": "https://github.com/example/foursday/issues/8",
+    "number": 8
+  },
+  "runtime": "codex",
+  "plan": {
+    "planHash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "status": "completed"
+  },
+  "evidence": [
+    {
+      "stepId": "step-1",
+      "capability": "code_patch",
+      "status": "completed",
+      "kind": "verified_code_patch",
+      "verification": "target_read_back",
+      "commit": null,
+      "url": null
+    },
+    {
+      "stepId": "step-2",
+      "capability": "local_branch",
+      "status": "completed",
+      "kind": "verified_local_branch",
+      "verification": "target_read_back",
+      "commit": null,
+      "url": null
+    },
+    {
+      "stepId": "step-3",
+      "capability": "local_test",
+      "status": "completed",
+      "kind": "verified_local_test",
+      "verification": "target_read_back",
+      "commit": null,
+      "url": null
+    },
+    {
+      "stepId": "step-4",
+      "capability": "git_push",
+      "status": "completed",
+      "kind": "verified_git_push",
+      "verification": "target_read_back",
+      "commit": null,
+      "url": null
+    },
+    {
+      "stepId": "step-5",
+      "capability": "github_pr_draft",
+      "status": "completed",
+      "kind": "verified_github_pr_draft",
+      "verification": "target_read_back",
+      "commit": "3333333333333333333333333333333333333333",
+      "url": "https://github.com/example/foursday/pull/8"
+    }
+  ],
+  "outcomes": {
+    "memory": {
+      "id": "memory-example",
+      "status": "confirmed"
+    },
+    "timeReturn": {
+      "id": "time-example",
+      "status": "confirmed",
+      "returnedMinutes": 30
+    }
+  },
+  "safeguards": {
+    "exactPlanApproval": true,
+    "targetReadBack": true,
+    "mergePerformed": false,
+    "deploymentPerformed": false,
+    "productionSendingEnabled": false,
+    "proactiveWorkEnabled": false
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "digest": "c6927854d09ba17b69be8d3799863500d43eb65c1f424a3c980adddb2f7e622a",
+    "signed": false
+  }
+}

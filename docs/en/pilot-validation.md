@@ -11,6 +11,8 @@ Foursday v0.5 is not launch-proven because the code passes tests. It becomes lau
 5. Download the evidence bundle after confirmation. It must report `verified_closed_loop`.
 6. Keep the resulting Draft PR unmerged and do not deploy it as part of the pilot.
 
+See the [sanitized validation evidence example](../examples/validation-evidence.example.json) for the expected bundle structure. Its `github.com/example` URLs are fictional, and the example does not count as pilot evidence.
+
 An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed outcome, or self-written JSON does not count.
 
 ## Cohort manifest

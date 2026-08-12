@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -71,6 +71,24 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
   });
   assert.throws(() => validateValidationEvidence(privateBundle), /forbidden private field/u);
 });
+
+test("committed validation evidence example stays sanitized and valid", async () => {
+  const text = await readFile(
+    new URL("../docs/examples/validation-evidence.example.json", import.meta.url),
+    "utf8",
+  );
+  const example = JSON.parse(text);
+  const summary = validateValidationEvidence(example);
+
+  assert.equal(summary.confirmed, true);
+  assert.equal(summary.repository, "example/foursday");
+  const urls = [...text.matchAll(/https:\/\/[^"\s]+/gu)].map(([url]) => url);
+  assert.deepEqual(urls, [
+    "https://github.com/example/foursday/issues/8",
+    "https://github.com/example/foursday/pull/8",
+  ]);
+});
+
 test("pilot verification requires ten self loops and ten distinct external testers", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "foursday-pilot-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
