@@ -145,7 +145,7 @@ Loop Engineering 继续负责“一个任务如何反复做到有证据地完成
 安装 Node.js 22 或 24 后，可以直接从经过审核的不可变 GitHub 提交启动 v0.5 Web 体验：
 
 ```bash
-npx --yes --package "github:ruiwang20010702/foursday#9bfed287f8d69a949a7cb549adc2ae2e88f8f3a5" foursday start --pilot-sha 9bfed287f8d69a949a7cb549adc2ae2e88f8f3a5
+npx --yes --package "github:ruiwang20010702/foursday#b0b2e6c04ca297d31f056d1152108e4a1b77c519" foursday start --pilot-sha b0b2e6c04ca297d31f056d1152108e4a1b77c519
 ```
 
 打开命令输出的回环地址。启动本身只下载并运行上述精确公开提交，不安装生产服务、不读取钉钉、不连接生产数据库，也不触碰外部系统；只看预览仅需 Node.js。在批准任何写入前，先点击 **Check pilot readiness**：这项只读检查只返回 GitHub CLI 登录和受支持 Agent 运行时是否可用，不会创建 fork、分支、推送或 PR。完成后可以点击 **Copy setup check-in**，复制用于 [Issue #50](https://github.com/ruiwang20010702/foursday/issues/50) 的有界可编辑签到模板；打开 Issue 是独立点击，Foursday 不会自动发布。开始准备 pilot 后，系统会禁用这份“尚未创建 fork”的签到入口。若要加入真实公开体验，再核对页面显示的固定提交，勾选独立确认并点击 **Prepare my pilot fork**。只有这次确认才允许 Foursday 创建或复用你的个人 fork，在 `~/FoursdayPilot/` 私有目录克隆精确提交、绑定无凭据的官方 upstream，并以禁用生命周期脚本的方式安装锁定依赖。它仍不会调用模型、创建交付分支、推送、创建 PR、合并或部署；这些交付副作用还需要选择已获授权的运行时，并再次批准完整计划哈希。
@@ -179,8 +179,8 @@ npm start
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
 git fetch upstream codex/v0.5-candidate
-git merge-base --is-ancestor 9bfed287f8d69a949a7cb549adc2ae2e88f8f3a5 FETCH_HEAD
-git switch --create pilot-v0.5-9bfed28 9bfed287f8d69a949a7cb549adc2ae2e88f8f3a5
+git merge-base --is-ancestor b0b2e6c04ca297d31f056d1152108e4a1b77c519 FETCH_HEAD
+git switch --create pilot-v0.5-b0b2e6c b0b2e6c04ca297d31f056d1152108e4a1b77c519
 npm ci --ignore-scripts
 npm start
 ```
