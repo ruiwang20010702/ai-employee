@@ -369,7 +369,7 @@ test("顶层演练中途失败仍关闭目标连接并删除临时数据库", as
     `CREATE DATABASE "${databaseName}"`,
     "operation",
     "target:end",
-    `DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`,
+    `DROP DATABASE IF EXISTS "${databaseName}"`,
     "admin:end",
   ]);
 });
@@ -427,7 +427,7 @@ test("主流程和清理同时失败时聚合保留全部错误并继续清理",
     `CREATE DATABASE "${databaseName}"`,
     "operation",
     "target:end",
-    `DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`,
+    `DROP DATABASE IF EXISTS "${databaseName}"`,
     "admin:end",
   ]);
 });
@@ -471,7 +471,7 @@ test("主流程成功时清理失败仍让顶层失败并继续删除数据库",
     `CREATE DATABASE "${databaseName}"`,
     "operation",
     "target:end",
-    `DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`,
+    `DROP DATABASE IF EXISTS "${databaseName}"`,
     "admin:end",
   ]);
 });

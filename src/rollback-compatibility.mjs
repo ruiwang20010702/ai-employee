@@ -394,7 +394,7 @@ export async function withTemporaryRollbackDatabase({
   if (databaseCreated) {
     try {
       await adminPool.query(
-        `DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`,
+        `DROP DATABASE IF EXISTS "${databaseName}"`,
       );
     } catch (error) {
       cleanupErrors.push(error);
