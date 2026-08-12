@@ -25,6 +25,7 @@ export async function runProactiveWorker({
     if (!config.capabilities.has("proactive_work") || await store.isPaused()) return false;
     const result = await runDueProactiveTrigger({
       store,
+      tenantId: config.tenantId,
       manifests: await loadProjectManifests(config.projectsDirectory),
       recipes: await loadWorkRecipes(config.recipesDirectory),
       owner,

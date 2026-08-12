@@ -10,9 +10,69 @@ import { executeWorkPlan } from "./work-executor.mjs";
 import { planResultTaskId } from "./plan-result-notification.mjs";
 import { isMainModule } from "./main-module.mjs";
 import { pausedPlanScopes } from "./scoped-pause.mjs";
+import { loadWorkRecipes } from "./recipe-library.mjs";
+import { captureWorkPlanGraph } from "./governed-work-graph-runtime.mjs";
 
 function log(type, fields = {}) {
   console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
+}
+
+function domainObservationTime(record, fallback = new Date()) {
+  const candidate = record?.updated_at ?? record?.updatedAt ?? fallback;
+  const value = candidate instanceof Date ? candidate : new Date(candidate);
+  if (Number.isNaN(value.getTime())) {
+    throw new Error("Graph replay requires a valid domain update timestamp");
+  }
+  return value;
+}
+
+export async function reconcileGovernedWorkGraphs({
+  store,
+  config,
+  limit = 100,
+} = {}) {
+  if (!store?.appendGraphProjection) return { changed: 0, failed: 0 };
+  const projects = await loadProjectManifests(config.projectsDirectory);
+  const recipes = await loadWorkRecipes(config.recipesDirectory);
+  let changed = 0;
+  let failed = 0;
+  for (const status of ["completed", "failed", "cancelled"]) {
+    const plans = await store.listWorkPlans({ status, limit });
+    for (const plan of plans) {
+      const manifest = projects.get(plan.project_id);
+      const recipe = plan.plan?.recipe?.id
+        ? recipes.get(plan.plan.recipe.id) ?? null
+        : null;
+      try {
+        if (!manifest) throw new Error("project_manifest_unavailable");
+        if (plan.plan?.recipe?.id && !recipe) {
+          throw new Error("work_recipe_unavailable");
+        }
+        const result = await captureWorkPlanGraph({
+          store,
+          tenantId: config.tenantId,
+          manifest,
+          workPlan: plan,
+          recipe,
+          observedAt: domainObservationTime(plan),
+        });
+        if ((result.insertedNodes ?? 0) + (result.insertedEdges ?? 0) > 0) {
+          changed += 1;
+        }
+      } catch (error) {
+        failed += 1;
+        await store.setCheckpoint?.(
+          `executor:graph-replay:${plan.id}`,
+          safeErrorCode(error),
+        );
+        log("executor.graph_replay_failed", {
+          planId: plan.id,
+          errorCode: safeErrorCode(error),
+        });
+      }
+    }
+  }
+  return { changed, failed };
 }
 
 export async function processNextWorkPlan({
@@ -52,6 +112,17 @@ export async function processNextWorkPlan({
     });
     return false;
   }
+  const recipe = plan.plan?.recipe?.id
+    ? (await loadWorkRecipes(config.recipesDirectory)).get(plan.plan.recipe.id) ?? null
+    : null;
+  await captureWorkPlanGraph({
+    store,
+    tenantId: config.tenantId,
+    manifest,
+    workPlan: plan,
+    recipe,
+    observedAt: domainObservationTime(plan, now()),
+  });
   const result = await executeWorkPlan({
     store,
     planId: plan.id,
@@ -64,6 +135,23 @@ export async function processNextWorkPlan({
       (await loadProjectManifests(config.projectsDirectory)).get(projectId) ?? null,
     now,
   });
+  const completedPlan = await store.getWorkPlan(plan.id);
+  try {
+    await captureWorkPlanGraph({
+      store,
+      tenantId: config.tenantId,
+      manifest,
+      workPlan: completedPlan,
+      recipe,
+      observedAt: domainObservationTime(completedPlan, now()),
+    });
+  } catch (error) {
+    await store.setCheckpoint?.("executor:last-graph-failure", safeErrorCode(error));
+    log("executor.graph_capture_failed", {
+      planId: plan.id,
+      errorCode: safeErrorCode(error),
+    });
+  }
   const notification = await store.ensureWorkPlanResultDraft?.(plan.id, now());
   await store.setCheckpoint?.("executor:last-success", now().toISOString());
   log("executor.plan_finished", {
@@ -128,7 +216,8 @@ export async function runPlanExecutor({
     if (recovered > 0) {
       log("executor.interrupted_plans_failed", { count: recovered });
     }
-    if (await store.isPaused()) return false;
+    const graphReplay = await reconcileGovernedWorkGraphs({ store, config });
+    if (await store.isPaused()) return graphReplay.changed > 0;
     const notifications = await reconcilePlanResultDrafts({ store });
     const executed = await processNextWorkPlan({
       store,
@@ -136,7 +225,7 @@ export async function runPlanExecutor({
       adapters,
       executionOwner,
     });
-    return notifications > 0 || executed;
+    return graphReplay.changed > 0 || notifications > 0 || executed;
   };
 
   if (once) {

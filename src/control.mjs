@@ -9,6 +9,8 @@ import { validateProjectManifest } from "./capability-policy.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
 import { createControlledWorkAdapters } from "./work-adapters.mjs";
 import { executeWorkPlan } from "./work-executor.mjs";
+import { captureWorkPlanGraph } from "./governed-work-graph-runtime.mjs";
+import { loadWorkRecipes } from "./recipe-library.mjs";
 import {
   createStructuredDecisionReviewNote,
   evaluateDecisionQuality,
@@ -315,14 +317,27 @@ try {
       readFile(resolve(argument), "utf8"),
       readStdin(),
     ]);
+    const manifest = validateProjectManifest(JSON.parse(manifestInput));
     const assessment = assessWorkPlan({
-      manifest: validateProjectManifest(JSON.parse(manifestInput)),
+      manifest,
       plan: JSON.parse(planInput),
     });
     if (!["ALLOW", "REQUIRE_APPROVAL"].includes(assessment.decision)) {
       print({ decision: assessment.decision, reason: assessment.reason });
     } else {
       const plan = await store.registerWorkPlan(assessment);
+      const recipe = assessment.plan.recipe?.id
+        ? (await loadWorkRecipes(config.recipesDirectory)).get(assessment.plan.recipe.id) ?? null
+        : null;
+      await captureWorkPlanGraph({
+        store,
+        tenantId: config.tenantId,
+        manifest,
+        assessment,
+        recipe,
+        workPlan: plan,
+        observedAt: new Date(),
+      });
       print({
         id: plan.id,
         status: plan.status,

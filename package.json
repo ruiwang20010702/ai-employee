@@ -81,6 +81,7 @@
     "quality:report": "node src/control.mjs review-report",
     "messages:reconcile": "node scripts/消息覆盖对账.mjs",
     "memory:sources": "node scripts/校验记忆来源.mjs",
+    "graph:benchmark": "node scripts/基准受治理工作图.mjs",
     "db:backup": "node scripts/备份数据库.mjs",
     "db:restore": "node scripts/恢复数据库.mjs",
     "db:restore:drill": "node scripts/隔离恢复演练.mjs",

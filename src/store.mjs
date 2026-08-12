@@ -39,6 +39,7 @@ import {
 import { validateWorkPlanRevision } from "./work-plan.mjs";
 import { buildTimeReturnProposal } from "./time-return.mjs";
 import { nextScheduledRun, validateWorkTrigger } from "./work-trigger.mjs";
+import { buildGraphProjection } from "./governed-work-graph.mjs";
 import {
   buildPrivacyErasurePreview,
   erasableTaskStatuses,
@@ -124,6 +125,28 @@ function timeReturnFromRow(row, cipher) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function graphPayload(ciphertext, cipher) {
+  return JSON.parse(cipher.decrypt(ciphertext));
+}
+
+function graphNodeRevisionPayload(node) {
+  const { observedAt: _observedAt, ...revision } = node;
+  return revision;
+}
+
+function sameGraphNodeRevision(left, right) {
+  return JSON.stringify(graphNodeRevisionPayload(left)) ===
+    JSON.stringify(graphNodeRevisionPayload(right));
+}
+
+function graphLimit(value) {
+  const limit = Number(value ?? 100);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+    throw new Error("Graph query limit must be between 1 and 500");
+  }
+  return limit;
 }
 
 export class Store {
@@ -399,6 +422,57 @@ export class Store {
         FOREIGN KEY(trigger_id) REFERENCES work_triggers(id) ON DELETE CASCADE,
         FOREIGN KEY(work_plan_id) REFERENCES work_plans(id) ON DELETE SET NULL
       );
+      CREATE TABLE IF NOT EXISTS governed_graph_nodes (
+        tenant_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        node_key TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        graph_version INTEGER NOT NULL CHECK(graph_version = 1),
+        node_type TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        payload_ciphertext TEXT NOT NULL,
+        sensitivity TEXT NOT NULL CHECK(sensitivity IN ('public','internal','confidential')),
+        expires_at TEXT,
+        observed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(tenant_id, node_id),
+        UNIQUE(tenant_id, project_id, node_key, revision)
+      );
+      CREATE INDEX IF NOT EXISTS governed_graph_nodes_project_type
+      ON governed_graph_nodes(tenant_id, project_id, node_type, observed_at DESC);
+      CREATE TABLE IF NOT EXISTS governed_graph_edges (
+        tenant_id TEXT NOT NULL,
+        edge_id TEXT NOT NULL,
+        relation_key TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        graph_version INTEGER NOT NULL CHECK(graph_version = 1),
+        edge_type TEXT NOT NULL,
+        phase TEXT NOT NULL CHECK(phase IN ('intended','runtime')),
+        from_node_id TEXT NOT NULL,
+        to_node_id TEXT NOT NULL,
+        authorization_hash TEXT,
+        payload_ciphertext TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('active','invalidated')),
+        sensitivity TEXT NOT NULL CHECK(sensitivity IN ('public','internal','confidential')),
+        expires_at TEXT,
+        valid_from TEXT NOT NULL,
+        invalidated_at TEXT,
+        observed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(tenant_id, edge_id),
+        FOREIGN KEY(tenant_id, from_node_id)
+          REFERENCES governed_graph_nodes(tenant_id, node_id),
+        FOREIGN KEY(tenant_id, to_node_id)
+          REFERENCES governed_graph_nodes(tenant_id, node_id)
+      );
+      CREATE INDEX IF NOT EXISTS governed_graph_edges_project_type
+      ON governed_graph_edges(tenant_id, project_id, edge_type, phase, observed_at DESC);
+      CREATE INDEX IF NOT EXISTS governed_graph_edges_relation
+      ON governed_graph_edges(tenant_id, project_id, relation_key, observed_at DESC);
+      CREATE INDEX IF NOT EXISTS governed_graph_edges_from
+      ON governed_graph_edges(tenant_id, project_id, from_node_id, observed_at DESC);
+      CREATE INDEX IF NOT EXISTS governed_graph_edges_to
+      ON governed_graph_edges(tenant_id, project_id, to_node_id, observed_at DESC);
     `);
     const workTriggerRunColumns = new Set(
       this.db.prepare("PRAGMA table_info(work_trigger_runs)").all().map((row) => row.name),
@@ -2421,6 +2495,24 @@ export class Store {
     );
   }
 
+  getWorkPlanApproval(id) {
+    const plan = this.db.prepare(
+      "SELECT plan_hash, approval_version FROM work_plans WHERE id = ? AND privacy_erased_at IS NULL",
+    ).get(id);
+    if (!plan) return null;
+    const row = this.db.prepare(
+      `SELECT * FROM work_plan_approvals
+       WHERE work_plan_id = ? AND plan_hash = ? AND approval_version = ?
+         AND decision = 'approved'
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+    ).get(id, plan.plan_hash, plan.approval_version);
+    return row ? {
+      ...row,
+      reason: this.cipher.decrypt(row.reason_ciphertext),
+      reason_ciphertext: undefined,
+    } : null;
+  }
+
   listWorkPlans({ status, limit = 100 } = {}) {
     const rows = status
       ? this.db
@@ -2677,6 +2769,18 @@ export class Store {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  getWorkTriggerRun(triggerId, runKey) {
+    const row = this.db.prepare(
+      `SELECT * FROM work_trigger_runs
+       WHERE trigger_id = ? AND run_key = ?`,
+    ).get(triggerId, runKey);
+    return row ? {
+      ...row,
+      error: row.error_ciphertext ? this.cipher.decrypt(row.error_ciphertext) : null,
+      error_ciphertext: undefined,
+    } : null;
   }
 
   listWorkTriggers({ projectId = null, status = null } = {}) {
@@ -3140,6 +3244,151 @@ export class Store {
       );
       return this.getTask(draft.id);
     });
+  }
+
+  appendGraphProjection(input, now = new Date()) {
+    const projection = buildGraphProjection(input);
+    const createdAt = nowIso(now);
+    return this.transaction(() => {
+      let insertedNodes = 0;
+      let existingNodes = 0;
+      for (const node of projection.nodes) {
+        const existing = this.db.prepare(
+          `SELECT payload_ciphertext FROM governed_graph_nodes
+           WHERE tenant_id = ? AND node_id = ?`,
+        ).get(node.tenantId, node.nodeId);
+        if (existing) {
+          if (!sameGraphNodeRevision(graphPayload(existing.payload_ciphertext, this.cipher), node)) {
+            throw new Error(`Graph node revision conflict: ${node.nodeId}`);
+          }
+          existingNodes += 1;
+          continue;
+        }
+        this.db.prepare(
+          `INSERT INTO governed_graph_nodes(
+             tenant_id, node_id, node_key, project_id, graph_version,
+             node_type, revision, payload_ciphertext, sensitivity,
+             expires_at, observed_at, created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ).run(
+          node.tenantId,
+          node.nodeId,
+          node.nodeKey,
+          node.projectId,
+          node.graphVersion,
+          node.nodeType,
+          node.revision,
+          this.cipher.encrypt(JSON.stringify(node)),
+          node.sensitivity,
+          node.expiresAt,
+          node.observedAt,
+          createdAt,
+        );
+        insertedNodes += 1;
+      }
+      let insertedEdges = 0;
+      let existingEdges = 0;
+      for (const edge of projection.edges) {
+        const existing = this.db.prepare(
+          `SELECT payload_ciphertext FROM governed_graph_edges
+           WHERE tenant_id = ? AND edge_id = ?`,
+        ).get(edge.from.tenantId, edge.edgeId);
+        if (existing) {
+          if (JSON.stringify(graphPayload(existing.payload_ciphertext, this.cipher)) !== JSON.stringify(edge)) {
+            throw new Error(`Graph edge observation conflict: ${edge.edgeId}`);
+          }
+          existingEdges += 1;
+          continue;
+        }
+        this.db.prepare(
+          `INSERT INTO governed_graph_edges(
+             tenant_id, edge_id, relation_key, project_id, graph_version,
+             edge_type, phase, from_node_id, to_node_id, authorization_hash,
+             payload_ciphertext, state, sensitivity, expires_at, valid_from,
+             invalidated_at, observed_at, created_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ).run(
+          edge.from.tenantId,
+          edge.edgeId,
+          edge.relationKey,
+          edge.from.projectId,
+          edge.graphVersion,
+          edge.edgeType,
+          edge.phase,
+          edge.from.nodeId,
+          edge.to.nodeId,
+          edge.authorizationHash,
+          this.cipher.encrypt(JSON.stringify(edge)),
+          edge.state,
+          edge.sensitivity,
+          edge.expiresAt,
+          edge.validFrom,
+          edge.invalidatedAt,
+          edge.observedAt,
+          createdAt,
+        );
+        insertedEdges += 1;
+      }
+      return {
+        graphVersion: projection.graphVersion,
+        insertedNodes,
+        existingNodes,
+        insertedEdges,
+        existingEdges,
+      };
+    });
+  }
+
+  listGraphNodes({ tenantId, projectId, nodeType = null, limit = 100 } = {}) {
+    const tenant = String(tenantId ?? "").trim();
+    const project = String(projectId ?? "").trim();
+    if (!tenant || !project) throw new Error("Graph query requires tenantId and projectId");
+    const bounded = graphLimit(limit);
+    const rows = nodeType
+      ? this.db.prepare(
+          `SELECT payload_ciphertext FROM governed_graph_nodes
+           WHERE tenant_id = ? AND project_id = ? AND node_type = ?
+           ORDER BY observed_at DESC, node_id DESC LIMIT ?`,
+        ).all(tenant, project, String(nodeType), bounded)
+      : this.db.prepare(
+          `SELECT payload_ciphertext FROM governed_graph_nodes
+           WHERE tenant_id = ? AND project_id = ?
+           ORDER BY observed_at DESC, node_id DESC LIMIT ?`,
+        ).all(tenant, project, bounded);
+    return rows.map((row) => graphPayload(row.payload_ciphertext, this.cipher));
+  }
+
+  listGraphEdges({
+    tenantId,
+    projectId,
+    edgeType = null,
+    phase = null,
+    fromNodeId = null,
+    toNodeId = null,
+    limit = 100,
+  } = {}) {
+    const tenant = String(tenantId ?? "").trim();
+    const project = String(projectId ?? "").trim();
+    if (!tenant || !project) throw new Error("Graph query requires tenantId and projectId");
+    const clauses = ["tenant_id = ?", "project_id = ?"];
+    const parameters = [tenant, project];
+    for (const [column, value] of [
+      ["edge_type", edgeType],
+      ["phase", phase],
+      ["from_node_id", fromNodeId],
+      ["to_node_id", toNodeId],
+    ]) {
+      if (value != null) {
+        clauses.push(`${column} = ?`);
+        parameters.push(String(value));
+      }
+    }
+    parameters.push(graphLimit(limit));
+    return this.db.prepare(
+      `SELECT payload_ciphertext FROM governed_graph_edges
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY observed_at DESC, edge_id DESC LIMIT ?`,
+    ).all(...parameters).map((row) => graphPayload(row.payload_ciphertext, this.cipher));
   }
 
   upsertDecisionReview(
@@ -3626,6 +3875,25 @@ export class Store {
         identityReferences.push(`checkpoint.actor:${row.key}`);
       }
     }
+    const graphProjectIds = new Set([
+      ...(selector.type === "project" ? [selector.value] : []),
+      ...planRows.map((row) => row.project_id),
+      ...memoryRows.map((row) => row.project_id),
+    ].filter((value) => value && value !== "deleted"));
+    const graphNodes = [];
+    const graphEdges = [];
+    const selectGraphNodes = this.db.prepare(
+      `SELECT node_id AS id, observed_at AS updated_at
+       FROM governed_graph_nodes WHERE project_id = ?`,
+    );
+    const selectGraphEdges = this.db.prepare(
+      `SELECT edge_id AS id, observed_at AS updated_at
+       FROM governed_graph_edges WHERE project_id = ?`,
+    );
+    for (const projectId of graphProjectIds) {
+      graphNodes.push(...selectGraphNodes.all(projectId));
+      graphEdges.push(...selectGraphEdges.all(projectId));
+    }
     const token = (row) =>
       `${row.id}:${row.status ?? ""}:${row.updated_at ?? row.ingested_at ?? ""}`;
     const eligible = {
@@ -3637,6 +3905,8 @@ export class Store {
         `${row.project_key}:${row.authorization_hash}:${row.capability}:${row.updated_at}`),
       timeReturns: timeReturnRows.map(token),
       workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map(token),
+      graphNodes: graphNodes.map(token),
+      graphEdges: graphEdges.map(token),
       identityReferences: [...new Set(identityReferences)],
     };
     const blocked = {
@@ -3666,6 +3936,7 @@ export class Store {
         })),
         timeReturns: timeReturnRows.map((row) => row.id),
         workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map((row) => row.id),
+        graphProjects: [...graphProjectIds].sort(),
         checkpointRewrites,
       },
     };
@@ -3789,6 +4060,16 @@ export class Store {
       for (const checkpoint of candidates.ids.checkpointRewrites) {
         this.db.prepare("UPDATE checkpoints SET value = ?, updated_at = ? WHERE key = ?")
           .run(this.cipher.encrypt(JSON.stringify(checkpoint.value)), timestamp, checkpoint.key);
+      }
+      const deleteGraphEdges = this.db.prepare(
+        "DELETE FROM governed_graph_edges WHERE project_id = ?",
+      );
+      const deleteGraphNodes = this.db.prepare(
+        "DELETE FROM governed_graph_nodes WHERE project_id = ?",
+      );
+      for (const projectId of candidates.ids.graphProjects) {
+        deleteGraphEdges.run(projectId);
+        deleteGraphNodes.run(projectId);
       }
       if (candidates.selector.type === "person") {
         const value = candidates.selector.value;

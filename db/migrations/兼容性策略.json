@@ -33,6 +33,11 @@
       "backwardCompatible": true,
       "rollback": "service_only",
       "evidence": "只增加独立触发器与运行幂等账本；旧服务不会创建主动任务，已有消息、计划、记忆和预算语义不变"
+    },
+    "021_受治理工作图.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only",
+      "evidence": "只增加独立且加密的图节点、关系投影表与索引；图层不授予能力，旧服务不读写这些表，既有领域状态、审批、预算、记忆和隐私语义不变"
     }
   }
 }

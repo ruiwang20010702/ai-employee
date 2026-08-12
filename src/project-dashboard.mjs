@@ -1,4 +1,5 @@
 import { summarizeTimeReturns } from "./time-return.mjs";
+import { buildGovernedGraphExplanations } from "./governed-work-graph-query.mjs";
 
 const activePlanStatuses = new Set([
   "ready", "awaiting_approval", "approved", "executing", "verifying",
@@ -11,6 +12,7 @@ export function buildProjectDashboard({
   timeReturns = [],
   recipes = [],
   planSteps = new Map(),
+  graph = null,
 }) {
   if (!manifest?.projectId || !manifest?.name) {
     throw new Error("Project dashboard requires a project manifest");
@@ -59,6 +61,29 @@ export function buildProjectDashboard({
           step.evidence.taskId ?? step.evidence.eventId ?? step.evidence.sha256 ?? null,
       })),
   ).slice(0, 50);
+  const graphExplanations = graph
+    ? buildGovernedGraphExplanations({
+        tenantId: graph.tenantId,
+        projectId: manifest.projectId,
+        nodes: graph.nodes ?? [],
+        edges: graph.edges ?? [],
+        plans: projectPlans,
+        now: graph.now,
+        limits: { maxDepth: 4, maxResults: 500 },
+      })
+    : [];
+  const graphByPlan = new Map(graphExplanations.map((item) => [item.planId, item]));
+  for (const item of workItems) {
+    const explanation = graphByPlan.get(item.id);
+    item.graph = explanation
+      ? {
+          driftStatus: explanation.drift.status,
+          driftReason: explanation.drift.reason,
+          changeStatus: explanation.changes.status,
+          changeReason: explanation.changes.reason,
+        }
+      : null;
+  }
   return {
     projectId: manifest.projectId,
     name: manifest.name,
@@ -86,6 +111,18 @@ export function buildProjectDashboard({
       })),
     },
     deliverables,
+    governedGraph: {
+      available: Boolean(graph),
+      contractVersion: graph?.nodes?.[0]?.graphVersion ?? graph?.edges?.[0]?.graphVersion ?? null,
+      nodeCount: graph?.nodes?.length ?? 0,
+      edgeCount: graph?.edges?.length ?? 0,
+      alignedPlans: graphExplanations.filter((item) => item.drift.status === "aligned").length,
+      driftedPlans: graphExplanations.filter((item) => item.drift.status === "drift_detected").length,
+      incompletePlans: graphExplanations.filter((item) =>
+        ["incomplete", "denied"].includes(item.drift.status)
+      ).length,
+      explanations: graphExplanations,
+    },
     recipes: recipes.filter((recipe) =>
       (manifest.profile?.selectedRecipeIds ?? []).includes(recipe.id)
     ),

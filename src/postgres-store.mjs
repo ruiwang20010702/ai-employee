@@ -35,6 +35,7 @@ import {
 import { validateWorkPlanRevision } from "./work-plan.mjs";
 import { buildTimeReturnProposal } from "./time-return.mjs";
 import { nextScheduledRun, validateWorkTrigger } from "./work-trigger.mjs";
+import { buildGraphProjection } from "./governed-work-graph.mjs";
 import {
   assertMigrationStatus,
   inspectMigrationStatus,
@@ -136,6 +137,28 @@ function timeReturnFromRow(row, cipher) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function graphPayload(ciphertext, cipher) {
+  return JSON.parse(cipher.decrypt(ciphertext));
+}
+
+function graphNodeRevisionPayload(node) {
+  const { observedAt: _observedAt, ...revision } = node;
+  return revision;
+}
+
+function sameGraphNodeRevision(left, right) {
+  return JSON.stringify(graphNodeRevisionPayload(left)) ===
+    JSON.stringify(graphNodeRevisionPayload(right));
+}
+
+function graphLimit(value) {
+  const limit = Number(value ?? 100);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+    throw new Error("Graph query limit must be between 1 and 500");
+  }
+  return limit;
 }
 
 export class PostgresStore {
@@ -2452,6 +2475,26 @@ export class PostgresStore {
     return result.rows.map((row) => workPlanFromRow(row, this.cipher));
   }
 
+  async getWorkPlanApproval(id) {
+    const result = await this.pool.query(
+      `SELECT a.* FROM work_plan_approvals a
+       JOIN work_plans p ON p.tenant_id = a.tenant_id AND p.id = a.work_plan_id
+       WHERE a.tenant_id = $1 AND a.work_plan_id = $2
+         AND p.privacy_erased_at IS NULL
+         AND a.plan_hash = p.plan_hash
+         AND a.approval_version = p.approval_version
+         AND a.decision = 'approved'
+       ORDER BY a.created_at DESC, a.id DESC LIMIT 1`,
+      [this.tenantId, id],
+    );
+    const row = result.rows[0];
+    return row ? {
+      ...row,
+      reason: this.cipher.decrypt(row.reason_ciphertext),
+      reason_ciphertext: undefined,
+    } : null;
+  }
+
   async decideWorkPlan(
     id,
     { decision, actor, reason = "", expiresAt, maxConsumptions = 1 },
@@ -2768,6 +2811,20 @@ export class PostgresStore {
       [this.tenantId, id],
     );
     return this._workTriggerFromRow(result.rows[0]);
+  }
+
+  async getWorkTriggerRun(triggerId, runKey) {
+    const result = await this.pool.query(
+      `SELECT * FROM work_trigger_runs
+       WHERE tenant_id = $1 AND trigger_id = $2 AND run_key = $3`,
+      [this.tenantId, triggerId, runKey],
+    );
+    const row = result.rows[0];
+    return row ? {
+      ...row,
+      error: row.error_ciphertext ? this.cipher.decrypt(row.error_ciphertext) : null,
+      error_ciphertext: undefined,
+    } : null;
   }
 
   async listWorkTriggers({ projectId = null, status = null } = {}) {
@@ -3252,6 +3309,182 @@ export class PostgresStore {
       evidence_ciphertext: undefined,
       error_ciphertext: undefined,
     }));
+  }
+
+  async appendGraphProjection(input, now = new Date()) {
+    const projection = buildGraphProjection(input);
+    return this.transaction(async (client) => {
+      let insertedNodes = 0;
+      let existingNodes = 0;
+      for (const node of projection.nodes) {
+        if (node.tenantId !== this.tenantId) {
+          throw new Error("Graph projection tenant does not match the store tenant");
+        }
+        const inserted = await client.query(
+          `INSERT INTO governed_graph_nodes(
+             tenant_id, node_id, node_key, project_id, graph_version,
+             node_type, revision, payload_ciphertext, sensitivity,
+             expires_at, observed_at, created_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           ON CONFLICT (tenant_id, node_id) DO NOTHING
+           RETURNING node_id`,
+          [
+            node.tenantId,
+            node.nodeId,
+            node.nodeKey,
+            node.projectId,
+            node.graphVersion,
+            node.nodeType,
+            node.revision,
+            this.cipher.encrypt(JSON.stringify(node)),
+            node.sensitivity,
+            node.expiresAt,
+            node.observedAt,
+            now,
+          ],
+        );
+        if (inserted.rowCount === 1) {
+          insertedNodes += 1;
+          continue;
+        }
+        const existing = await client.query(
+          `SELECT payload_ciphertext FROM governed_graph_nodes
+           WHERE tenant_id = $1 AND node_id = $2 FOR SHARE`,
+          [node.tenantId, node.nodeId],
+        );
+        if (
+          existing.rowCount !== 1 ||
+          !sameGraphNodeRevision(graphPayload(existing.rows[0].payload_ciphertext, this.cipher), node)
+        ) {
+          throw new Error(`Graph node revision conflict: ${node.nodeId}`);
+        }
+        existingNodes += 1;
+      }
+      let insertedEdges = 0;
+      let existingEdges = 0;
+      for (const edge of projection.edges) {
+        if (edge.from.tenantId !== this.tenantId) {
+          throw new Error("Graph projection tenant does not match the store tenant");
+        }
+        const inserted = await client.query(
+          `INSERT INTO governed_graph_edges(
+             tenant_id, edge_id, relation_key, project_id, graph_version,
+             edge_type, phase, from_node_id, to_node_id, authorization_hash,
+             payload_ciphertext, state, sensitivity, expires_at, valid_from,
+             invalidated_at, observed_at, created_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+           ON CONFLICT (tenant_id, edge_id) DO NOTHING
+           RETURNING edge_id`,
+          [
+            edge.from.tenantId,
+            edge.edgeId,
+            edge.relationKey,
+            edge.from.projectId,
+            edge.graphVersion,
+            edge.edgeType,
+            edge.phase,
+            edge.from.nodeId,
+            edge.to.nodeId,
+            edge.authorizationHash,
+            this.cipher.encrypt(JSON.stringify(edge)),
+            edge.state,
+            edge.sensitivity,
+            edge.expiresAt,
+            edge.validFrom,
+            edge.invalidatedAt,
+            edge.observedAt,
+            now,
+          ],
+        );
+        if (inserted.rowCount === 1) {
+          insertedEdges += 1;
+          continue;
+        }
+        const existing = await client.query(
+          `SELECT payload_ciphertext FROM governed_graph_edges
+           WHERE tenant_id = $1 AND edge_id = $2 FOR SHARE`,
+          [edge.from.tenantId, edge.edgeId],
+        );
+        if (
+          existing.rowCount !== 1 ||
+          JSON.stringify(graphPayload(existing.rows[0].payload_ciphertext, this.cipher)) !== JSON.stringify(edge)
+        ) {
+          throw new Error(`Graph edge observation conflict: ${edge.edgeId}`);
+        }
+        existingEdges += 1;
+      }
+      await this.audit(client, {
+        eventType: "governed_graph.projection_appended",
+        actor: "system:governed-graph",
+        details: {
+          graphVersion: projection.graphVersion,
+          insertedNodes,
+          existingNodes,
+          insertedEdges,
+          existingEdges,
+        },
+      });
+      return {
+        graphVersion: projection.graphVersion,
+        insertedNodes,
+        existingNodes,
+        insertedEdges,
+        existingEdges,
+      };
+    });
+  }
+
+  async listGraphNodes({ projectId, nodeType = null, limit = 100 } = {}) {
+    const project = String(projectId ?? "").trim();
+    if (!project) throw new Error("Graph query requires projectId");
+    const bounded = graphLimit(limit);
+    const parameters = [this.tenantId, project];
+    let predicate = "";
+    if (nodeType != null) {
+      parameters.push(String(nodeType));
+      predicate = ` AND node_type = $${parameters.length}`;
+    }
+    parameters.push(bounded);
+    const result = await this.pool.query(
+      `SELECT payload_ciphertext FROM governed_graph_nodes
+       WHERE tenant_id = $1 AND project_id = $2${predicate}
+       ORDER BY observed_at DESC, node_id DESC LIMIT $${parameters.length}`,
+      parameters,
+    );
+    return result.rows.map((row) => graphPayload(row.payload_ciphertext, this.cipher));
+  }
+
+  async listGraphEdges({
+    projectId,
+    edgeType = null,
+    phase = null,
+    fromNodeId = null,
+    toNodeId = null,
+    limit = 100,
+  } = {}) {
+    const project = String(projectId ?? "").trim();
+    if (!project) throw new Error("Graph query requires projectId");
+    const parameters = [this.tenantId, project];
+    const clauses = ["tenant_id = $1", "project_id = $2"];
+    for (const [column, value] of [
+      ["edge_type", edgeType],
+      ["phase", phase],
+      ["from_node_id", fromNodeId],
+      ["to_node_id", toNodeId],
+    ]) {
+      if (value != null) {
+        parameters.push(String(value));
+        clauses.push(`${column} = $${parameters.length}`);
+      }
+    }
+    parameters.push(graphLimit(limit));
+    const result = await this.pool.query(
+      `SELECT payload_ciphertext FROM governed_graph_edges
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY observed_at DESC, edge_id DESC LIMIT $${parameters.length}`,
+      parameters,
+    );
+    return result.rows.map((row) => graphPayload(row.payload_ciphertext, this.cipher));
   }
 
   async updateWorkPlanStep(
@@ -3998,6 +4231,27 @@ export class PostgresStore {
           return false;
         }
       });
+    const graphProjectIds = new Set([
+      ...(selector.type === "project" ? [selector.value] : []),
+      ...planRows.map((row) => row.project_id),
+      ...memoryRows.map((row) => row.project_id),
+    ].filter((value) => value && value !== "deleted"));
+    const graphNodeResult = graphProjectIds.size === 0
+      ? { rows: [] }
+      : await client.query(
+          `SELECT node_id AS id, observed_at AS updated_at
+           FROM governed_graph_nodes
+           WHERE tenant_id = $1 AND project_id = ANY($2::text[])${suffix}`,
+          [this.tenantId, [...graphProjectIds]],
+        );
+    const graphEdgeResult = graphProjectIds.size === 0
+      ? { rows: [] }
+      : await client.query(
+          `SELECT edge_id AS id, observed_at AS updated_at
+           FROM governed_graph_edges
+           WHERE tenant_id = $1 AND project_id = ANY($2::text[])${suffix}`,
+          [this.tenantId, [...graphProjectIds]],
+        );
     const token = (row, id = row.id) =>
       `${id}:${row.status ?? row.event_type ?? ""}:${
         row.updated_at?.toISOString?.() ?? row.ingested_at?.toISOString?.() ??
@@ -4015,6 +4269,8 @@ export class PostgresStore {
       timeReturns: timeReturnRows.map(token),
       workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map(token),
       auditEvents: auditRows.map(token),
+      graphNodes: graphNodeResult.rows.map(token),
+      graphEdges: graphEdgeResult.rows.map(token),
       identityReferences: [...new Set(identityReferences)],
     };
     const blocked = {
@@ -4045,6 +4301,7 @@ export class PostgresStore {
         timeReturns: timeReturnRows.map((row) => row.id),
         workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map((row) => row.id),
         auditEvents: auditRows.map((row) => row.id),
+        graphProjects: [...graphProjectIds].sort(),
         checkpointRewrites,
       },
     };
@@ -4063,7 +4320,8 @@ export class PostgresStore {
            decision_review_events, work_plans, work_plan_approvals,
            work_plan_steps, capability_budget_usage, time_return_entries,
            work_trigger_runs, work_triggers,
-           memory_items, checkpoints, audit_events
+           memory_items, checkpoints, audit_events,
+           governed_graph_edges, governed_graph_nodes
          IN SHARE ROW EXCLUSIVE MODE`,
       );
       const candidates = await this._privacyErasureCandidates(selector, now, client, { lock: true });
@@ -4238,6 +4496,18 @@ export class PostgresStore {
             candidates.ids.auditEvents,
             this.cipher.encrypt(JSON.stringify({ erased: true })),
           ],
+        );
+      }
+      if (candidates.ids.graphProjects.length > 0) {
+        await client.query(
+          `DELETE FROM governed_graph_edges
+           WHERE tenant_id = $1 AND project_id = ANY($2::text[])`,
+          [this.tenantId, candidates.ids.graphProjects],
+        );
+        await client.query(
+          `DELETE FROM governed_graph_nodes
+           WHERE tenant_id = $1 AND project_id = ANY($2::text[])`,
+          [this.tenantId, candidates.ids.graphProjects],
         );
       }
       if (candidates.selector.type === "person") {

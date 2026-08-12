@@ -55,6 +55,12 @@ function recipeBinding(value) {
     throw new Error("recipe.id is invalid");
   }
   const version = Number(value.version);
+  const contentHash = value.contentHash == null
+    ? null
+    : required(value.contentHash, "recipe.contentHash", 64);
+  if (contentHash != null && !/^[a-f0-9]{64}$/u.test(contentHash)) {
+    throw new Error("recipe.contentHash must be a lowercase SHA-256 digest");
+  }
   const baselineMinutes = Number(value.baselineMinutes);
   if (version !== 1) throw new Error("recipe.version must be 1");
   if (
@@ -82,6 +88,7 @@ function recipeBinding(value) {
   return {
     id,
     version,
+    ...(contentHash == null ? {} : { contentHash }),
     baselineMinutes,
     baselineMethod: value.baselineMethod,
     triggerId,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildProjectDashboard } from "../src/project-dashboard.mjs";
+import { graphFixture } from "./support/governed-work-graph-fixture.mjs";
 
 test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", () => {
   const dashboard = buildProjectDashboard({
@@ -40,4 +41,36 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
   assert.equal(dashboard.plans.items[0].id, "plan-2");
   assert.equal(dashboard.deliverables[0].reference, "a".repeat(64));
   assert.equal(dashboard.memory.items[0].statement, "负责人已确认");
+  assert.equal(dashboard.governedGraph.available, false);
+});
+
+test("项目驾驶舱只读呈现受治理工作图的对齐和变化解释", () => {
+  const fixture = graphFixture();
+  const dashboard = buildProjectDashboard({
+    manifest: {
+      projectId: fixture.scope.projectId,
+      name: "图查询项目",
+      profile: { objective: "完成可解释交付" },
+    },
+    plans: [{
+      id: fixture.planId,
+      objective: "完成交付",
+      project_id: fixture.scope.projectId,
+      status: "completed",
+      updated_at: fixture.observedAt,
+      plan: {},
+    }],
+    graph: {
+      tenantId: fixture.scope.tenantId,
+      nodes: fixture.graph.nodes,
+      edges: fixture.graph.edges,
+      now: fixture.observedAt,
+    },
+  });
+  assert.equal(dashboard.governedGraph.available, true);
+  assert.equal(dashboard.governedGraph.contractVersion, 1);
+  assert.equal(dashboard.governedGraph.alignedPlans, 1);
+  assert.equal(dashboard.governedGraph.driftedPlans, 0);
+  assert.equal(dashboard.plans.items[0].graph.driftStatus, "aligned");
+  assert.equal(dashboard.plans.items[0].graph.changeStatus, "evidence_complete");
 });

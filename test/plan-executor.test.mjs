@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   processNextWorkPlan,
+  reconcileGovernedWorkGraphs,
   runPlanExecutor,
 } from "../src/plan-executor.mjs";
 import { Store } from "../src/store.mjs";
@@ -153,4 +154,68 @@ test("常驻执行器停止时立即唤醒并安全关闭存储", async () => {
   await executor.stop();
   assert.ok(Date.now() - startedAt < 1_000);
   assert.equal(closed, true);
+});
+
+test("终态图投影失败后可由领域事实确定性补齐且重放不重复", async (t) => {
+  const { directory, projectsDirectory, store } = await fixture(t);
+  const manifest = project(directory);
+  await writeFile(join(projectsDirectory, "project.json"), JSON.stringify(manifest));
+  const registered = store.registerWorkPlan(plan(manifest));
+  const originalAppend = store.appendGraphProjection.bind(store);
+  let appendCalls = 0;
+  store.appendGraphProjection = (projection, observedAt) => {
+    appendCalls += 1;
+    if (appendCalls === 2) throw new Error("simulated_terminal_graph_failure");
+    return originalAppend(projection, observedAt);
+  };
+  const config = {
+    tenantId: "local",
+    capabilities: new Set(["work_plan_execution"]),
+    projectsDirectory,
+    recipesDirectory: join(directory, "recipes"),
+    planExecutionLeaseMs: 1_000,
+    planExecutionLeaseRenewMs: 100,
+  };
+  await mkdir(config.recipesDirectory);
+  const adapters = {
+    research: {
+      async execute() {
+        return { verified: true, evidence: { kind: "research" } };
+      },
+    },
+  };
+
+  assert.equal(await processNextWorkPlan({
+    store,
+    config,
+    adapters,
+    executionOwner: "executor_1",
+  }), true);
+  assert.equal(store.getWorkPlan(registered.id).status, "completed");
+  assert.equal(
+    store.listGraphEdges({
+      tenantId: "local",
+      projectId: manifest.projectId,
+      edgeType: "plan.produces_outcome",
+    }).length,
+    0,
+  );
+
+  store.appendGraphProjection = originalAppend;
+  assert.deepEqual(
+    await reconcileGovernedWorkGraphs({ store, config }),
+    { changed: 1, failed: 0 },
+  );
+  assert.equal(
+    store.listGraphEdges({
+      tenantId: "local",
+      projectId: manifest.projectId,
+      edgeType: "plan.produces_outcome",
+    }).length,
+    1,
+  );
+  assert.deepEqual(
+    await reconcileGovernedWorkGraphs({ store, config }),
+    { changed: 0, failed: 0 },
+  );
 });

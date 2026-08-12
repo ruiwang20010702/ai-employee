@@ -1,6 +1,8 @@
 import { runCodexArtifact } from "./codex-artifact-runner.mjs";
 import { loadProjectManifests } from "./project-manifests.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
+import { memoryIsUsable } from "./memory-policy.mjs";
+import { captureWorkPlanGraph } from "./governed-work-graph-runtime.mjs";
 
 function stripFence(value) {
   const trimmed = value.trim();
@@ -95,6 +97,13 @@ export async function proposeWorkPlanForTask({
     };
   }
   const objective = draft.workRequest.objective.trim();
+  const projectMemories = store.listMemories
+    ? (await store.listMemories({
+        projectId: project.projectId,
+        status: "confirmed",
+        limit: 20,
+      })).filter((memory) => memoryIsUsable(memory, new Date()))
+    : [];
   const result = await runCodexArtifact({
     codexPath: config.codexPath,
     workingDirectory: project.rootDirectory,
@@ -115,6 +124,15 @@ export async function proposeWorkPlanForTask({
       "<untrusted_objective>",
       objective,
       "</untrusted_objective>",
+      "<confirmed_project_memory>",
+      JSON.stringify(projectMemories.map((memory) => ({
+        id: memory.id,
+        factKey: memory.scope?.factKey ?? null,
+        statement: memory.statement,
+        sourceVersion: memory.source_version,
+        expiresAt: memory.expires_at,
+      })), null, 2),
+      "</confirmed_project_memory>",
     ].join("\n\n"),
   });
   let parsed;
@@ -149,6 +167,16 @@ export async function proposeWorkPlanForTask({
     };
   }
   const plan = await store.registerWorkPlan(assessment);
+  await captureWorkPlanGraph({
+    store,
+    tenantId: config.tenantId,
+    manifest: project,
+    assessment,
+    workPlan: plan,
+    sourceTask: task,
+    memoriesUsed: projectMemories,
+    observedAt: new Date(),
+  });
   return {
     created: true,
     planId: plan.id,

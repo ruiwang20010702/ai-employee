@@ -156,6 +156,80 @@ test("V2.3 个人工作闭环和社区扩展在中英文文档统一", async () 
   assert.match(deployment, /workspace-candidate/u);
 });
 
+test("Graph Engineering 工作区候选把领域权威、图解释和生产状态明确区分", async () => {
+  const [readme, chinese, architecture, overview, adr, chineseAdr] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/architecture.md"),
+    projectText("docs/设计总览.md"),
+    projectText("docs/en/adr-001-governed-work-graph-storage.md"),
+    projectText("docs/架构决策受治理工作图存储.md"),
+  ]);
+  for (const value of ["Governed Work Graph", "Work graph", "Knowledge graph", "Governance graph"]) {
+    assert.match(readme, new RegExp(value, "u"));
+    assert.match(architecture, new RegExp(value, "u"));
+  }
+  for (const value of ["受治理工作图", "工作图", "知识图", "治理图"]) {
+    assert.match(chinese, new RegExp(value, "u"));
+    assert.match(overview, new RegExp(value, "u"));
+  }
+  assert.match(readme, /not a claim that a graph database or the V2\.3 production release is already\s+shipped/u);
+  assert.match(chinese, /不代表图数据库或 V2\.3 已经发布生产/u);
+  assert.match(architecture, /intended graph.+runtime graph/su);
+  assert.match(overview, /Loop 是执行单元，Graph 是控制平面/u);
+  for (const edge of [
+    "project.has_authorization",
+    "project.selects_recipe",
+    "recipe.instantiates_plan",
+    "authorization.grants_capability",
+    "approval.authorizes_plan",
+    "step.produces_evidence",
+    "source.supports_memory",
+    "memory.informs_plan",
+    "plan.proposes_memory",
+  ]) {
+    assert.match(architecture, new RegExp(edge.replace(".", "\\."), "u"));
+    assert.match(overview, new RegExp(edge.replace(".", "\\."), "u"));
+  }
+  for (const phrase of [
+    "Current-state audit",
+    "Graph Contract v1",
+    "Invariants and forbidden shortcuts",
+    "Required bounded queries",
+    "Delivery stages and exit criteria",
+  ]) {
+    assert.match(architecture, new RegExp(phrase, "u"));
+  }
+  for (const phrase of [
+    "现状审计",
+    "Graph Contract v1",
+    "不可突破的图约束",
+    "第一批有界查询",
+    "阶段和退出条件",
+  ]) {
+    assert.match(overview, new RegExp(phrase, "u"));
+  }
+  assert.match(architecture, /Graph\s+reachability is never authorization/u);
+  assert.match(overview, /“图上可达”永远不等于“获得授权”/u);
+  assert.match(architecture, /edgeId.+Deterministic hash/u);
+  assert.match(overview, /edgeId.+确定性生成/u);
+  assert.match(architecture, /Stages 1–4 are now implemented as a workspace candidate/u);
+  assert.match(overview, /当前工作区已经完成 Stage 1—4 候选/u);
+  assert.match(architecture, /terminal capture failures are replayed by the executor/u);
+  assert.match(overview, /终态采集失败由执行器自动补齐/u);
+  assert.match(readme, /\[x\] Governed Work Graph v1 workspace candidate/u);
+  assert.match(chinese, /\[x\] 受治理工作图 V1 工作区候选/u);
+  assert.match(readme, /Four bounded graph explanations/u);
+  assert.match(chinese, /四类项目驾驶舱图解释/u);
+  assert.match(adr, /Keep the Governed Work Graph in transactional stores/u);
+  assert.match(adr, /22\.114 ms P95, and 26\.918 ms maximum/u);
+  assert.match(chineseAdr, /受治理工作图继续使用事务数据库/u);
+  assert.match(chineseAdr, /P95 为 22\.114 ms/u);
+  for (const text of [readme, chinese, architecture, overview]) {
+    assert.doesNotMatch(text, /(?:图数据库|graph database).{0,30}(?:已实现|已交付|implemented|shipped capability)/iu);
+  }
+});
+
 test("新环境文档禁止把生成的生产密钥写入配置", async () => {
   const [readme, operations, requirements] = await Promise.all([
     projectText("README_ZH.md"),

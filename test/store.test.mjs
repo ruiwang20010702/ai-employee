@@ -7,6 +7,7 @@ import test from "node:test";
 import { memoryDeletionConfirmation } from "../src/memory-portability.mjs";
 import { Store } from "../src/store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
+import { buildGraphProjection, createGraphEdge, createGraphNode } from "../src/governed-work-graph.mjs";
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "ai-employee-test-"));
@@ -37,6 +38,26 @@ function messages() {
       content: "就是昨天的方案",
     },
   ];
+}
+
+function graphFixture(tenantId = "tenant-sqlite", projectId = "graph_project") {
+  const observedAt = "2026-08-12T08:00:00.000Z";
+  const node = (nodeType, domainId, revision, sensitivity = "internal") => createGraphNode({
+    tenantId, projectId, nodeType, domainId, revision, sensitivity, observedAt,
+    provenance: { recordType: nodeType, recordId: domainId, recordVersion: revision },
+  });
+  const authorization = node("authorization", "auth-1", "a".repeat(64), "confidential");
+  const step = node("step", "plan-1:step-1", "step-v1");
+  const edge = createGraphEdge({
+    edgeType: "authorization.permits_step",
+    from: authorization,
+    to: step,
+    phase: "intended",
+    authorizationHash: "a".repeat(64),
+    observedAt,
+    provenance: { recordType: "capability_policy", recordId: "research", recordVersion: "v1" },
+  });
+  return buildGraphProjection({ nodes: [authorization, step], edges: [edge] });
 }
 
 test("消息幂等入库并在安静窗口后合并为一个任务", async (t) => {
@@ -1175,6 +1196,10 @@ test("按项目擦除覆盖计划、来源任务和项目记忆但不接受活�
   }), new Date(base.getTime() + 30));
   assert.equal(store.previewPrivacyErasure({ projectId: "privacy_project" }).blocked.workPlans, 1);
   store.requestWorkPlanCancellation(plan.id, "operator", new Date(base.getTime() + 40));
+  store.appendGraphProjection(
+    graphFixture("tenant-sqlite", "privacy_project"),
+    new Date(base.getTime() + 40),
+  );
   const memoryId = store.proposeMemory({
     type: "project",
     subject: "项目口径",
@@ -1204,6 +1229,8 @@ test("按项目擦除覆盖计划、来源任务和项目记忆但不接受活�
   assert.equal(preview.counts.workPlans, 1);
   assert.equal(preview.counts.memories, 1);
   assert.equal(preview.counts.capabilityBudgets, 1);
+  assert.equal(preview.counts.graphNodes, 2);
+  assert.equal(preview.counts.graphEdges, 1);
   store.erasePrivacyData(
     { projectId: "privacy_project" }, preview.confirmation, "operator", new Date(base.getTime() + 50),
   );
@@ -1218,6 +1245,12 @@ test("按项目擦除覆盖计划、来源任务和项目记忆但不接受活�
   ).get();
   assert.equal(store.cipher.decrypt(retainedBudget.project_id_ciphertext), "");
   assert.equal(retainedBudget.used_count, 1);
+  assert.equal(store.listGraphNodes({
+    tenantId: "tenant-sqlite", projectId: "privacy_project",
+  }).length, 0);
+  assert.equal(store.listGraphEdges({
+    tenantId: "tenant-sqlite", projectId: "privacy_project",
+  }).length, 0);
   assert.throws(
     () => store.registerWorkPlan(assessWorkPlan({
       manifest,
@@ -1987,4 +2020,38 @@ test("项目记忆候选绑定计划哈希、保持幂等且必须人工确认",
     () => store.proposeWorkPlanMemory({ ...input, sourceId: "f".repeat(64) }),
     /not verifiable/u,
   );
+});
+
+test("SQLite 受治理工作图追加写入幂等、加密且查询强制项目范围", async (t) => {
+  const store = await fixture(t);
+  const graph = graphFixture();
+  const first = store.appendGraphProjection(graph);
+  assert.deepEqual(first, {
+    graphVersion: 1,
+    insertedNodes: 2,
+    existingNodes: 0,
+    insertedEdges: 1,
+    existingEdges: 0,
+  });
+  const second = store.appendGraphProjection(graph);
+  assert.equal(second.insertedNodes, 0);
+  assert.equal(second.existingNodes, 2);
+  assert.equal(second.insertedEdges, 0);
+  assert.equal(second.existingEdges, 1);
+  const nodes = store.listGraphNodes({ tenantId: "tenant-sqlite", projectId: "graph_project" });
+  const edges = store.listGraphEdges({
+    tenantId: "tenant-sqlite", projectId: "graph_project", phase: "intended",
+  });
+  assert.equal(nodes.length, 2);
+  assert.equal(edges.length, 1);
+  assert.equal(edges[0].edgeType, "authorization.permits_step");
+  const raw = store.db.prepare(
+    "SELECT payload_ciphertext FROM governed_graph_edges LIMIT 1",
+  ).get();
+  assert.match(raw.payload_ciphertext, /^enc:v1:/u);
+  assert.equal(raw.payload_ciphertext.includes("capability_policy"), false);
+  assert.throws(() => store.listGraphNodes({ tenantId: "tenant-sqlite" }), /tenantId and projectId/u);
+  assert.throws(() => store.listGraphEdges({
+    tenantId: "tenant-sqlite", projectId: "graph_project", limit: 501,
+  }), /between 1 and 500/u);
 });

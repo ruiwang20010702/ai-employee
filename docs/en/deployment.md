@@ -135,7 +135,7 @@ A deployed release may be service-available while business readiness is false. D
 ## V2.3 candidate rollout boundary
 
 The personal cockpit, recipes, proactive worker, meeting loop, GitHub Draft PR
-adapter, migrations 019/020, and community contracts are workspace-candidate
+adapter, migrations 019/020/021, governed graph projection, and community contracts are workspace-candidate
 features until an exact commit is submitted, pushed, passes both cloud gates,
 is deployed, and is read back from the running services. Deployment never
 enables `proactive_work`, sending, or work-plan execution. Triggers remain

@@ -7,6 +7,7 @@ import { createPostgresPool } from "../src/postgres.mjs";
 import { PostgresStore } from "../src/postgres-store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 import { capabilityBudgetForPlan } from "../src/capability-budget.mjs";
+import { buildGraphProjection, createGraphEdge, createGraphNode } from "../src/governed-work-graph.mjs";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const temporaryDatabase = process.env.TEST_DATABASE_TEMP === "true";
@@ -46,6 +47,8 @@ async function fixture(t) {
   await migrate(pool);
   const store = await new PostgresStore(settings, { pool }).open();
   t.after(async () => {
+    await pool.query("DELETE FROM governed_graph_edges WHERE tenant_id = $1", [tenantId]);
+    await pool.query("DELETE FROM governed_graph_nodes WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM time_return_entries WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM work_trigger_runs WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM work_triggers WHERE tenant_id = $1", [tenantId]);
@@ -64,6 +67,26 @@ async function fixture(t) {
     await pool.end();
   });
   return store;
+}
+
+function graphFixture(tenantId, projectId = "graph_project") {
+  const observedAt = "2026-08-12T08:00:00.000Z";
+  const node = (nodeType, domainId, revision, sensitivity = "internal") => createGraphNode({
+    tenantId, projectId, nodeType, domainId, revision, sensitivity, observedAt,
+    provenance: { recordType: nodeType, recordId: domainId, recordVersion: revision },
+  });
+  const authorization = node("authorization", "auth-1", "a".repeat(64), "confidential");
+  const step = node("step", "plan-1:step-1", "step-v1");
+  const edge = createGraphEdge({
+    edgeType: "authorization.permits_step",
+    from: authorization,
+    to: step,
+    phase: "intended",
+    authorizationHash: "a".repeat(64),
+    observedAt,
+    provenance: { recordType: "capability_policy", recordId: "research", recordVersion: "v1" },
+  });
+  return buildGraphProjection({ nodes: [authorization, step], edges: [edge] });
 }
 
 function messages() {
@@ -1561,6 +1584,10 @@ integration("PostgreSQL 按项目擦除计划及其明确绑定的来源任务",
   const plan = await store.registerWorkPlan(assessment, new Date(base.getTime() + 30));
   assert.equal((await store.previewPrivacyErasure({ projectId: "privacy_project" })).confirmation, null);
   await store.requestWorkPlanCancellation(plan.id, "operator", new Date(base.getTime() + 40));
+  await store.appendGraphProjection(
+    graphFixture(store.tenantId, "privacy_project"),
+    new Date(base.getTime() + 40),
+  );
   await store.pool.query(
     `INSERT INTO capability_budget_usage(
        tenant_id, project_key, project_id_ciphertext,
@@ -1582,6 +1609,8 @@ integration("PostgreSQL 按项目擦除计划及其明确绑定的来源任务",
   assert.equal(preview.counts.tasks, 1);
   assert.equal(preview.counts.workPlans, 1);
   assert.equal(preview.counts.capabilityBudgets, 1);
+  assert.equal(preview.counts.graphNodes, 2);
+  assert.equal(preview.counts.graphEdges, 1);
   await store.erasePrivacyData(
     { projectId: "privacy_project" }, preview.confirmation, "operator", new Date(base.getTime() + 50),
   );
@@ -1603,6 +1632,8 @@ integration("PostgreSQL 按项目擦除计划及其明确绑定的来源任务",
   assert.equal(retainedBudget.rowCount, 1);
   assert.equal(store.cipher.decrypt(retainedBudget.rows[0].project_id_ciphertext), "");
   assert.equal(retainedBudget.rows[0].used_count, 1);
+  assert.equal((await store.listGraphNodes({ projectId: "privacy_project" })).length, 0);
+  assert.equal((await store.listGraphEdges({ projectId: "privacy_project" })).length, 0);
   await assert.rejects(
     store.registerWorkPlan(assessment),
     /source task is no longer actionable|cannot be recreated/u,
@@ -2282,4 +2313,32 @@ integration("PostgreSQL 项目记忆候选绑定计划来源并保持幂等", as
   const personPreview = await store.previewPrivacyErasure({ personId: "owner" });
   assert.equal(personPreview.counts.memories, 1);
   assert.equal(await store.confirmMemory(first.id, "owner", new Date("2026-08-12T00:02:00.000Z")), "confirmed");
+});
+
+integration("PostgreSQL 受治理工作图并发追加保持幂等且查询固定租户项目", async (t) => {
+  const store = await fixture(t);
+  const graph = graphFixture(store.tenantId);
+  const results = await Promise.all([
+    store.appendGraphProjection(graph),
+    store.appendGraphProjection(graph),
+  ]);
+  assert.equal(results.reduce((sum, value) => sum + value.insertedNodes, 0), 2);
+  assert.equal(results.reduce((sum, value) => sum + value.insertedEdges, 0), 1);
+  const nodes = await store.listGraphNodes({ projectId: "graph_project" });
+  const edges = await store.listGraphEdges({
+    projectId: "graph_project", edgeType: "authorization.permits_step",
+  });
+  assert.equal(nodes.length, 2);
+  assert.equal(edges.length, 1);
+  const raw = await store.pool.query(
+    `SELECT payload_ciphertext FROM governed_graph_edges
+     WHERE tenant_id = $1 LIMIT 1`,
+    [store.tenantId],
+  );
+  assert.match(raw.rows[0].payload_ciphertext, /^enc:v1:/u);
+  assert.equal((await store.listGraphNodes({ projectId: "other" })).length, 0);
+  await assert.rejects(
+    store.appendGraphProjection(graphFixture("wrong-tenant")),
+    /tenant does not match/u,
+  );
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { validateWorkPlan } from "./work-plan.mjs";
 
 const recipeIdPattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
@@ -81,6 +82,22 @@ export function validateWorkRecipe(input) {
   };
 }
 
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonical(value[key])]),
+    );
+  }
+  return value;
+}
+
+export function workRecipeRevision(input) {
+  return createHash("sha256")
+    .update(JSON.stringify(canonical(validateWorkRecipe(input))))
+    .digest("hex");
+}
+
 function normalizeInput(field, value) {
   if (value == null || value === "") {
     if (field.required) throw new Error(`Missing recipe input: ${field.name}`);
@@ -146,6 +163,7 @@ export function instantiateWorkRecipe(recipeInput, {
   trigger = null,
 }) {
   const recipe = validateWorkRecipe(recipeInput);
+  const contentHash = workRecipeRevision(recipe);
   const normalizedValues = {
     projectRoot: String(projectRoot ?? "").trim(),
     ...Object.fromEntries(
@@ -160,6 +178,7 @@ export function instantiateWorkRecipe(recipeInput, {
     recipe: {
       id: recipe.id,
       version: recipe.version,
+      contentHash,
       baselineMinutes: recipe.baselineMinutes,
       baselineMethod: recipe.baselineMethod,
       ...(trigger == null ? {} : {

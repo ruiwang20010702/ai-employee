@@ -38,6 +38,7 @@ import { instantiateWorkRecipe } from "./work-recipe.mjs";
 import { validateWorkTrigger } from "./work-trigger.mjs";
 import { validateWorkEvent } from "./work-trigger.mjs";
 import { ingestProactiveEvent } from "./proactive-runtime.mjs";
+import { captureWorkPlanGraph } from "./governed-work-graph-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -430,6 +431,27 @@ export async function startAdminServer({
         request.headers["x-ai-employee-write-token"],
       config.adminWriteToken,
     );
+  const captureTimeReturnGraph = async (entry, observedAt = new Date()) => {
+    const [projects, recipes, plan] = await Promise.all([
+      manifestLoader(config.projectsDirectory),
+      recipeLoader(config.recipesDirectory),
+      store.getWorkPlan(entry.workPlanId),
+    ]);
+    const manifest = projects.get(entry.projectId);
+    const recipe = recipes.get(entry.recipeId);
+    if (!manifest || !recipe || !plan) {
+      throw new Error("time_return_graph_context_unavailable");
+    }
+    return captureWorkPlanGraph({
+      store,
+      tenantId: config.tenantId,
+      manifest,
+      recipe,
+      workPlan: plan,
+      timeReturn: entry,
+      observedAt,
+    });
+  };
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -548,6 +570,28 @@ export async function startAdminServer({
           plan.id,
           await (store.listWorkPlanSteps?.(plan.id) ?? Promise.resolve([])),
         ])));
+        const graphByProject = new Map(await Promise.all(
+          [...projects.values()].map(async (manifest) => {
+            if (!store.listGraphNodes || !store.listGraphEdges) {
+              return [manifest.projectId, null];
+            }
+            const scope = {
+              tenantId: config.tenantId,
+              projectId: manifest.projectId,
+              limit: 500,
+            };
+            const [nodes, edges] = await Promise.all([
+              store.listGraphNodes(scope),
+              store.listGraphEdges(scope),
+            ]);
+            return [manifest.projectId, {
+              tenantId: config.tenantId,
+              nodes,
+              edges,
+              now: new Date(),
+            }];
+          }),
+        ));
         json(response, 200, {
           items: [...projects.values()].map((manifest) => buildProjectDashboard({
             manifest,
@@ -556,6 +600,7 @@ export async function startAdminServer({
             timeReturns,
             recipes: [...recipes.values()],
             planSteps,
+            graph: graphByProject.get(manifest.projectId),
           })),
         });
         return;
@@ -850,6 +895,15 @@ export async function startAdminServer({
           throw Object.assign(new Error("recipe_plan_denied_by_policy"), { status: 403 });
         }
         const plan = await store.registerWorkPlan(assessment);
+        await captureWorkPlanGraph({
+          store,
+          tenantId: config.tenantId,
+          manifest,
+          assessment,
+          recipe,
+          workPlan: plan,
+          observedAt: new Date(),
+        });
         json(response, 201, {
           plan: planSummary(plan),
           assessment: { decision: assessment.decision, maxLevel: assessment.maxLevel },
@@ -863,6 +917,7 @@ export async function startAdminServer({
           body.humanActiveMinutes,
           "admin-ui",
         );
+        await captureTimeReturnGraph(entry);
         json(response, 201, { entry });
         return;
       }
@@ -918,6 +973,7 @@ export async function startAdminServer({
         ]);
         const results = await ingestProactiveEvent({
           store,
+          tenantId: config.tenantId,
           manifests: projects,
           recipes,
           event,
@@ -947,6 +1003,7 @@ export async function startAdminServer({
           body.decision,
           "admin-ui",
         );
+        await captureTimeReturnGraph(entry);
         json(response, 200, { entry });
         return;
       }
