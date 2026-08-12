@@ -348,11 +348,10 @@ flowchart LR
 
 ## 参与贡献
 
-欢迎提交问题、使用案例、文档改进和代码贡献。可以先选择一项[首次贡献任务](./docs/首次贡献任务.md)，再阅读[贡献指南](./CONTRIBUTING_ZH.md)和[行为准则](./CODE_OF_CONDUCT_ZH.md)。这些任务目前是 v0.5 候选版中的 Issue 草案，只有候选版推送后才会发布为真实 `good first issue`。
+欢迎提交问题、使用案例、文档改进和代码贡献。可以先从已发布的 `good first issue` [#3](https://github.com/ruiwang20010702/foursday/issues/3)、[#4](https://github.com/ruiwang20010702/foursday/issues/4)、[#5](https://github.com/ruiwang20010702/foursday/issues/5)、[#6](https://github.com/ruiwang20010702/foursday/issues/6) 和 [#7](https://github.com/ruiwang20010702/foursday/issues/7) 中选择一项；任务概览见[首次贡献任务](./docs/首次贡献任务.md)，贡献前请阅读[贡献指南](./CONTRIBUTING_ZH.md)和[行为准则](./CODE_OF_CONDUCT_ZH.md)。
 
 - 不要在 Issue、PR、截图或测试夹具中包含真实消息、人员编号、令牌或公司内部资料。
 - 新能力必须有明确边界、反向测试、目标回读和失败处理。
-- 候选版发布后，适合第一次贡献的任务会在 GitHub 中标记为 `good first issue`。
 
 ## 许可证
 
