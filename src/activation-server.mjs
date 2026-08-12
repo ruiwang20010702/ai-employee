@@ -46,6 +46,7 @@ export async function startActivationServer({
   workingDirectory = process.cwd(),
   previewBuilder = buildActivationPreview,
   executionCoordinator = null,
+  pilotWorkspace = null,
   actionToken = randomBytes(32).toString("hex"),
 } = {}) {
   if (!["127.0.0.1", "::1", "localhost"].includes(host)) {
@@ -73,7 +74,32 @@ export async function startActivationServer({
         nodeVersion: process.versions.node,
         externalSystemsTouched: false,
         executionAvailable: Boolean(executionCoordinator),
+        pilotWorkspaceAvailable: Boolean(pilotWorkspace),
+        pilotSourceSha: pilotWorkspace?.sourceSha ?? null,
       });
+      return;
+    }
+    if (pilotWorkspace && request.method === "POST" && url.pathname === "/api/pilot-workspace") {
+      try {
+        if (!equalToken(request.headers["x-foursday-action-token"], actionToken)) {
+          throw Object.assign(new Error("action_token_invalid"), { status: 403 });
+        }
+        if (!String(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+          throw Object.assign(new Error("content_type_must_be_application_json"), { status: 415 });
+        }
+        const body = await readJson(request);
+        if (body.confirmForkAndClone !== true) {
+          throw Object.assign(new Error("fork_and_clone_confirmation_required"), { status: 400 });
+        }
+        json(response, 201, await pilotWorkspace.prepare({
+          confirmForkAndClone: true,
+        }));
+      } catch (error) {
+        const status = error.status ?? 400;
+        json(response, status, {
+          error: error.status ? String(error.message) : "pilot_workspace_prepare_failed",
+        });
+      }
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/preview") {

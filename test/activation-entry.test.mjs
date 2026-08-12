@@ -48,3 +48,66 @@ test("activation CLI help exits without model setup or a listener", async () => 
   assert.equal(stderr, "");
   assert.equal(stdout, activationHelp);
 });
+
+test("activation validates the immutable pilot SHA before loading runtime", async () => {
+  let dependencyLoads = 0;
+  await assert.rejects(
+    () => runActivation({
+      args: ["--pilot-sha", "main"],
+      loadRuntime: async () => {
+        dependencyLoads += 1;
+        throw new Error("runtime must not load");
+      },
+    }),
+    /complete 40-character lowercase commit SHA/u,
+  );
+  assert.equal(dependencyLoads, 0);
+});
+
+test("activation offers the exact pilot workspace without preparing it at startup", async () => {
+  const sourceSha = "a".repeat(40);
+  const serverCalls = [];
+  let preparations = 0;
+  const server = { url: "http://127.0.0.1:4173/" };
+  const result = await runActivation({
+    args: ["--pilot-sha", sourceSha, "--port", "0"],
+    output: { write() {} },
+    loadRuntime: async () => ({
+      startActivationServer: async (options) => {
+        serverCalls.push(options);
+        return server;
+      },
+      createDefaultActivationExecutionCoordinator: () => ({
+        ghPath: "/usr/bin/true",
+      }),
+      openAiCompatibleProviderFromEnvironment: () => null,
+      prepareFoursdayPilotWorkspace: async (input) => {
+        preparations += 1;
+        return input;
+      },
+    }),
+  });
+
+  assert.equal(result, server);
+  assert.equal(preparations, 0);
+  assert.equal(serverCalls.length, 1);
+  assert.equal(serverCalls[0].port, 0);
+  assert.equal(serverCalls[0].pilotWorkspace.sourceSha, sourceSha);
+  const prepared = await serverCalls[0].pilotWorkspace.prepare({ confirmForkAndClone: true });
+  assert.deepEqual(prepared, { sourceSha, confirmForkAndClone: true });
+  assert.equal(preparations, 1);
+});
+
+test("activation rejects unknown options before loading runtime", async () => {
+  let dependencyLoads = 0;
+  await assert.rejects(
+    () => runActivation({
+      args: ["--deploy"],
+      loadRuntime: async () => {
+        dependencyLoads += 1;
+      },
+    }),
+    /Unknown activation option/u,
+  );
+  assert.equal(dependencyLoads, 0);
+});

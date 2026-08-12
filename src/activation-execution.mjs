@@ -499,7 +499,7 @@ export class ActivationExecutionCoordinator {
   }
 }
 
-async function resolveExecutable(configured, candidates, label) {
+export async function resolveExecutable(configured, candidates, label) {
   const values = configured ? [configured] : candidates;
   for (const value of values) {
     if (!isAbsolute(value)) {

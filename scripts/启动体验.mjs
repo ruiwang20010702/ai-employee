@@ -9,6 +9,7 @@ Usage:
 
 Options:
   --port <number>  Set the loopback preview port (default: 4173).
+  --pilot-sha <sha>  Offer approval-bound fork preparation for this exact commit.
   --help           Show this help and exit.
 
 Safety:
@@ -19,15 +20,18 @@ async function loadActivationRuntime() {
   const [
     { startActivationServer },
     { createDefaultActivationExecutionCoordinator },
+    { prepareFoursdayPilotWorkspace },
     { openAiCompatibleProviderFromEnvironment },
   ] = await Promise.all([
     import("../src/activation-server.mjs"),
     import("../src/activation-execution.mjs"),
+    import("../src/pilot-workspace.mjs"),
     import("../src/openai-compatible-provider.mjs"),
   ]);
   return {
     startActivationServer,
     createDefaultActivationExecutionCoordinator,
+    prepareFoursdayPilotWorkspace,
     openAiCompatibleProviderFromEnvironment,
   };
 }
@@ -42,6 +46,34 @@ function portFrom(args) {
   return port;
 }
 
+function optionValue(args, name) {
+  const indexes = args.flatMap((value, index) => value === name ? [index] : []);
+  if (indexes.length === 0) return null;
+  if (indexes.length > 1 || !args[indexes[0] + 1] || args[indexes[0] + 1].startsWith("--")) {
+    throw new Error(`${name} must be provided once with a value`);
+  }
+  return args[indexes[0] + 1];
+}
+
+function pilotShaFrom(args) {
+  const value = optionValue(args, "--pilot-sha");
+  if (value !== null && !/^[a-f0-9]{40}$/u.test(value)) {
+    throw new Error("--pilot-sha must be a complete 40-character lowercase commit SHA");
+  }
+  return value;
+}
+
+function validateOptions(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    if (["--port", "--pilot-sha"].includes(args[index])) {
+      index += 1;
+      continue;
+    }
+    if (args[index] === "--help") continue;
+    throw new Error(`Unknown activation option: ${args[index]}`);
+  }
+}
+
 export async function runActivation({
   args = process.argv.slice(2),
   output = process.stdout,
@@ -52,23 +84,41 @@ export async function runActivation({
     output.write(activationHelp);
     return null;
   }
+  validateOptions(args);
   const port = portFrom(args);
+  const pilotSourceSha = pilotShaFrom(args);
   const {
     startActivationServer,
     createDefaultActivationExecutionCoordinator,
     openAiCompatibleProviderFromEnvironment,
+    prepareFoursdayPilotWorkspace,
   } = await loadRuntime();
   const executionCoordinator = createDefaultActivationExecutionCoordinator({
     workingDirectory,
     modelProvider: openAiCompatibleProviderFromEnvironment(),
   });
+  const pilotWorkspace = pilotSourceSha
+    ? {
+        sourceSha: pilotSourceSha,
+        async prepare({ confirmForkAndClone }) {
+          const ghPath = executionCoordinator.ghPathProvider
+            ? await executionCoordinator.ghPathProvider()
+            : executionCoordinator.ghPath;
+          return prepareFoursdayPilotWorkspace({
+            sourceSha: pilotSourceSha,
+            confirmForkAndClone,
+          }, { ghPath });
+        },
+      }
+    : null;
   const server = await startActivationServer({
     port,
     workingDirectory,
     executionCoordinator,
+    pilotWorkspace,
   });
   output.write(`Foursday activation is ready: ${server.url}\n`);
-  output.write("Preview is read-only. Local SQLite, model, Git, and GitHub are used only after explicit plan approval.\n");
+  output.write("Preview is read-only. Pilot fork setup requires separate confirmation; delivery still requires exact-plan approval.\n");
   return server;
 }
 

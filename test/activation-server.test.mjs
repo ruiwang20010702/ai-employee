@@ -60,6 +60,17 @@ test("public proof is copied only after outcome confirmation with bounded status
   assert.doesNotMatch(script, /proofStatus\.textContent=error\.(?:message|stack)/u);
 });
 
+test("pilot preparation is separately confirmed and reports only bounded status text", () => {
+  const script = activationHtml.match(/<script nonce="__NONCE__">([\s\S]*?)<\/script>/u)?.[1];
+  assert.match(activationHtml, /Prepare my pilot fork/u);
+  assert.match(activationHtml, /I authorize creation or reuse of my personal Foursday fork/u);
+  assert.match(activationHtml, /id="pilot-status"[^>]*role="status"[^>]*aria-live="polite"/u);
+  assert.match(script, /api\('\/api\/pilot-workspace',\{confirmForkAndClone:true\},600000\)/u);
+  assert.match(script, /Pilot workspace ready\. Review the repository root/u);
+  assert.match(script, /Pilot preparation failed\. Check GitHub CLI login and retry/u);
+  assert.doesNotMatch(script, /pilot-status[^;]*error\.(?:message|stack)/u);
+});
+
 test("activation server exposes only loopback preview endpoints", async () => {
   const calls = [];
   const service = await startActivationServer({
@@ -101,6 +112,82 @@ test("activation server exposes only loopback preview endpoints", async () => {
     () => startActivationServer({ host: "0.0.0.0", port: 0 }),
     /loopback-only/u,
   );
+});
+
+test("pilot workspace endpoint requires token and explicit confirmation", async () => {
+  const actionToken = "b".repeat(64);
+  const calls = [];
+  const service = await startActivationServer({
+    port: 0,
+    actionToken,
+    pilotWorkspace: {
+      sourceSha: "a".repeat(40),
+      async prepare(body) {
+        calls.push(body);
+        return {
+          schema: "foursday-pilot-workspace/v1",
+          rootDirectory: "/fixed/pilot/foursday",
+        };
+      },
+    },
+  });
+  const post = (body, token = actionToken, contentType = "application/json") => fetch(
+    new URL("/api/pilot-workspace", service.url),
+    {
+      method: "POST",
+      headers: {
+        "content-type": contentType,
+        "x-foursday-action-token": token,
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  try {
+    const environment = await fetch(new URL("/api/environment", service.url))
+      .then((response) => response.json());
+    assert.equal(environment.pilotWorkspaceAvailable, true);
+    assert.equal(environment.pilotSourceSha, "a".repeat(40));
+    assert.equal((await post({ confirmForkAndClone: true }, "wrong")).status, 403);
+    assert.equal((await post({}, actionToken)).status, 400);
+    assert.equal((await post({ confirmForkAndClone: true }, actionToken, "text/plain")).status, 415);
+    assert.equal(calls.length, 0);
+    const prepared = await post({ confirmForkAndClone: true });
+    assert.equal(prepared.status, 201);
+    assert.equal((await prepared.json()).rootDirectory, "/fixed/pilot/foursday");
+    assert.deepEqual(calls, [{ confirmForkAndClone: true }]);
+  } finally {
+    await service.stop();
+  }
+});
+
+test("pilot workspace endpoint hides unexpected preparation errors", async () => {
+  const actionToken = "c".repeat(64);
+  const service = await startActivationServer({
+    port: 0,
+    actionToken,
+    pilotWorkspace: {
+      sourceSha: "a".repeat(40),
+      async prepare() {
+        throw new Error("/Users/private/.config/gh/hosts.yml contained secret-value");
+      },
+    },
+  });
+  try {
+    const response = await fetch(new URL("/api/pilot-workspace", service.url), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-foursday-action-token": actionToken,
+      },
+      body: JSON.stringify({ confirmForkAndClone: true }),
+    });
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.deepEqual(body, { error: "pilot_workspace_prepare_failed" });
+    assert.doesNotMatch(JSON.stringify(body), /private|secret-value/u);
+  } finally {
+    await service.stop();
+  }
 });
 
 test("activation execution routes require explicit local-session and plan approval", async () => {
