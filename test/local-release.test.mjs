@@ -27,6 +27,7 @@ import {
   compareReleaseRuntimeIdentity,
   createLocalReleaseDependencies,
   githubCliEnvironment,
+  githubCredentialEnvironment,
   inspectPendingReleaseJournal,
   minimalRuntimeEnvironment,
   normalizeGitHubRepository,
@@ -2305,6 +2306,72 @@ test("云端门禁只用受信 gh 且令牌仅存在于 gh 的最小环境", asy
     ]) {
       assert.equal(Object.hasOwn(call.options.env, key), false, key);
     }
+  }
+});
+
+test("父进程没有令牌时只从受信 gh 钥匙串读取并注入门禁子进程", async () => {
+  const calls = [];
+  const workflowIdentity = {
+    "check.yml": {
+      id: 101,
+      name: "检查",
+      path: ".github/workflows/check.yml",
+      state: "active",
+    },
+    "security.yml": {
+      id: 102,
+      name: "安全扫描",
+      path: ".github/workflows/security.yml",
+      state: "active",
+    },
+  };
+  const runs = ["检查", "安全扫描"].map((name, index) => ({
+    databaseId: index + 10,
+    workflowDatabaseId: index + 101,
+    name,
+    headSha: sha,
+    status: "completed",
+    conclusion: "success",
+    event: "push",
+    url: `https://github.example/actions/runs/${index + 10}`,
+    createdAt: `2026-08-10T08:00:0${index}Z`,
+  }));
+  const dependencies = createLocalReleaseDependencies({
+    environmentSource: {
+      PATH: "/sentinel/fake-bin",
+      GH_CONFIG_DIR: "/sentinel/gh-config",
+      GITHUB_TOKEN: "",
+    },
+    syncCommand(command, args, options) {
+      calls.push({ command, args, options });
+      if (args[0] === "auth") return "keyring-only-token";
+      if (args[0] === "api") {
+        const file = args[1].split("/").at(-1);
+        return JSON.stringify(workflowIdentity[file]);
+      }
+      return JSON.stringify(runs);
+    },
+  });
+
+  const result = await dependencies.verifyCloudGate({
+    sha,
+    sourceDirectory: "/workspace/ai-employee",
+  });
+  assert.equal(result.valid, true);
+  assert.equal(calls.length, 4);
+  const credentialCall = calls[0];
+  assert.deepEqual(
+    credentialCall.args,
+    ["auth", "token", "--hostname", "github.com"],
+  );
+  assert.equal(credentialCall.options.env.HOME, homedir());
+  assert.equal(credentialCall.options.env.GH_HOST, "github.com");
+  assert.equal(Object.hasOwn(credentialCall.options.env, "GH_TOKEN"), false);
+  assert.equal(Object.hasOwn(credentialCall.options.env, "GH_CONFIG_DIR"), false);
+  for (const call of calls.slice(1)) {
+    assert.equal(call.options.env.HOME, "/var/empty");
+    assert.equal(call.options.env.GH_TOKEN, "keyring-only-token");
+    assert.equal(call.args.includes("keyring-only-token"), false);
   }
 });
 

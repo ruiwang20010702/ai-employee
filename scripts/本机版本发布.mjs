@@ -500,10 +500,16 @@ export function productionGitHubArguments(args = []) {
   throw new Error("GitHub 命令不在固定生产仓库白名单内");
 }
 
-export function githubCliEnvironment(source = process.env) {
+export function githubCredentialEnvironment(source = process.env) {
+  const environment = baseReleaseEnvironment({ source });
+  environment.GH_HOST = "github.com";
+  return environment;
+}
+
+export function githubCliEnvironment(source = process.env, explicitToken = "") {
   const environment = releaseVerificationEnvironment(source);
   const token = safeEnvironmentValue(
-    source.GH_TOKEN ?? source.GITHUB_TOKEN,
+    explicitToken || source.GH_TOKEN || source.GITHUB_TOKEN,
     /^.+$/u,
     8_192,
   );
@@ -1905,6 +1911,22 @@ export function createLocalReleaseDependencies({
     },
     verifyCheckout: verifyLocalReleaseCheckout,
     async verifyCloudGate({ sha, sourceDirectory }) {
+      let githubEnvironment = githubCliEnvironment(environmentSource);
+      if (!githubEnvironment.GH_TOKEN) {
+        const token = syncCommand(
+          resolveTool("gh"),
+          ["auth", "token", "--hostname", "github.com"],
+          {
+            cwd: sourceDirectory,
+            env: githubCredentialEnvironment(environmentSource),
+            description: "读取 GitHub CLI 钥匙串令牌",
+          },
+        );
+        githubEnvironment = githubCliEnvironment(environmentSource, token);
+        if (!githubEnvironment.GH_TOKEN) {
+          throw new Error("GitHub CLI 钥匙串令牌不可用");
+        }
+      }
       return verifyGitHubReleaseCommit({
         cwd: sourceDirectory,
         sha,
@@ -1917,7 +1939,7 @@ export function createLocalReleaseDependencies({
             productionGitHubArguments(args),
             {
               cwd,
-              env: githubCliEnvironment(environmentSource),
+              env: githubEnvironment,
               description: "核对固定仓库的 GitHub 工作流",
             },
           );
