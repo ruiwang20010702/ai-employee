@@ -12,6 +12,7 @@ import {
   prepareActivationExecution,
 } from "../src/activation-execution.mjs";
 import { createControlledWorkAdapters } from "../src/work-adapters.mjs";
+import { validateValidationEvidence } from "../src/validation-evidence.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -188,4 +189,13 @@ test("public activation runs the real governed patch-to-Draft-PR loop", async (t
   assert.equal(confirmed.memory.status, "confirmed");
   assert.equal(confirmed.timeReturn.status, "confirmed");
   assert.ok(confirmed.timeReturn.returnedMinutes > 0);
+  const bundle = await coordinator.exportEvidence(created.sessionId);
+  const summary = validateValidationEvidence(bundle);
+  assert.equal(summary.confirmed, true);
+  assert.equal(summary.issueNumber, 7);
+  assert.equal(summary.draftPrNumber, 42);
+  assert.match(summary.draftPrHead, /^foursday\//u);
+  assert.equal(summary.draftPrBase, "main");
+  assert.equal(summary.draftPrState, "OPEN");
+  assert.equal(summary.draftPrIsDraft, true);
 });

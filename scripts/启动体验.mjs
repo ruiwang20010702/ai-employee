@@ -1,8 +1,35 @@
 #!/usr/bin/env node
-import { startActivationServer } from "../src/activation-server.mjs";
-import { createDefaultActivationExecutionCoordinator } from "../src/activation-execution.mjs";
 import { isMainModule } from "../src/main-module.mjs";
-import { openAiCompatibleProviderFromEnvironment } from "../src/openai-compatible-provider.mjs";
+
+export const activationHelp = `Foursday activation
+
+Usage:
+  npm start -- [options]
+
+Options:
+  --port <number>  Set the loopback preview port (default: 4173).
+  --help           Show this help and exit.
+
+Safety:
+  Help exits without starting a listener or accessing a model, Git, GitHub, SQLite, or production systems.
+`;
+
+async function loadActivationRuntime() {
+  const [
+    { startActivationServer },
+    { createDefaultActivationExecutionCoordinator },
+    { openAiCompatibleProviderFromEnvironment },
+  ] = await Promise.all([
+    import("../src/activation-server.mjs"),
+    import("../src/activation-execution.mjs"),
+    import("../src/openai-compatible-provider.mjs"),
+  ]);
+  return {
+    startActivationServer,
+    createDefaultActivationExecutionCoordinator,
+    openAiCompatibleProviderFromEnvironment,
+  };
+}
 
 function portFrom(args) {
   const index = args.indexOf("--port");
@@ -14,14 +41,28 @@ function portFrom(args) {
   return port;
 }
 
-export async function runActivation({ args = process.argv.slice(2), output = process.stdout } = {}) {
+export async function runActivation({
+  args = process.argv.slice(2),
+  output = process.stdout,
+  loadRuntime = loadActivationRuntime,
+} = {}) {
+  if (args.includes("--help")) {
+    output.write(activationHelp);
+    return null;
+  }
+  const port = portFrom(args);
+  const {
+    startActivationServer,
+    createDefaultActivationExecutionCoordinator,
+    openAiCompatibleProviderFromEnvironment,
+  } = await loadRuntime();
   const workingDirectory = process.cwd();
   const executionCoordinator = createDefaultActivationExecutionCoordinator({
     workingDirectory,
     modelProvider: openAiCompatibleProviderFromEnvironment(),
   });
   const server = await startActivationServer({
-    port: portFrom(args),
+    port,
     workingDirectory,
     executionCoordinator,
   });

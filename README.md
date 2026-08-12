@@ -154,6 +154,17 @@ The bundle omits local paths, remotes, action tokens, credentials, and model
 output while retaining the Issue, plan hash, target read-back, memory status,
 time-return status, and explicit safety boundaries.
 
+### Troubleshoot Web onboarding
+
+| Check | Safe next action |
+|---|---|
+| Dirty worktree | Stop and inspect `git status`; commit or stash changes intentionally, then retry. |
+| Repository mismatch | Select a local checkout whose repository owner and name match the GitHub Issue. |
+| Missing registered test script | Register the existing project test command in `package.json`, run it manually, then retry. |
+
+Foursday does not clean the worktree or switch repositories automatically.
+Never paste credentials into onboarding fields or logs.
+
 For an OpenAI-compatible provider, configure all three values before `npm
 start`; they are read at runtime and the API key is never written to the local
 session:

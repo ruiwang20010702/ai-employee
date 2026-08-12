@@ -187,6 +187,10 @@ function publicEvidence(steps) {
     commit: step.evidence?.commit ?? null,
     url: step.evidence?.url ?? null,
     number: step.evidence?.number ?? null,
+    head: step.evidence?.head ?? null,
+    base: step.evidence?.base ?? null,
+    state: step.evidence?.state ?? null,
+    isDraft: step.evidence?.isDraft ?? null,
     error: step.error ?? null,
   }));
 }

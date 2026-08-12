@@ -1027,11 +1027,21 @@ export function createControlledWorkAdapters({
             "--title", title, "--body-file", bodyPath,
           ], rule.timeoutMs ?? 120_000);
           const parsed = new URL(createdUrl);
+          const normalizedPath = parsed.pathname.toLowerCase().replace(/\/$/u, "");
           const expectedPrefix = `/${rule.repository.toLowerCase()}/pull/`;
+          const numberText = normalizedPath.startsWith(expectedPrefix)
+            ? normalizedPath.slice(expectedPrefix.length)
+            : "";
+          const createdNumber = Number(numberText);
           if (
             parsed.protocol !== "https:" ||
             parsed.hostname.toLowerCase() !== "github.com" ||
-            !parsed.pathname.toLowerCase().startsWith(expectedPrefix)
+            parsed.username ||
+            parsed.password ||
+            parsed.search ||
+            parsed.hash ||
+            !/^[1-9]\d*$/u.test(numberText) ||
+            !Number.isSafeInteger(createdNumber)
           ) {
             throw new Error("GitHub PR create returned an unexpected URL");
           }
@@ -1040,7 +1050,8 @@ export function createControlledWorkAdapters({
             "--json", "number,url,state,isDraft,headRefName,headRefOid,baseRefName,title",
           ], rule.timeoutMs ?? 120_000));
           if (
-            readback.url !== createdUrl || readback.state !== "OPEN" || readback.isDraft !== true ||
+            readback.url !== createdUrl || readback.number !== createdNumber ||
+            readback.state !== "OPEN" || readback.isDraft !== true ||
             readback.headRefName !== pushEvidence.branch || readback.headRefOid !== pushEvidence.commit ||
             readback.baseRefName !== baseBranch || readback.title !== title
           ) {
@@ -1055,6 +1066,8 @@ export function createControlledWorkAdapters({
               url: readback.url,
               head: readback.headRefName,
               base: readback.baseRefName,
+              state: readback.state,
+              isDraft: readback.isDraft,
               commit: readback.headRefOid,
               titleSha256: createHash("sha256").update(title).digest("hex"),
               bodySha256: createHash("sha256").update(body).digest("hex"),

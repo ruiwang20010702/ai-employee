@@ -148,6 +148,14 @@ npm start
 
 如果要继续真实执行，请选择 Codex 或 Claude Code。Foursday 会再次检查工作区干净、Git 远端与 Issue 仓库一致、测试命令已登记、GitHub CLI 已登录，然后要求你对完整计划哈希进行第二次审批。只有这次审批才能生成补丁、创建 `foursday/` 分支、运行登记测试、推送分支并创建 Draft PR；它不能合并或部署。执行状态写入本地加密 SQLite 会话，项目记忆和时间返还仍只是候选，必须由你再次确认。
 
+#### Web 接入排障
+
+创建真实执行会话时如果前置检查失败，先修复对应的本地条件，再重新创建会话；不要绕过检查或扩大权限：
+
+- **工作区不干净：** 用 `git status --short` 识别已跟踪和未跟踪变更。保留并审查现有工作；提交应保留的变更，或改用单独的干净克隆/工作树。不要用会丢失更改的命令强行清理。
+- **仓库不一致：** 用 `git remote get-url origin` 对照 Issue URL 中的 `owner/repository`。绑定与 Issue 相同且已获授权的仓库；`origin` 必须是 GitHub 地址且不能内嵌凭据。不要为了通过检查改写 Issue 或远端身份。
+- **缺少登记的测试脚本：** 检查 `package.json` 的 `scripts`，把“Registered test command ID”填写为已有脚本名（例如本仓库的 `check`）。如果项目没有所需脚本，应先由仓库维护者在 `package.json` 中登记固定、可审查的脚本；不要填写任意 shell 命令，也不要跳过测试。
+
 闭环完成后可以下载 JSON 证据包；确认记忆和时间返还后再次下载，状态才会变为 `verified_closed_loop`。证据包不包含本机路径、Git 远端、操作令牌、凭据或模型原始输出，只保留 Issue、计划哈希、目标回读、记忆与时间返还状态以及明确的安全边界。
 
 使用 OpenAI-compatible 模型时，在 `npm start` 前同时配置三个值。它们只在运行时读取，API Key 不会写入本地会话：

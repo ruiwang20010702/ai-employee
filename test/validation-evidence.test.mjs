@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -29,9 +29,14 @@ function evidence(index = 1, { confirmed = true } = {}) {
       kind: capability === "github_pr_draft" ? "verified_github_pr_draft" : `verified_${capability}`,
       verification: "target_read_back",
       commit: capability === "github_pr_draft" ? commit : null,
+      number: capability === "github_pr_draft" ? index : null,
       url: capability === "github_pr_draft"
         ? `https://github.com/example/foursday/pull/${index}`
         : null,
+      head: capability === "github_pr_draft" ? `foursday/self-${index}` : null,
+      base: capability === "github_pr_draft" ? "main" : null,
+      state: capability === "github_pr_draft" ? "OPEN" : null,
+      isDraft: capability === "github_pr_draft" ? true : null,
     })),
     outcomes: {
       memory: { id: `memory-${index}`, status: confirmed ? "confirmed" : "proposed" },
@@ -57,6 +62,11 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
   const summary = validateValidationEvidence(valid);
   assert.equal(summary.confirmed, true);
   assert.equal(summary.draftPrUrl, "https://github.com/example/foursday/pull/1");
+  assert.equal(summary.draftPrNumber, 1);
+  assert.equal(summary.draftPrHead, "foursday/self-1");
+  assert.equal(summary.draftPrBase, "main");
+  assert.equal(summary.draftPrState, "OPEN");
+  assert.equal(summary.draftPrIsDraft, true);
   assert.throws(
     () => validateValidationEvidence(evidence(2, { confirmed: false })),
     /not a confirmed closed loop/u,
@@ -70,6 +80,58 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
     rootDirectory: "/private/project",
   });
   assert.throws(() => validateValidationEvidence(privateBundle), /forbidden private field/u);
+});
+
+test("validation evidence binds canonical time and GitHub target identity", () => {
+  const invalidTime = evidence();
+  const { integrity: ignoredTime, ...timeCore } = invalidTime;
+  timeCore.generatedAt = "2026-08-12T08:00:00.000+08:00";
+  assert.throws(
+    () => validateValidationEvidence(sealValidationEvidence(timeCore)),
+    /canonical ISO 8601 UTC/u,
+  );
+
+  const cases = [
+    ["issue number", (core) => { core.issue.number = 2; }, /issue\.number/u],
+    ["PR number", (core) => { core.evidence[4].number = 2; }, /draftPr\.number/u],
+    ["PR state", (core) => { core.evidence[4].state = "CLOSED"; }, /open and remain a draft/u],
+    ["PR draft flag", (core) => { core.evidence[4].isDraft = false; }, /open and remain a draft/u],
+    ["PR head", (core) => { core.evidence[4].head = "feature/unapproved"; }, /governed branch name/u],
+    ["PR repository", (core) => {
+      core.evidence[4].url = "https://github.com/other/foursday/pull/1";
+    }, /project repository/u],
+    ["PR URL query", (core) => {
+      core.evidence[4].url = "https://github.com/example/foursday/pull/1?token=unsafe";
+    }, /credential-free GitHub HTTPS/u],
+  ];
+  for (const [name, mutate, pattern] of cases) {
+    const value = evidence();
+    const { integrity: ignored, ...core } = value;
+    mutate(core);
+    assert.throws(
+      () => validateValidationEvidence(sealValidationEvidence(core)),
+      pattern,
+      name,
+    );
+  }
+});
+
+test("committed validation evidence example stays sanitized and valid", async () => {
+  const contents = await readFile(
+    new URL("../docs/examples/validation-evidence.example.json", import.meta.url),
+    "utf8",
+  );
+  const example = JSON.parse(contents);
+  const summary = validateValidationEvidence(example);
+
+  assert.equal(summary.confirmed, true);
+  assert.equal(summary.repository, "example/foursday");
+  assert.equal(summary.draftPrHead, "foursday/example-8");
+  const urls = [...contents.matchAll(/https:\/\/[^"\s]+/gu)].map(([url]) => url);
+  assert.deepEqual(urls, [
+    "https://github.com/example/foursday/issues/8",
+    "https://github.com/example/foursday/pull/8",
+  ]);
 });
 test("pilot verification requires ten self loops and ten distinct external testers", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "foursday-pilot-"));

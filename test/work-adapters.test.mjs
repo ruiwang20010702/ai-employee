@@ -517,8 +517,20 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
   const executable = join(directory, "fake-gh");
   const argumentsPath = join(directory, "arguments.jsonl");
   const bodyRecord = join(directory, "body.md");
+  const readbackPath = join(directory, "readback.json");
   const branch = "foursday/change-1";
   const commit = "a".repeat(40);
+  const readback = {
+    number: 42,
+    url: "https://github.com/example/project/pull/42",
+    state: "OPEN",
+    isDraft: true,
+    headRefName: branch,
+    headRefOid: commit,
+    baseRefName: "main",
+    title: "修复问题",
+  };
+  await writeFile(readbackPath, JSON.stringify(readback));
   await writeFile(executable, [
     "#!/usr/bin/env node",
     "const fs = require('node:fs');",
@@ -529,7 +541,7 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
     `  fs.writeFileSync(${JSON.stringify(bodyRecord)}, fs.readFileSync(bodyPath));`,
     "  console.log('https://github.com/example/project/pull/42');",
     "} else if (args[0] === 'pr' && args[1] === 'view') {",
-    `  console.log(JSON.stringify({number:42,url:'https://github.com/example/project/pull/42',state:'OPEN',isDraft:true,headRefName:${JSON.stringify(branch)},headRefOid:${JSON.stringify(commit)},baseRefName:'main',title:'修复问题'}));`,
+    `  console.log(fs.readFileSync(${JSON.stringify(readbackPath)}, 'utf8'));`,
     "} else process.exit(2);",
   ].join("\n"), { mode: 0o700 });
   const plan = {
@@ -560,7 +572,7 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
     codexPath: "/bin/false", ghPath: executable,
   }).github_pr_draft;
   await adapter.preflight({ plan, step: plan.steps[1], manifest: project });
-  const result = await adapter.execute({
+  const execute = () => adapter.execute({
     plan,
     step: plan.steps[1],
     manifest: project,
@@ -568,13 +580,29 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
       push: { kind: "verified_git_push", branch, commit },
     },
   });
+  const result = await execute();
   assert.equal(result.evidence.kind, "verified_github_pr_draft");
+  assert.equal(result.evidence.number, 42);
+  assert.equal(result.evidence.state, "OPEN");
+  assert.equal(result.evidence.isDraft, true);
   assert.equal(result.evidence.commit, commit);
   assert.equal(await readFile(bodyRecord, "utf8"), "变更与测试说明\n");
   const invocations = (await readFile(argumentsPath, "utf8")).trim().split("\n").map(JSON.parse);
   assert.equal(invocations.length, 2);
   assert.equal(invocations[0].includes("--draft"), true);
   assert.match(invocations[1][invocations[1].indexOf("--json") + 1], /headRefOid/u);
+
+  for (const mutation of [
+    { number: 41 },
+    { isDraft: false },
+    { headRefOid: "b".repeat(40) },
+  ]) {
+    await writeFile(readbackPath, JSON.stringify({ ...readback, ...mutation }));
+    await assert.rejects(
+      execute(),
+      /GitHub PR readback did not match the approved intent/u,
+    );
+  }
 });
 
 test("共享文档只写固定目标并通过 DWS 回读哈希验收", async (t) => {

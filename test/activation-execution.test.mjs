@@ -121,6 +121,10 @@ test("activation coordinator executes only the approved hash then proposes confi
       commit: "b".repeat(40),
       number: 42,
       url: "https://github.com/example/project/pull/42",
+      head: "foursday/change-42",
+      base: "main",
+      state: "OPEN",
+      isDraft: true,
     },
   };
   const coordinator = new ActivationExecutionCoordinator({
@@ -163,6 +167,10 @@ test("activation coordinator executes only the approved hash then proposes confi
   assert.equal(proposedEvidence.validationStatus, "awaiting_outcome_confirmation");
   assert.equal(proposedEvidence.plan.planHash, created.plan.planHash);
   assert.equal(proposedEvidence.evidence.length, 5);
+  assert.equal(proposedEvidence.evidence[4].head, "foursday/change-42");
+  assert.equal(proposedEvidence.evidence[4].base, "main");
+  assert.equal(proposedEvidence.evidence[4].state, "OPEN");
+  assert.equal(proposedEvidence.evidence[4].isDraft, true);
   assert.equal(proposedEvidence.safeguards.mergePerformed, false);
   assert.equal(proposedEvidence.safeguards.deploymentPerformed, false);
   assert.match(proposedEvidence.integrity.digest, /^[a-f0-9]{64}$/u);

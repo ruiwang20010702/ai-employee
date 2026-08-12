@@ -11,6 +11,8 @@ Foursday v0.5 is not launch-proven because the code passes tests. It becomes lau
 5. Download the evidence bundle after confirmation. It must report `verified_closed_loop`.
 6. Keep the resulting Draft PR unmerged and do not deploy it as part of the pilot.
 
+See the [sanitized validation evidence example](../examples/validation-evidence.example.json) for the expected bundle structure. Its `github.com/example` URLs are fictional, and the example does not count as pilot evidence.
+
 An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed outcome, or self-written JSON does not count.
 
 ## Cohort manifest
@@ -44,7 +46,16 @@ After collecting at least ten entries in each cohort:
 npm run pilot:verify -- --manifest /absolute/path/to/pilot.json
 ```
 
-The verifier checks bundle integrity, the complete governed recipe, confirmed outcomes, unique plan/Issue/PR evidence, ten self loops, and ten unique external aliases. A passing local report still says `targetReadbackReverificationRequired: true`: before launch, the maintainer must re-open every Issue and Draft PR on GitHub and confirm the recorded draft state, branches, and commit. A self-contained SHA-256 digest detects accidental bundle changes; it is not a signature and does not prove who ran the loop.
+The verifier checks bundle integrity, the complete governed recipe, confirmed outcomes, unique plan/Issue/PR evidence, ten self loops, and ten unique external aliases.
+
+Local bundle integrity and online GitHub proof are separate checks:
+
+- **Local SHA-256 integrity:** the self-contained digest detects whether the sealed bundle bytes changed. It is not a signature, does not identify who ran the loop, and does not contact GitHub or prove that a recorded target still exists in the recorded state.
+- **Online GitHub read-back:** immediately before launch, the maintainer must re-open every recorded target on GitHub and re-read these fields:
+  - **Issue:** repository, number, URL, state, title, and body must match the approved change request.
+  - **Draft PR:** repository, number, URL, open state, draft flag, head branch, head commit SHA, base branch, title, and body must match the approved plan and verified push.
+
+A passing local report therefore keeps `targetReadbackReverificationRequired: true` until this separate online read-back is complete.
 
 ## Feedback decision
 
