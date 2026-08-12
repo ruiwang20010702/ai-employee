@@ -10,6 +10,14 @@ import {
   validationEvidenceCapabilities,
 } from "../src/validation-evidence.mjs";
 
+const expectedEvidenceKinds = Object.freeze([
+  "unified_diff",
+  "isolated_git_worktree",
+  "controlled_command",
+  "verified_git_push",
+  "verified_github_pr_draft",
+]);
+
 function evidence(index = 1, { confirmed = true } = {}) {
   const hex = index.toString(16);
   const commit = hex.padStart(40, "0");
@@ -26,7 +34,7 @@ function evidence(index = 1, { confirmed = true } = {}) {
       stepId: `step-${step + 1}`,
       capability,
       status: "completed",
-      kind: capability === "github_pr_draft" ? "verified_github_pr_draft" : `verified_${capability}`,
+      kind: expectedEvidenceKinds[step],
       verification: "target_read_back",
       commit: capability === "github_pr_draft" ? commit : null,
       number: capability === "github_pr_draft" ? index : null,
@@ -80,6 +88,41 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
     rootDirectory: "/private/project",
   });
   assert.throws(() => validateValidationEvidence(privateBundle), /forbidden private field/u);
+});
+
+test("validation evidence requires unique non-empty step IDs", () => {
+  const cases = [
+    ["empty step ID", (core) => { core.evidence[0].stepId = " "; }, /non-empty stepId/u],
+    ["duplicate step ID", (core) => {
+      core.evidence[1].stepId = core.evidence[0].stepId;
+    }, /stepId values must be unique/u],
+  ];
+  for (const [name, mutate, pattern] of cases) {
+    const value = evidence();
+    const { integrity: ignored, ...core } = value;
+    mutate(core);
+    assert.throws(
+      () => validateValidationEvidence(sealValidationEvidence(core)),
+      pattern,
+      name,
+    );
+  }
+});
+
+test("validation evidence requires the expected kind for every governed capability", () => {
+  for (const [index, capability] of validationEvidenceCapabilities.entries()) {
+    const value = evidence();
+    const { integrity: ignored, ...core } = value;
+    core.evidence[index].kind = expectedEvidenceKinds[(index + 1) % expectedEvidenceKinds.length];
+    assert.throws(
+      () => validateValidationEvidence(sealValidationEvidence(core)),
+      new RegExp(
+        `Evidence step ${capability} must use kind ${expectedEvidenceKinds[index]}`,
+        "u",
+      ),
+      capability,
+    );
+  }
 });
 
 test("validation evidence binds canonical time and GitHub target identity", () => {

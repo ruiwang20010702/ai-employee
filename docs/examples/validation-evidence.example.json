@@ -21,21 +21,21 @@
       "stepId": "step-1",
       "capability": "code_patch",
       "status": "completed",
-      "kind": "verified_code_patch",
+      "kind": "unified_diff",
       "verification": "target_read_back"
     },
     {
       "stepId": "step-2",
       "capability": "local_branch",
       "status": "completed",
-      "kind": "verified_local_branch",
+      "kind": "isolated_git_worktree",
       "verification": "target_read_back"
     },
     {
       "stepId": "step-3",
       "capability": "local_test",
       "status": "completed",
-      "kind": "verified_local_test",
+      "kind": "controlled_command",
       "verification": "target_read_back"
     },
     {
@@ -81,7 +81,7 @@
   },
   "integrity": {
     "algorithm": "sha256",
-    "digest": "dc3c57fa7c512e377843af6012a26aa79a624ae47bb1cf1eaff30329b4d74574",
+    "digest": "31d783fa8950ff2e3f0d1656e28696d9bfaf9083b035fd1adc6347fd71e809d0",
     "signed": false
   }
 }

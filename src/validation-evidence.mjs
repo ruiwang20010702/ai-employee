@@ -8,6 +8,14 @@ const capabilities = Object.freeze([
   "github_pr_draft",
 ]);
 
+const evidenceKinds = Object.freeze({
+  code_patch: "unified_diff",
+  local_branch: "isolated_git_worktree",
+  local_test: "controlled_command",
+  git_push: "verified_git_push",
+  github_pr_draft: "verified_github_pr_draft",
+});
+
 function object(value, name) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${name} must be an object`);
@@ -139,9 +147,22 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
   if (JSON.stringify(observedCapabilities) !== JSON.stringify(capabilities)) {
     throw new Error("Evidence capabilities or order do not match the governed recipe");
   }
+  const stepIds = new Set();
   for (const entry of bundle.evidence) {
     object(entry, "step evidence");
-    if (entry.status !== "completed" || !entry.kind || !entry.verification) {
+    const stepId = typeof entry.stepId === "string" ? entry.stepId.trim() : "";
+    if (!stepId) {
+      throw new Error(`Evidence step ${entry.capability} must have a non-empty stepId`);
+    }
+    if (stepIds.has(stepId)) {
+      throw new Error("Evidence stepId values must be unique");
+    }
+    stepIds.add(stepId);
+    const expectedKind = evidenceKinds[entry.capability];
+    if (entry.kind !== expectedKind) {
+      throw new Error(`Evidence step ${entry.capability} must use kind ${expectedKind}`);
+    }
+    if (entry.status !== "completed" || !entry.verification) {
       throw new Error(`Evidence step ${entry.capability} is not verified and completed`);
     }
   }
