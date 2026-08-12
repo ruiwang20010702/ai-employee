@@ -23,6 +23,8 @@ impersonating you.
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
+[Start in 10 minutes](#quick-start) · [75-second demo contract](./docs/en/demo.md) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
+
 </div>
 
 ## Why Foursday?
@@ -81,7 +83,7 @@ and sees whether time was actually returned.
 
 | Capability | What the user gets | Current implementation |
 |---|---|---|
-| Project onboarding | Project goal, milestones, people, memory scope, recipes, and risk budgets in one safe draft | Implemented; side-effect capabilities start disabled |
+| Project onboarding | Project goal, milestones, people, memory scope, recipes, and risk budgets in one safe draft | Implemented; external effects start disabled and local preparation requires approval |
 | Recipe library | Repeatable workflows instead of planning the same work from every message | Four versioned built-in recipes with validated inputs |
 | Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, and triggers in one view | Implemented in the local personal console |
 | Time-return dashboard | Evidence-backed minutes saved, confirmed by the user | Implemented; estimates never count automatically |
@@ -121,22 +123,65 @@ proves that a dedicated graph database is necessary.
 
 ## Quick Start
 
-### Run the five-minute local demo
+### Start the Web onboarding preview
 
-The demo needs only Node.js. It does not require DingTalk, DWS, PostgreSQL,
-Codex, Claude Code, or an API key:
+The fastest way to understand Foursday is the local activation page. It needs
+only Node.js and does not require DingTalk, DWS, PostgreSQL, Codex, Claude Code,
+GitHub authentication, or an API key:
 
 ```bash
 git clone https://github.com/ruiwang20010702/foursday.git
 cd foursday
 npm ci
+npm start
+```
+
+Open `http://127.0.0.1:4173`, bind a local Git repository, and describe one
+GitHub issue. Foursday builds its real five-step delivery recipe—patch, isolated
+branch, tests, push, and Draft PR—and shows the plan hash, risk levels, and
+disabled capabilities. Building this preview touches zero external systems.
+
+To continue beyond the preview, choose Codex or Claude Code. Foursday then
+requires a clean Git repository whose origin matches the Issue, a registered
+`package.json` test script, an authenticated GitHub CLI, and a second approval
+bound to the exact plan hash. Only that approval can generate a patch, create a
+`foursday/` branch, run the registered test, push the branch, and open a Draft
+PR. It cannot merge or deploy. Execution state is stored in an encrypted local
+SQLite session; project memory and returned time remain proposals until you
+confirm them. After completion, download the JSON evidence bundle; download it
+again after confirmation to capture the final `verified_closed_loop` status.
+The bundle omits local paths, remotes, action tokens, credentials, and model
+output while retaining the Issue, plan hash, target read-back, memory status,
+time-return status, and explicit safety boundaries.
+
+For an OpenAI-compatible provider, configure all three values before `npm
+start`; they are read at runtime and the API key is never written to the local
+session:
+
+```bash
+export FOURSDAY_OPENAI_BASE_URL="https://your-provider.example/v1/"
+export FOURSDAY_OPENAI_API_KEY="..."
+export FOURSDAY_OPENAI_MODEL="your-model"
+npm start
+```
+
+HTTPS is required except for an explicit loopback endpoint such as a local
+model server. The provider receives an artifact prompt only after exact-plan
+approval.
+
+### Run the terminal safety demo
+
+The terminal demo teaches the approval and read-back model with a deterministic
+in-memory target:
+
+```bash
 npm run demo
 ```
 
-Enter a message, review the draft, and choose whether to approve the local
-simulation. Before approval, the effect ledger and evidence list remain empty.
-After approval, the demo records intent, performs only an in-memory action, and
-reads the simulated target back. For a non-interactive reproducible run:
+Enter a message, review the draft, and decide whether to approve the simulation.
+Before approval, the effect ledger and evidence list remain empty. After
+approval, the demo records intent, performs only an in-memory action, and reads
+the simulated target back. For a reproducible non-interactive run:
 
 ```bash
 npm run demo -- --message "Prepare a launch checklist" --approve --json
@@ -235,6 +280,9 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 | [Integrations](./docs/en/integrations.md) | DingTalk/DWS, Feishu events, Codex, Claude Code, and provider contracts |
 | [Capabilities and Memory](./docs/en/capabilities.md) | Project authorization, plans, formal memory, and takeover |
 | [Deployment](./docs/en/deployment.md) | Safe setup, exact-SHA releases, verification, and forward-only boundaries |
+| [First contributions](./docs/en/first-contributions.md) | Five bounded, issue-ready tasks for new contributors |
+| [Authentic demo contract](./docs/en/demo.md) | The 75-second storyboard and evidence required before publishing the launch video |
+| [Pilot validation](./docs/en/pilot-validation.md) | What counts toward 10 maintainer loops and 10 external testers |
 | [Security Policy](./SECURITY.md) | Private reporting and supported security boundaries |
 
 ## Roadmap
@@ -243,6 +291,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [x] Project capability gateway, work plans, execution evidence, and result reporting
 - [x] Formal memory, takeover controls, SLOs, and immutable production releases
 - [x] Interactive local demo without enterprise accounts or model credentials
+- [x] One-command local Web onboarding with a real governed GitHub recipe and zero external writes
 - [x] Versioned MessageAdapter, AgentRuntime, and ModelProvider contracts
 - [ ] Easier desktop distribution
 - [x] Feishu Open Platform adapter without a DWS dependency
@@ -259,7 +308,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 
 ## Contributing
 
-Issues, real-world use cases, documentation improvements, and code contributions are welcome. Read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before contributing.
+Issues, real-world use cases, documentation improvements, and code contributions are welcome. Start with one of the five [first-contribution drafts](./docs/en/first-contributions.md), then read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). The drafts become live `good first issue` items only after the v0.5 candidate is published.
 
 ## License
 

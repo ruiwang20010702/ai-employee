@@ -6,8 +6,18 @@
 
 ## [未发布]
 
+### 计划中
+
+- 更易安装的桌面发行包和生产级社区连接器。
+
+## [0.5.0] - 2026-08-12
+
 ### 新增
 
+- 新增 10 分钟本机 Web 接入路径；预览无需钉钉、DWS 或生产 PostgreSQL。
+- Codex、Claude Code 和 OpenAI-compatible 运行时共享同一条从 GitHub Issue 到已回读 Draft PR 的审批闭环。
+- 新增隐私受限的闭环证据包，以及 10 次维护者自测和 10 名外部体验者的证据验证器。
+- 英文默认 README、Foursday 新视觉、75 秒真实演示契约和 5 个边界清晰的首次贡献草稿。
 - 个人项目接入、4 个官方配方、项目驾驶舱和本人确认的时间返还账本。
 - 默认停用的定时/事件触发器，以及幂等运行、每日次数、冷却和租约。
 - 会议到执行与 GitHub 补丁到 Draft PR 的完整配方。
@@ -20,10 +30,6 @@
 - 项目接入在共享服务边界校验规范 Git 仓库根目录，不再只依赖 CLI 检查。
 - 触发器定义拒绝凭据材料，定时运行绑定租约实例，主动计划必须等待精确运行完成落账后才能消费授权。
 - 社区扩展清单只接受 `1.0` 契约版本，并要求五项安全保证全部显式开启。
-
-### 计划中
-
-- 更易安装的桌面发行包和生产级社区连接器。
 
 ## [0.4.0] - 2026-08-11
 
@@ -69,7 +75,8 @@
 - 本机管理台、只读 Codex 插件和 macOS 常驻服务。
 - SQLite 开发存储与基础生产诊断流程。
 
-[未发布]: https://github.com/ruiwang20010702/foursday/compare/v0.4.0...HEAD
+[未发布]: https://github.com/ruiwang20010702/foursday/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ruiwang20010702/foursday/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ruiwang20010702/foursday/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ruiwang20010702/foursday/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ruiwang20010702/foursday/releases/tag/v0.2.0

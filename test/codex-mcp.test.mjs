@@ -16,14 +16,17 @@ import {
 } from "../plugins/foursday/scripts/mcp-server.mjs";
 
 test("仓库市场以显式安装方式发布只读 Codex 插件", async () => {
-  const result = await validateCodexPluginPackage({
-    root: fileURLToPath(new URL("../", import.meta.url)),
-  });
+  const [result, application] = await Promise.all([
+    validateCodexPluginPackage({
+      root: fileURLToPath(new URL("../", import.meta.url)),
+    }),
+    readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
+  ]);
   assert.deepEqual(result, {
     valid: true,
     marketplace: "foursday-local",
     plugin: "foursday",
-    version: "0.4.0",
+    version: application.version,
     installation: "AVAILABLE",
     authentication: "ON_INSTALL",
     readOnly: true,
@@ -40,7 +43,7 @@ test("应用包、插件清单和 MCP 服务版本保持一致", async () => {
       "utf8",
     ).then(JSON.parse),
   ]);
-  assert.equal(application.version, "0.4.0");
+  assert.match(application.version, /^\d+\.\d+\.\d+$/u);
   assert.equal(plugin.version, application.version);
   assert.equal(pluginVersion, application.version);
 });

@@ -397,6 +397,12 @@ test("中英文首页、治理文件和英文核心文档的本地链接全部�
     "docs/en/architecture.md",
     "docs/en/capabilities.md",
     "docs/en/deployment.md",
+    "docs/en/demo.md",
+    "docs/en/first-contributions.md",
+    "docs/en/pilot-validation.md",
+    "docs/真实演示录制说明.md",
+    "docs/首次贡献任务.md",
+    "docs/体验验证说明.md",
   ]) {
     const text = await projectText(file);
     const base = new URL(`../${file}`, import.meta.url);
@@ -411,6 +417,58 @@ test("中英文首页、治理文件和英文核心文档的本地链接全部�
       );
     }
   }
+});
+
+test("首批贡献任务可发布、范围受限且进入复用安装包", async () => {
+  const [english, chinese, packageText, entries] = await Promise.all([
+    projectText("docs/en/first-contributions.md"),
+    projectText("docs/首次贡献任务.md"),
+    projectText("package.json"),
+    readdir(new URL("../.github/ISSUE_DRAFTS/", import.meta.url)),
+  ]);
+  const drafts = entries.filter((entry) => /^gfi-\d{3}-.+\.md$/u.test(entry)).sort();
+  assert.equal(drafts.length, 5);
+  assert.deepEqual(
+    drafts.map((entry) => entry.slice(0, 7)),
+    ["gfi-001", "gfi-002", "gfi-003", "gfi-004", "gfi-005"],
+  );
+  for (const draft of drafts) {
+    const text = await projectText(`.github/ISSUE_DRAFTS/${draft}`);
+    assert.match(text, /Labels: .*`good first issue`/u);
+    assert.match(text, /## User outcome/u);
+    assert.match(text, /## Scope/u);
+    assert.match(text, /## Acceptance/u);
+    assert.match(text, /## Non-goals/u);
+    assert.doesNotMatch(text, /(?:enable|开启).{0,30}(?:production sending|生产发送)/iu);
+    assert.match(english, new RegExp(draft.replace(".", "\\."), "u"));
+  }
+  assert.match(english, /do not claim they are already open Issues/u);
+  assert.match(chinese, /不宣称任务已经开放领取/u);
+  assert.ok(JSON.parse(packageText).files.includes(".github/ISSUE_DRAFTS/"));
+});
+
+test("真实演示文档要求同一次闭环和可复核证据，不冒充成片", async () => {
+  const [readme, chineseReadme, demo, chineseDemo] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/demo.md"),
+    projectText("docs/真实演示录制说明.md"),
+  ]);
+  assert.match(readme, /75-second demo contract/u);
+  assert.match(chineseReadme, /75 秒真实演示契约/u);
+  for (const value of [
+    "public, synthetic GitHub Issue",
+    "complete plan hash",
+    "verified Draft PR",
+    "memory: proposed → confirmed",
+    "No merge. No deploy.",
+  ]) assert.match(demo, new RegExp(value, "u"));
+  assert.match(demo, /recording plan rather than a finished video/u);
+  assert.match(demo, /verified_closed_loop/u);
+  assert.match(demo, /integrity digest/u);
+  assert.match(chineseDemo, /不能把本地预览、无关 PR 和模拟结果剪接/u);
+  assert.match(chineseDemo, /在此之前统一称为录制计划/u);
+  assert.match(chineseDemo, /verified_closed_loop/u);
 });
 
 test("英文核心文档覆盖产品、架构、能力记忆和部署边界", async () => {

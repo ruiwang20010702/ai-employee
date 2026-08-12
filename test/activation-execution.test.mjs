@@ -1,0 +1,187 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { promisify } from "node:util";
+import { buildActivationPreview } from "../src/activation.mjs";
+import {
+  ActivationExecutionCoordinator,
+  inspectActivationRepository,
+  prepareActivationExecution,
+} from "../src/activation-execution.mjs";
+
+const execFileAsync = promisify(execFile);
+
+const input = {
+  projectId: "example-project",
+  projectName: "Example project",
+  rootDirectory: "/workspace/example",
+  requesterId: "owner-1",
+  runtime: "codex",
+  issueUrl: "https://github.com/example/project/issues/42",
+  changeRequest: "Fix the startup error without changing public APIs.",
+  testCommandId: "check",
+  baseBranch: "main",
+  prTitle: "fix: keep startup compatible",
+};
+
+async function previewBuilder(value) {
+  return buildActivationPreview(value, {
+    onboardingBuilder: async (onboarding) => {
+      const { buildProjectOnboardingDraft } = await import("../src/project-onboarding.mjs");
+      return buildProjectOnboardingDraft({
+        ...onboarding,
+        realpathFn: async (path) => path,
+        gitRootFn: async (path) => path,
+      });
+    },
+  });
+}
+
+const snapshot = {
+  head: "a".repeat(40),
+  remoteUrl: "https://github.com/example/project.git",
+  repository: "example/project",
+};
+
+async function candidate() {
+  return prepareActivationExecution(input, {
+    previewBuilder,
+    repositoryInspector: async () => snapshot,
+    commandBuilder: async () => ({
+      executable: "/usr/bin/true",
+      args: [],
+      timeoutMs: 10_000,
+      maxOutputBytes: 10_000,
+    }),
+  });
+}
+
+test("activation repository inspection requires a clean credential-free GitHub origin", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "foursday-activation-repository-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await execFileAsync("/usr/bin/git", ["-C", directory, "init", "-b", "main"]);
+  await execFileAsync("/usr/bin/git", ["-C", directory, "config", "user.name", "Foursday Test"]);
+  await execFileAsync("/usr/bin/git", ["-C", directory, "config", "user.email", "foursday@example.invalid"]);
+  await writeFile(join(directory, "README.md"), "fixture\n");
+  await execFileAsync("/usr/bin/git", ["-C", directory, "add", "README.md"]);
+  await execFileAsync("/usr/bin/git", ["-C", directory, "commit", "-m", "initial"]);
+  await execFileAsync("/usr/bin/git", ["-C", directory, "remote", "add", "origin", "git@github.com:Example/Project.git"]);
+  const snapshot = await inspectActivationRepository(directory);
+  assert.equal(snapshot.repository, "example/project");
+  assert.match(snapshot.head, /^[a-f0-9]{40}$/u);
+  await writeFile(join(directory, "untracked.txt"), "must block\n");
+  await assert.rejects(
+    inspectActivationRepository(directory),
+    /worktree must be clean/u,
+  );
+  await rm(join(directory, "untracked.txt"));
+  await execFileAsync("/usr/bin/git", [
+    "-C", directory, "remote", "set-url", "origin",
+    "https://user:password@github.com/example/project.git",
+  ]);
+  await assert.rejects(
+    inspectActivationRepository(directory),
+    /without embedded credentials/u,
+  );
+});
+
+test("activation execution binds Issue, clean repository, command, remote, and full approval", async () => {
+  const result = await candidate();
+  assert.equal(result.assessment.decision, "REQUIRE_APPROVAL");
+  assert.match(result.assessment.plan.objective, /issues\/42/u);
+  assert.equal(result.manifest.capabilities.local_test.mode, "approval_required");
+  assert.equal(result.manifest.capabilities.git_push.expectedRemoteUrl, snapshot.remoteUrl);
+  assert.equal(result.manifest.capabilities.github_pr_draft.repository, "example/project");
+  assert.deepEqual(result.manifest.capabilities.github_pr_draft.baseBranches, ["main"]);
+  await assert.rejects(
+    () => prepareActivationExecution(input, {
+      previewBuilder,
+      repositoryInspector: async () => ({ ...snapshot, repository: "other/project" }),
+      commandBuilder: async () => ({ executable: "/usr/bin/true", args: [] }),
+    }),
+    /does not match/u,
+  );
+});
+
+test("activation coordinator executes only the approved hash then proposes confirmable outcomes", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "foursday-activation-execution-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const prepared = await candidate();
+  const evidence = {
+    code_patch: { kind: "unified_diff", verification: "git_apply_check", sha256: "1".repeat(64) },
+    local_branch: { kind: "isolated_git_worktree", verification: "isolated_commit_matches_verified_patch", commit: "b".repeat(40) },
+    local_test: { kind: "controlled_command", verification: "exit_code_zero", sha256: "2".repeat(64) },
+    git_push: { kind: "verified_git_push", verification: "ls_remote_commit_matches", commit: "b".repeat(40) },
+    github_pr_draft: {
+      kind: "verified_github_pr_draft",
+      verification: "gh_pr_view_matches_push_and_intent",
+      commit: "b".repeat(40),
+      number: 42,
+      url: "https://github.com/example/project/pull/42",
+    },
+  };
+  const coordinator = new ActivationExecutionCoordinator({
+    sessionRoot: join(directory, "sessions"),
+    prepare: async () => prepared,
+    repositoryInspector: async () => snapshot,
+    artifactRuntimeFactory: async () => ({ id: "fake" }),
+    ghPath: "/usr/bin/true",
+    adapterFactory: () => Object.fromEntries(
+      Object.entries(evidence).map(([capability, value]) => [capability, {
+        async execute() { return { verified: true, evidence: value }; },
+      }]),
+    ),
+  });
+  t.after(() => coordinator.close());
+  const created = await coordinator.create(input);
+  assert.equal(created.plan.status, "awaiting_approval");
+  assert.equal(created.externalSystemsTouched, false);
+  await assert.rejects(
+    () => coordinator.approveAndExecute(created.sessionId, {
+      planHash: "0".repeat(64),
+      approved: true,
+      reason: "reviewed",
+      humanActiveMinutes: 10,
+    }),
+    /review the current plan again/u,
+  );
+  const completed = await coordinator.approveAndExecute(created.sessionId, {
+    planHash: created.plan.planHash,
+    approved: true,
+    reason: "I reviewed the immutable five-step plan and repository scope.",
+    humanActiveMinutes: 10,
+  });
+  assert.equal(completed.status, "completed");
+  assert.deepEqual(completed.evidence.map((item) => item.kind), Object.values(evidence).map((item) => item.kind));
+  assert.equal(completed.memoryCandidate.status, "proposed");
+  assert.equal(completed.timeReturn.status, "proposed");
+  assert.equal(completed.timeReturn.returnedMinutes, 110);
+  const proposedEvidence = await coordinator.exportEvidence(created.sessionId);
+  assert.equal(proposedEvidence.validationStatus, "awaiting_outcome_confirmation");
+  assert.equal(proposedEvidence.plan.planHash, created.plan.planHash);
+  assert.equal(proposedEvidence.evidence.length, 5);
+  assert.equal(proposedEvidence.safeguards.mergePerformed, false);
+  assert.equal(proposedEvidence.safeguards.deploymentPerformed, false);
+  assert.match(proposedEvidence.integrity.digest, /^[a-f0-9]{64}$/u);
+  assert.equal(proposedEvidence.integrity.signed, false);
+  const serialized = JSON.stringify(proposedEvidence);
+  assert.doesNotMatch(serialized, /\/workspace\/example/u);
+  assert.doesNotMatch(serialized, /remoteUrl|rootDirectory|actionToken/u);
+  const confirmed = await coordinator.confirmOutcomes(created.sessionId, {
+    memoryId: completed.memoryCandidate.id,
+    timeReturnId: completed.timeReturn.id,
+  });
+  assert.equal(confirmed.memory.status, "confirmed");
+  assert.equal(confirmed.timeReturn.status, "confirmed");
+  const confirmedEvidence = await coordinator.exportEvidence(created.sessionId);
+  assert.equal(confirmedEvidence.validationStatus, "verified_closed_loop");
+  assert.equal(confirmedEvidence.outcomes.memory.status, "confirmed");
+  assert.equal(confirmedEvidence.outcomes.timeReturn.status, "confirmed");
+  await assert.rejects(
+    () => coordinator.confirmOutcomes(created.sessionId, { memoryId: "memory_other" }),
+    /does not belong/u,
+  );
+});

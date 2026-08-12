@@ -1,6 +1,6 @@
 {
   "name": "foursday-runtime",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Foursday is an open-source work twin for authorized, verifiable workplace automation.",
   "bin": {
     "foursday": "scripts/新环境向导.mjs",
@@ -10,6 +10,7 @@
   "license": "MIT",
   "type": "module",
   "files": [
+    ".github/ISSUE_DRAFTS/",
     ".agents/plugins/marketplace.json",
     "assets/",
     "db/",
@@ -20,7 +21,6 @@
     "scripts/",
     "src/*.mjs",
     "plugins/foursday/",
-    "!src/store.mjs",
     "CHANGELOG.md",
     "CHANGELOG_ZH.md",
     "CODE_OF_CONDUCT.md",
@@ -38,6 +38,8 @@
     "node": ">=22.5"
   },
   "scripts": {
+    "start": "node scripts/启动体验.mjs",
+    "onboard": "node scripts/启动体验.mjs",
     "demo": "node scripts/交互式演示.mjs",
     "listen": "node src/listener.mjs",
     "worker": "node src/worker.mjs",
@@ -82,6 +84,7 @@
     "messages:reconcile": "node scripts/消息覆盖对账.mjs",
     "memory:sources": "node scripts/校验记忆来源.mjs",
     "graph:benchmark": "node scripts/基准受治理工作图.mjs",
+    "pilot:verify": "node scripts/验证体验证据.mjs",
     "db:backup": "node scripts/备份数据库.mjs",
     "db:restore": "node scripts/恢复数据库.mjs",
     "db:restore:drill": "node scripts/隔离恢复演练.mjs",

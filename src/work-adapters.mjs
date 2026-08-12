@@ -620,7 +620,11 @@ async function resolveIsolatedWorkspace({
   return { root, target, branch, commit, workspace };
 }
 
-export function createReadOnlyWorkAdapters({ codexPath, gbrainPath = "gbrain" }) {
+export function createReadOnlyWorkAdapters({
+  codexPath,
+  gbrainPath = "gbrain",
+  artifactRuntime = null,
+}) {
   const artifact = (capability, instruction, verification) => ({
     async preflight({ plan, step, manifest }) {
       await verifiedWorkingDirectory(manifest, step.workingDirectory);
@@ -641,9 +645,9 @@ export function createReadOnlyWorkAdapters({ codexPath, gbrainPath = "gbrain" })
         step,
         priorEvidence,
       );
-      const result = await runCodexArtifact({
-        codexPath,
+      const artifactInput = {
         workingDirectory: target,
+        outputDirectory: fileURLToPath(patchDirectory),
         timeoutMs: rule.timeoutMs ?? 120_000,
         prompt: [
           ...basePrompt({ plan, step }),
@@ -653,7 +657,10 @@ export function createReadOnlyWorkAdapters({ codexPath, gbrainPath = "gbrain" })
           instruction,
         ].filter(Boolean).join("\n\n"),
         signal,
-      });
+      };
+      const result = artifactRuntime
+        ? await artifactRuntime.generateArtifact(artifactInput)
+        : await runCodexArtifact({ codexPath, ...artifactInput });
       return verification({ ...result, root, target });
     },
   });
@@ -788,13 +795,14 @@ export function createReadOnlyWorkAdapters({ codexPath, gbrainPath = "gbrain" })
 
 export function createControlledWorkAdapters({
   codexPath,
+  artifactRuntime = null,
   dwsPath = null,
   gbrainPath = "gbrain",
   ghPath = null,
   store = null,
 }) {
   return {
-    ...createReadOnlyWorkAdapters({ codexPath, gbrainPath }),
+    ...createReadOnlyWorkAdapters({ codexPath, gbrainPath, artifactRuntime }),
     project_memory_proposal: {
       async preflight({ plan, step, manifest }) {
         referencedEarlierStep(plan, step, "documentStepId", "document_draft");

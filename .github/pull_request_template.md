@@ -1,26 +1,26 @@
-## 解决什么问题
+## User problem and outcome
 
-<!-- 描述用户问题和最终行为，不要只罗列文件。 -->
+<!-- Describe the user problem and final behavior, not only edited files. -->
 
-## 主要改动
+## Main changes
 
 -
 
-## 权限、数据与副作用
+## Authority, data, and side effects
 
-<!-- 说明新增或变化的消息范围、能力、外部写入、迁移和回退边界；无变化请写“无”。 -->
+<!-- Explain changes to message scope, capabilities, external writes, migrations, or rollback. Write "None" when unchanged. -->
 
-## 验证证据
+## Verification evidence
 
-<!-- 列出实际运行的命令和结果。UI/文档改动可附已脱敏截图。 -->
+<!-- List commands actually run and results observed. Attach sanitized UI screenshots when useful. -->
 
-- [ ] 允许路径已覆盖
-- [ ] 拒绝、超时或异常路径已覆盖
-- [ ] 外部动作已做幂等和目标回读验证，或本 PR 不涉及外部动作
-- [ ] SQLite/PostgreSQL 对等性已验证，或本 PR 不涉及存储
-- [ ] 文档和迁移/回退说明已更新，或本 PR 不需要更新
-- [ ] 未包含真实消息、人员信息、凭据、数据库、日志、备份或本机路径
+- [ ] Allowed path covered
+- [ ] Denied, timeout, or failure path covered
+- [ ] External effects are idempotent and read back from the target, or this PR has no external effects
+- [ ] SQLite/PostgreSQL parity verified, or this PR does not affect storage
+- [ ] Documentation and migration/rollback notes updated, or no update is required
+- [ ] No real messages, personal data, credentials, databases, logs, backups, or machine-specific paths included
 
-## 发布说明
+## Release boundary
 
-<!-- 合并不等于部署；说明是否需要单独的生产审批、迁移或业务放量。 -->
+<!-- A merge is not a deployment. State whether separate production approval, migration, or business rollout is required. -->

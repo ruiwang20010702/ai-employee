@@ -18,6 +18,8 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
+[10 分钟开始](#快速开始) · [75 秒真实演示契约](./docs/真实演示录制说明.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+
 </div>
 
 ## 为什么做 Foursday
@@ -103,7 +105,7 @@ Foursday 默认服务一个人，不是为了给管理者监控团队。个人�
 
 | 功能 | 用户价值 | 当前实现 |
 |---|---|---|
-| 项目接入向导 | 一次配置目标、里程碑、协作对象、记忆范围、配方和风险预算 | 已实现；所有外部副作用能力默认关闭 |
+| 项目接入向导 | 一次配置目标、里程碑、协作对象、记忆范围、配方和风险预算 | 已实现；外部副作用默认关闭，本地准备动作需审批 |
 | 工作配方库 | 重复流程直接复用，不再每次从消息重新规划 | 已实现 4 个带版本的官方配方 |
 | 项目驾驶舱 | 汇总目标、计划、证据、交付物、正式记忆和主动触发器 | 已集成本机个人控制台 |
 | 时间返还仪表盘 | 只统计有执行证据且经本人确认的返还时间 | 已实现；模型估算不自动计入 |
@@ -131,14 +133,39 @@ Loop Engineering 继续负责“一个任务如何反复做到有证据地完成
 
 ## 快速开始
 
-### 1. 五分钟本地演示
+### 1. 启动 Web 接入体验
 
-演示只需要 Node.js，不需要钉钉、DWS、PostgreSQL、Codex、Claude Code 或任何 API Key：
+最快理解 Foursday 的方式是本地接入页。它只需要 Node.js，不需要钉钉、DWS、PostgreSQL、Codex、Claude Code、GitHub 登录或任何 API Key：
 
 ```bash
 git clone https://github.com/ruiwang20010702/foursday.git
 cd foursday
 npm ci
+npm start
+```
+
+打开 `http://127.0.0.1:4173`，绑定一个本地 Git 仓库并填写 GitHub Issue。Foursday 会使用真实的五步代码交付配方生成补丁、隔离分支、测试、推送和 Draft PR 计划，并展示计划哈希、风险等级和被锁定能力。生成预览不会触碰任何外部系统。
+
+如果要继续真实执行，请选择 Codex 或 Claude Code。Foursday 会再次检查工作区干净、Git 远端与 Issue 仓库一致、测试命令已登记、GitHub CLI 已登录，然后要求你对完整计划哈希进行第二次审批。只有这次审批才能生成补丁、创建 `foursday/` 分支、运行登记测试、推送分支并创建 Draft PR；它不能合并或部署。执行状态写入本地加密 SQLite 会话，项目记忆和时间返还仍只是候选，必须由你再次确认。
+
+闭环完成后可以下载 JSON 证据包；确认记忆和时间返还后再次下载，状态才会变为 `verified_closed_loop`。证据包不包含本机路径、Git 远端、操作令牌、凭据或模型原始输出，只保留 Issue、计划哈希、目标回读、记忆与时间返还状态以及明确的安全边界。
+
+使用 OpenAI-compatible 模型时，在 `npm start` 前同时配置三个值。它们只在运行时读取，API Key 不会写入本地会话：
+
+```bash
+export FOURSDAY_OPENAI_BASE_URL="https://your-provider.example/v1/"
+export FOURSDAY_OPENAI_API_KEY="..."
+export FOURSDAY_OPENAI_MODEL="your-model"
+npm start
+```
+
+除显式回环地址上的本地模型服务外，接口必须使用 HTTPS；只有完整计划获批后，模型才会收到工件生成提示。
+
+### 2. 运行终端安全演示
+
+终端演示使用确定性的内存目标解释“审批后执行、执行后回读”：
+
+```bash
 npm run demo
 ```
 
@@ -148,7 +175,7 @@ npm run demo
 npm run demo -- --message "帮我准备一份上线检查清单" --approve --json
 ```
 
-### 2. 本地验证代码
+### 3. 本地验证代码
 
 这条路径不会连接你的钉钉、生产数据库或 Codex 账号：
 
@@ -159,7 +186,7 @@ npm ci
 npm run check
 ```
 
-### 3. 检查运行环境
+### 4. 检查运行环境
 
 钉钉生产配置当前面向 macOS 登录会话，需要 Node.js 22.5+、PostgreSQL 16/17、已授权的 DWS，以及 Codex 或 Claude Code：
 
@@ -169,7 +196,7 @@ npm run setup:check
 
 `setup:check` 只检查依赖、配置权限和危险能力开关，不读取钉钉消息，不连接生产数据库，也不修改系统。
 
-### 4. 从固定版本复用
+### 5. 从固定版本复用
 
 在新的空白工作目录中固定到已经审核的完整提交：
 
@@ -280,6 +307,7 @@ flowchart LR
 - [x] 项目能力网关、工作计划、执行证据与结果回传
 - [x] 正式记忆、人工接管、SLO 和不可变生产发布
 - [x] 无需企业账号或模型凭据的交互式本地演示
+- [x] 一条命令启动 Web 接入页，复用真实 GitHub 受治理配方且零外部写入
 - [x] 带版本的 MessageAdapter、AgentRuntime 和 ModelProvider 契约
 - [x] 个人项目接入、配方库、项目驾驶舱和时间返还账本
 - [x] 主动触发、会议到执行和 GitHub PR 草稿交付闭环
@@ -305,15 +333,18 @@ flowchart LR
 | [生产运维手册](./docs/生产运维手册.md) | 运维与负责人 | 配置、部署、监控、备份和恢复 |
 | [人工判断标注手册](./docs/人工判断标注操作手册.md) | 运营与标注人员 | 回应必要性和草稿质量口径 |
 | [集成扩展指南](./docs/集成扩展指南.md) | 适配器贡献者 | 消息、事件、办公空间、配方契约和安全证据 |
+| [首次贡献任务](./docs/首次贡献任务.md) | 新贡献者 | 5 个边界清晰、可直接发布为 Issue 的入门任务 |
+| [真实演示录制说明](./docs/真实演示录制说明.md) | 发布负责人 | 75 秒演示分镜、公开证据和真实性门禁 |
+| [体验验证说明](./docs/体验验证说明.md) | 发布负责人和体验者 | 10 次自测、10 名外测和证据汇总门禁 |
 | [安全说明](./安全说明.md) | 安全审查人员 | 数据边界、密钥、报告渠道和风险 |
 
 ## 参与贡献
 
-欢迎提交问题、使用案例、文档改进和代码贡献。开始之前请阅读[贡献指南](./CONTRIBUTING_ZH.md)和[行为准则](./CODE_OF_CONDUCT_ZH.md)。
+欢迎提交问题、使用案例、文档改进和代码贡献。可以先选择一项[首次贡献任务](./docs/首次贡献任务.md)，再阅读[贡献指南](./CONTRIBUTING_ZH.md)和[行为准则](./CODE_OF_CONDUCT_ZH.md)。这些任务目前是 v0.5 候选版中的 Issue 草案，只有候选版推送后才会发布为真实 `good first issue`。
 
 - 不要在 Issue、PR、截图或测试夹具中包含真实消息、人员编号、令牌或公司内部资料。
 - 新能力必须有明确边界、反向测试、目标回读和失败处理。
-- 适合第一次贡献的任务会标记为 `good first issue`。
+- 候选版发布后，适合第一次贡献的任务会在 GitHub 中标记为 `good first issue`。
 
 ## 许可证
 

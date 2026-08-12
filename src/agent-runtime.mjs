@@ -25,6 +25,12 @@ function runtimeError(runtimeId, kind, detail) {
   return error;
 }
 
+function runtimeCancelled(runtimeId) {
+  const error = new Error(`${runtimeId} draft cancelled`);
+  error.code = "WORK_PLAN_CANCELLED";
+  return error;
+}
+
 export class CodexAgentRuntime {
   constructor({
     executable = process.env.CODEX_PATH ?? "codex",
@@ -45,7 +51,9 @@ export class CodexAgentRuntime {
     workspacePath,
     outputDirectory,
     timeoutMs = 120_000,
+    signal = null,
   }) {
+    if (signal?.aborted) throw runtimeCancelled("Codex");
     await mkdir(outputDirectory, { recursive: true, mode: 0o700 });
     await chmod(outputDirectory, 0o700);
     const temporaryDirectory = await mkdtemp(join(outputDirectory, "runtime-"));
@@ -77,12 +85,14 @@ export class CodexAgentRuntime {
         });
         let settled = false;
         let timedOut = false;
+        let cancelled = false;
         let forceKillTimer;
         const finish = (error) => {
           if (settled) return;
           settled = true;
           clearTimeout(timeoutTimer);
           clearTimeout(forceKillTimer);
+          signal?.removeEventListener("abort", onAbort);
           if (error) rejectRun(error);
           else resolveRun();
         };
@@ -100,6 +110,18 @@ export class CodexAgentRuntime {
           forceKillTimer.unref();
         }, timeoutMs);
         timeoutTimer.unref();
+        const onAbort = () => {
+          if (settled || timedOut || cancelled) return;
+          cancelled = true;
+          try {
+            killGroup("SIGTERM");
+            forceKillTimer = setTimeout(() => killGroup("SIGKILL"), 2_000);
+            forceKillTimer.unref();
+          } catch (error) {
+            finish(runtimeCancelled("Codex"));
+          }
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
         const executionError = (exitCode = null) => runtimeError(
           "Codex",
           "execution",
@@ -111,7 +133,8 @@ export class CodexAgentRuntime {
         });
         child.once("error", () => finish(executionError()));
         child.once("close", (code) => {
-          if (timedOut) finish(runtimeError("Codex", "timeout"));
+          if (cancelled) finish(runtimeCancelled("Codex"));
+          else if (timedOut) finish(runtimeError("Codex", "timeout"));
           else if (code !== 0) finish(executionError(code));
           else finish();
         });
@@ -165,7 +188,9 @@ export class ClaudeCodeAgentRuntime {
     schemaPath,
     workspacePath,
     timeoutMs = 120_000,
+    signal = null,
   }) {
+    if (signal?.aborted) throw runtimeCancelled("ClaudeCode");
     const schema = JSON.parse(await readFile(schemaPath, "utf8"));
     const stdout = await new Promise((resolveRun, rejectRun) => {
       const stderrHash = createHash("sha256");
@@ -193,12 +218,14 @@ export class ClaudeCodeAgentRuntime {
       });
       let settled = false;
       let timedOut = false;
+      let cancelled = false;
       let forceKillTimer;
       const finish = (error) => {
         if (settled) return;
         settled = true;
         clearTimeout(timeoutTimer);
         clearTimeout(forceKillTimer);
+        signal?.removeEventListener("abort", onAbort);
         if (error) rejectRun(error);
         else resolveRun(Buffer.concat(chunks).toString("utf8"));
       };
@@ -216,6 +243,18 @@ export class ClaudeCodeAgentRuntime {
         forceKillTimer.unref();
       }, timeoutMs);
       timeoutTimer.unref();
+      const onAbort = () => {
+        if (settled || timedOut || cancelled) return;
+        cancelled = true;
+        try {
+          killGroup("SIGTERM");
+          forceKillTimer = setTimeout(() => killGroup("SIGKILL"), 2_000);
+          forceKillTimer.unref();
+        } catch (error) {
+          finish(runtimeCancelled("ClaudeCode"));
+        }
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
       const executionError = (exitCode = null) => runtimeError(
         "ClaudeCode",
         "execution",
@@ -238,7 +277,8 @@ export class ClaudeCodeAgentRuntime {
       });
       child.once("error", () => finish(executionError()));
       child.once("close", (code) => {
-        if (timedOut) finish(runtimeError("ClaudeCode", "timeout"));
+        if (cancelled) finish(runtimeCancelled("ClaudeCode"));
+        else if (timedOut) finish(runtimeError("ClaudeCode", "timeout"));
         else if (code !== 0) finish(executionError(code));
         else finish();
       });

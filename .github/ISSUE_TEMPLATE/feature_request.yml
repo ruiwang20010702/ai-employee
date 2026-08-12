@@ -1,5 +1,5 @@
-name: 功能建议
-description: 提议一个有明确边界、验证方式和失败策略的新能力
+name: Feature request
+description: Propose a bounded capability with a verification and failure strategy
 title: "[Feature] "
 labels:
   - enhancement
@@ -7,31 +7,31 @@ body:
   - type: textarea
     id: problem
     attributes:
-      label: 要解决的问题
-      description: 描述用户场景和当前阻碍，不要只写解决方案。
+      label: User problem
+      description: Describe the user outcome and current obstacle, not only a preferred implementation.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: 建议方案
+      label: Proposed behavior
     validations:
       required: true
   - type: textarea
     id: boundary
     attributes:
-      label: 权限与能力边界
-      description: 谁可以触发、允许访问什么、哪些情况必须拒绝或人工审批？
+      label: Authority and capability boundary
+      description: Who may trigger it, what may it access, and when must it refuse or require approval?
     validations:
       required: true
   - type: textarea
     id: verification
     attributes:
-      label: 成功验证与失败处理
-      description: 如何从目标系统回读成功？超时、未知结果和部分失败如何处理？
+      label: Read-back evidence and failure handling
+      description: How is the final target state verified? What happens on timeout, unknown outcome, duplicate delivery, or partial failure?
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: 考虑过的替代方案
+      label: Alternatives considered

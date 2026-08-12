@@ -11,6 +11,8 @@ Thank you for helping improve Foursday. This project treats workplace messaging 
 - message adapters, work adapters, and target verifiers;
 - security, reliability, observability, and test improvements.
 
+New here? Start with the [first-contribution queue](./docs/en/first-contributions.md). Each draft has a narrow file surface, acceptance commands, and explicit non-goals. Wait for the matching live GitHub Issue before claiming a task.
+
 Sanitize anything related to real DingTalk accounts, production data, or internal company information. Report security issues privately according to [SECURITY.md](./SECURITY.md).
 
 ## Local development

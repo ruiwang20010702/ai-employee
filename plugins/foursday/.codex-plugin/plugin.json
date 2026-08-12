@@ -1,6 +1,6 @@
 {
   "name": "foursday",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "在 Codex 中安全查看本机 Foursday 状态、待审批草稿、计划与能力边界。",
   "author": {
     "name": "Foursday"
