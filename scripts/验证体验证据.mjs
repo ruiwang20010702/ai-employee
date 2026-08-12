@@ -5,6 +5,20 @@ import { fileURLToPath } from "node:url";
 import { isMainModule } from "../src/main-module.mjs";
 import { validateValidationEvidence } from "../src/validation-evidence.mjs";
 
+export const pilotEvidenceHelp = `Foursday pilot evidence verification
+
+Usage:
+  npm run pilot:verify -- --manifest /absolute/path/pilot.json
+
+Options:
+  --manifest <path>  Read a local pilot manifest and its referenced evidence files.
+  --help             Show this help and exit.
+
+Safety:
+  Help exits before reading a manifest or evidence file.
+  Verification is local only; online GitHub target re-read remains a separate required step.
+`;
+
 function bounded(value, name, maximum = 500) {
   const normalized = String(value ?? "").trim();
   if (!normalized || normalized.length > maximum) {
@@ -116,6 +130,10 @@ export async function runPilotEvidenceVerification({
   args = process.argv.slice(2),
   output = process.stdout,
 } = {}) {
+  if (args.includes("--help")) {
+    output.write(pilotEvidenceHelp);
+    return null;
+  }
   const result = await verifyPilotEvidence(manifestArgument(args));
   output.write(`${JSON.stringify(result, null, 2)}\n`);
   return result;

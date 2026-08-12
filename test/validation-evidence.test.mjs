@@ -3,12 +3,33 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { verifyPilotEvidence } from "../scripts/验证体验证据.mjs";
+import {
+  pilotEvidenceHelp,
+  runPilotEvidenceVerification,
+  verifyPilotEvidence,
+} from "../scripts/验证体验证据.mjs";
 import {
   sealValidationEvidence,
   validateValidationEvidence,
   validationEvidenceCapabilities,
 } from "../src/validation-evidence.mjs";
+
+test("pilot verification help is English and exits before reading local files", async () => {
+  const chunks = [];
+  const result = await runPilotEvidenceVerification({
+    args: ["--manifest", "/manifest-and-evidence-must-not-be-read.json", "--help"],
+    output: { write: (chunk) => chunks.push(chunk) },
+  });
+  const output = chunks.join("");
+
+  assert.equal(result, null);
+  assert.equal(output, pilotEvidenceHelp);
+  assert.match(output, /Usage:\n  npm run pilot:verify -- --manifest/u);
+  assert.match(output, /Help exits before reading a manifest or evidence file\./u);
+  assert.match(output, /Verification is local only/u);
+  assert.match(output, /online GitHub target re-read remains a separate required step\./u);
+  assert.doesNotMatch(output, /[^\x00-\x7F]/u);
+});
 
 function evidence(index = 1, { confirmed = true } = {}) {
   const hex = index.toString(16);
