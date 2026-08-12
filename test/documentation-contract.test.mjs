@@ -438,7 +438,7 @@ test("中英文首页、治理文件和英文核心文档的本地链接全部�
   }
 });
 
-test("首批贡献任务可发布、范围受限且进入复用安装包", async () => {
+test("首批贡献任务已公开、范围受限且进入复用安装包", async () => {
   const [english, chinese, packageText, entries] = await Promise.all([
     projectText("docs/en/first-contributions.md"),
     projectText("docs/首次贡献任务.md"),
@@ -461,8 +461,15 @@ test("首批贡献任务可发布、范围受限且进入复用安装包", async
     assert.doesNotMatch(text, /(?:enable|开启).{0,30}(?:production sending|生产发送)/iu);
     assert.match(english, new RegExp(draft.replace(".", "\\."), "u"));
   }
-  assert.match(english, /do not claim they are already open Issues/u);
-  assert.match(chinese, /不宣称任务已经开放领取/u);
+  for (const issueNumber of [3, 4, 5, 6, 7]) {
+    const issueUrl = `https://github.com/ruiwang20010702/foursday/issues/${issueNumber}`;
+    assert.match(english, new RegExp(issueUrl, "u"));
+    assert.match(chinese, new RegExp(issueUrl, "u"));
+  }
+  assert.match(english, /All five tasks are live/u);
+  assert.match(chinese, /5 个任务都已经开放/u);
+  assert.doesNotMatch(english, /do not claim they are already open Issues/u);
+  assert.doesNotMatch(chinese, /不宣称任务已经开放领取/u);
   assert.ok(JSON.parse(packageText).files.includes(".github/ISSUE_DRAFTS/"));
 });
 

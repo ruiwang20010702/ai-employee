@@ -369,7 +369,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 
 ## Contributing
 
-Issues, real-world use cases, documentation improvements, and code contributions are welcome. Start with one of the five [first-contribution drafts](./docs/en/first-contributions.md), then read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). The drafts become live `good first issue` items only after the v0.5 candidate is published.
+Issues, real-world use cases, documentation improvements, and code contributions are welcome. Pick one of the five live [`good first issue` tasks](./docs/en/first-contributions.md), comment before starting to avoid duplicate work, then read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). Each live Issue links back to a versioned in-repository scope and acceptance contract.
 
 ## License
 
