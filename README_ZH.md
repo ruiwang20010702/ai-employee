@@ -140,7 +140,17 @@ Loop Engineering 继续负责“一个任务如何反复做到有证据地完成
 
 ## 快速开始
 
-### 1. 启动 Web 接入体验
+### 1. 用一条命令启动 Web 接入体验
+
+安装 Node.js 22 或 24 后，可以直接从经过审核的不可变 GitHub 提交启动 v0.5 Web 体验：
+
+```bash
+npx --yes --package "github:ruiwang20010702/foursday#565023486271bfc4d3280113b130362e55bea050" foursday start
+```
+
+打开命令输出的回环地址。这条命令只下载并运行上述精确公开提交，不安装生产服务、不读取钉钉、不连接生产数据库，也不触碰外部系统。若要继续真实 GitHub 交付，仍须在 Web 表单中绑定另一个干净的本地仓库、选择已获授权的运行时，并再次批准完整计划。
+
+#### 从源码启动
 
 最快理解 Foursday 的方式是本地接入页。它只需要 Node.js，不需要钉钉、DWS、PostgreSQL、Codex、Claude Code、GitHub 登录或任何 API Key：
 

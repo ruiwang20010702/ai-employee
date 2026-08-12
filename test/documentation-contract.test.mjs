@@ -260,6 +260,25 @@ test("公开仓库安装说明固定到已审核完整提交", async () => {
   assert.match(chinese, /完整 40 位提交编号/u);
 });
 
+test("中英文快速开始提供不可变的一条命令 Web 体验入口", async () => {
+  const [readme, chinese] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+  ]);
+  const immutableStart =
+    /npx --yes --package "github:ruiwang20010702\/foursday#[a-f0-9]{40}" foursday start/u;
+  for (const text of [readme, chinese]) {
+    assert.match(text, immutableStart);
+    assert.match(text, /Node\.js 22 (?:or|或) 24/u);
+  }
+  assert.match(readme, /does not install a production service/u);
+  assert.match(readme, /touch an external system/u);
+  assert.match(readme, /approve the complete plan a second time/u);
+  assert.match(chinese, /不安装生产服务/u);
+  assert.match(chinese, /不触碰外部系统/u);
+  assert.match(chinese, /再次批准完整计划/u);
+});
+
 test("五分钟演示和三类扩展契约在中英文入口保持一致", async () => {
   const [
     readme,

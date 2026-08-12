@@ -130,7 +130,22 @@ proves that a dedicated graph database is necessary.
 
 ## Quick Start
 
-### Start the Web onboarding preview
+### Start the Web onboarding preview with one command
+
+With Node.js 22 or 24 installed, launch the reviewed v0.5 Web preview directly
+from its immutable GitHub commit:
+
+```bash
+npx --yes --package "github:ruiwang20010702/foursday#565023486271bfc4d3280113b130362e55bea050" foursday start
+```
+
+Open the printed loopback URL. The command downloads and runs that exact public
+commit; it does not install a production service, read DingTalk, connect to a
+production database, or touch an external system. A real GitHub delivery still
+requires you to bind a separate clean local repository in the Web form, choose
+an authorized runtime, and approve the complete plan a second time.
+
+### Start from a source checkout
 
 The fastest way to understand Foursday is the local activation page. It needs
 only Node.js and does not require DingTalk, DWS, PostgreSQL, Codex, Claude Code,
