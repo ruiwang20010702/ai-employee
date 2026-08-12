@@ -19,6 +19,8 @@ An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed
 
 Keep evidence files and `pilot.json` in one private local directory that is not committed. Use pseudonymous external aliases and never collect a name, email address, token, repository credential, or private model output.
 
+Once evidence is sealed, never edit or re-sign it after a contract change. Rerun every loop affected by the changed contract, and retain both the old discovery evidence and the new acceptance evidence in the private local directory.
+
 ```json
 {
   "schema": "foursday-pilot-evidence/v1",
