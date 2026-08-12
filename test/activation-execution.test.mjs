@@ -222,6 +222,10 @@ test("activation coordinator executes only the approved hash then proposes confi
   assert.equal(proposedEvidence.safeguards.deploymentPerformed, false);
   assert.match(proposedEvidence.integrity.digest, /^[a-f0-9]{64}$/u);
   assert.equal(proposedEvidence.integrity.signed, false);
+  await assert.rejects(
+    () => coordinator.exportPublicProof(created.sessionId),
+    /not a confirmed closed loop/u,
+  );
   const serialized = JSON.stringify(proposedEvidence);
   assert.doesNotMatch(serialized, /\/workspace\/example/u);
   assert.doesNotMatch(serialized, /remoteUrl|rootDirectory|actionToken/u);
@@ -235,6 +239,11 @@ test("activation coordinator executes only the approved hash then proposes confi
   assert.equal(confirmedEvidence.validationStatus, "verified_closed_loop");
   assert.equal(confirmedEvidence.outcomes.memory.status, "confirmed");
   assert.equal(confirmedEvidence.outcomes.timeReturn.status, "confirmed");
+  const publicProof = await coordinator.exportPublicProof(created.sessionId);
+  assert.equal(publicProof.proof.schema, "foursday-public-pilot-proof/v1");
+  assert.equal(publicProof.proof.draftPrUrl, "https://github.com/example/project/pull/42");
+  assert.match(publicProof.markdown, /Alias: tester-XX/u);
+  assert.doesNotMatch(publicProof.markdown, /memory_|time_/u);
   await assert.rejects(
     () => coordinator.confirmOutcomes(created.sessionId, { memoryId: "memory_other" }),
     /does not belong/u,

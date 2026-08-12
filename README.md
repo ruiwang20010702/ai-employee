@@ -183,6 +183,14 @@ remotes, action tokens, credentials, and model output while retaining the
 Issue, source and target repository identities, plan hash, target read-back,
 memory status, time-return status, and explicit safety boundaries.
 
+After confirming memory and returned time, use **Copy privacy-safe pilot proof**
+to copy a public Issue comment template derived from that verified bundle. The
+template contains only public GitHub target identities, governed hashes,
+runtime, confirmed returned minutes, and explicit feedback placeholders. It is
+an unsigned self-report, so it never replaces maintainer read-back of the Issue
+and Draft PR. Keep the complete JSON bundle local unless a maintainer requests
+it through an agreed private channel.
+
 ### Join the external pilot from a fork
 
 External testers do not need write access to Foursday. Fork the repository with
@@ -203,6 +211,8 @@ base branch `codex/v0.5-candidate`, registered test `check`, and the synthetic
 task assigned to your pseudonymous slot. Before approval, verify that the Web
 page names your fork as the push source and `ruiwang20010702/foursday` as the
 Issue and Draft PR target. Keep the PR open and Draft; never merge or deploy it.
+After confirming the outcomes, copy the privacy-safe pilot proof, replace the
+`tester-XX` placeholder, add timings and feedback, and post it to Issue #49.
 
 ### Troubleshoot Web onboarding
 

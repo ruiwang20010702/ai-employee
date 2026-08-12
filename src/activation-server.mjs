@@ -123,6 +123,28 @@ export async function startActivationServer({
       }
       return;
     }
+    const publicProofRoute = url.pathname.match(
+      /^\/api\/sessions\/([^/]+)\/public-proof$/u,
+    );
+    if (executionCoordinator && request.method === "GET" && publicProofRoute) {
+      try {
+        if (!equalToken(request.headers["x-foursday-action-token"], actionToken)) {
+          throw Object.assign(new Error("action_token_invalid"), { status: 403 });
+        }
+        json(
+          response,
+          200,
+          await executionCoordinator.exportPublicProof(
+            decodeURIComponent(publicProofRoute[1]),
+          ),
+        );
+      } catch (error) {
+        json(response, error.status ?? 400, {
+          error: String(error.message ?? "public_proof_export_failed"),
+        });
+      }
+      return;
+    }
     const sessionRoute = url.pathname.match(/^\/api\/sessions\/([^/]+)$/u);
     if (executionCoordinator && request.method === "GET" && sessionRoute) {
       try {

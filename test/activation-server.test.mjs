@@ -14,12 +14,14 @@ test("activation UI is parseable, responsive, and honest about preview boundarie
   assert.match(activationHtml, /Building the plan/u);
   assert.match(activationHtml, /blockedCapabilities/u);
   assert.match(activationHtml, /Download evidence bundle/u);
+  assert.match(activationHtml, /Copy privacy-safe pilot proof/u);
   assert.match(activationHtml, /Repository authority/u);
   assert.match(activationHtml, /sourceRepository/u);
   assert.match(activationHtml, /issueRepository/u);
   assert.match(activationHtml, /retains Issue and PR URLs, plan and commit evidence, and confirmed outcomes/u);
   assert.match(activationHtml, /omitting local paths, remotes, tokens, credentials, and model output/u);
   assert.match(activationHtml, /foursday-evidence-/u);
+  assert.match(activationHtml, /\/public-proof/u);
   assert.match(activationHtml, /@media\(max-width:820px\)/u);
   assert.match(activationHtml, /prefers-reduced-motion/u);
   assert.doesNotMatch(activationHtml, /fake|testimonial|trusted by/iu);
@@ -40,6 +42,22 @@ test("evidence download announcements are accessible, truthful, and privacy boun
     assert.doesNotMatch(announcement, /token|path|directory|[/\\]/iu);
   }
   assert.doesNotMatch(script, /downloadStatus\.textContent=error\.(?:message|stack)/u);
+});
+
+test("public proof is copied only after outcome confirmation with bounded status text", () => {
+  const script = activationHtml.match(/<script nonce="__NONCE__">([\s\S]*?)<\/script>/u)?.[1];
+  const announcements = [...script.matchAll(/proofStatus\.textContent='([^']+)'/gu)]
+    .map((match) => match[1]);
+  assert.match(activationHtml, /data-action="copy-public-proof"/u);
+  assert.match(activationHtml, /<p id="public-proof-status" class="hint" role="status" aria-live="polite" aria-atomic="true"><\/p>/u);
+  assert.deepEqual(announcements, [
+    "Copying privacy-safe pilot proof...",
+    "Pilot proof copied. Replace tester-XX and add your timings and feedback before posting.",
+    "Pilot proof copy failed. Download the private evidence bundle and try again.",
+  ]);
+  assert.match(script, /await copyPublicProof\(\)/u);
+  assert.match(script, /navigator\.clipboard\?\.writeText/u);
+  assert.doesNotMatch(script, /proofStatus\.textContent=error\.(?:message|stack)/u);
 });
 
 test("activation server exposes only loopback preview endpoints", async () => {
@@ -113,6 +131,13 @@ test("activation execution routes require explicit local-session and plan approv
         plan: { planHash: "a".repeat(64) },
       };
     },
+    async exportPublicProof(id) {
+      calls.push(["public-proof", id]);
+      return {
+        proof: { schema: "foursday-public-pilot-proof/v1" },
+        markdown: "Alias: tester-XX",
+      };
+    },
     async close() { calls.push(["close"]); },
   };
   const service = await startActivationServer({
@@ -161,10 +186,17 @@ test("activation execution routes require explicit local-session and plan approv
     assert.equal(evidence.status, 200);
     assert.match(evidence.headers.get("content-disposition"), /foursday-evidence-a{12}\.json/u);
     assert.equal((await evidence.json()).schema, "foursday-validation-evidence/v1");
+    assert.equal((await fetch(new URL("/api/sessions/session-1/public-proof", service.url))).status, 403);
+    const publicProof = await fetch(
+      new URL("/api/sessions/session-1/public-proof", service.url),
+      { headers: { "x-foursday-action-token": actionToken } },
+    );
+    assert.equal(publicProof.status, 200);
+    assert.equal((await publicProof.json()).proof.schema, "foursday-public-pilot-proof/v1");
   } finally {
     await service.stop();
   }
   assert.deepEqual(calls.map((call) => call[0]), [
-    "create", "approve", "outcomes", "cancel", "evidence", "close",
+    "create", "approve", "outcomes", "cancel", "evidence", "public-proof", "close",
   ]);
 });

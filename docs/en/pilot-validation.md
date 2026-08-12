@@ -9,7 +9,8 @@ Foursday v0.5 is not launch-proven because the code passes tests. It becomes lau
 3. Complete patch, isolated branch, registered test, verified push, and verified Draft PR.
 4. Confirm project memory and time return separately.
 5. Download the evidence bundle after confirmation. It must report `verified_closed_loop`.
-6. Keep the resulting Draft PR unmerged and do not deploy it as part of the pilot.
+6. Copy the privacy-safe pilot proof, replace `tester-XX`, add timings and feedback, and post it to Issue #49.
+7. Keep the resulting Draft PR unmerged and do not deploy it as part of the pilot.
 
 See the [sanitized validation evidence example](../examples/validation-evidence.example.json) for the expected bundle structure. Its `github.com/example` URLs are fictional, and the example does not count as pilot evidence.
 
@@ -29,8 +30,12 @@ An external tester must not need upstream write access. The supported path is:
    governed branch, exact commit, upstream PR target, open state, and Draft flag.
 
 The maintainer assigns a pseudonymous slot and a bounded synthetic change.
-Never publish the local evidence bundle; send it privately for verification and
-leave only the privacy-safe feedback template on the public Issue.
+Never publish the complete local evidence bundle. Post only the generated
+privacy-safe proof: it is a strict whitelist of public GitHub identities,
+governed hashes, runtime, confirmed returned minutes, and feedback placeholders.
+It is explicitly unsigned and still requires maintainer target read-back. Keep
+the full bundle locally unless a maintainer requests it through an agreed
+private channel.
 
 ## Cohort manifest
 
@@ -64,6 +69,10 @@ npm run pilot:verify -- --manifest /absolute/path/to/pilot.json
 ```
 
 The verifier checks bundle integrity, the complete governed recipe, confirmed outcomes, unique plan/Issue/PR evidence, ten self loops, and ten unique external aliases.
+
+The public proof is intake evidence, not a replacement for the private cohort
+manifest. It makes the first review reproducible without publishing local
+outcome identifiers or the complete bundle.
 
 Local bundle integrity and online GitHub proof are separate checks:
 

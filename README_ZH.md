@@ -167,6 +167,8 @@ npm start
 
 执行状态写入本地加密 SQLite 会话，项目记忆和时间返还仍只是候选，必须由你再次确认。证据包不会记录本机路径、远端 URL 或凭据，但会保留脱敏后的来源与目标仓库身份。
 
+确认项目记忆和时间返还后，可以点击 **Copy privacy-safe pilot proof**。系统只从已验证证据包中提取公开 GitHub 目标身份、受治理哈希、运行时、已确认返还时间和反馈占位符，不复制记忆正文、内部编号、本机路径、令牌或模型输出。公开证明属于未签名的本人陈述，不能替代维护者对 Issue 与 Draft PR 的独立回读；除非维护者另行约定私密传输方式，完整 JSON 证据包继续保留在本机。
+
 #### 从 fork 加入外部体验
 
 外部体验者不需要 Foursday 上游仓库写权限。使用 GitHub CLI 创建自己的 fork，从自动生成的 `upstream` 远端检出候选版，再启动 Web 接入页：
@@ -181,6 +183,8 @@ npm start
 ```
 
 填写[体验 Issue #49](https://github.com/ruiwang20010702/foursday/issues/49)，基础分支使用 `codex/v0.5-candidate`，登记测试填写 `check`，变更任务使用化名名额对应的合成任务。批准前必须确认页面把你的 fork 显示为推送来源，把 `ruiwang20010702/foursday` 显示为 Issue 和 Draft PR 目标。PR 必须保持打开和 Draft，禁止合并或部署。
+
+确认结果后复制隐私安全体验证明，把 `tester-XX` 替换为分配的化名，补充耗时与反馈，再粘贴到 Issue #49。
 
 #### Web 接入排障
 

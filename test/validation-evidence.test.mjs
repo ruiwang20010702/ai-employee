@@ -5,7 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { verifyPilotEvidence } from "../scripts/验证体验证据.mjs";
 import {
+  createPublicPilotProof,
+  publicPilotProofMarkdown,
   sealValidationEvidence,
+  validatePublicPilotProof,
   validateValidationEvidence,
   validationEvidenceCapabilities,
 } from "../src/validation-evidence.mjs";
@@ -135,6 +138,44 @@ test("validation evidence supports a bound fork head without changing the Issue 
   assert.equal(summary.repository, "example/foursday");
   assert.equal(summary.sourceRepository, "tester/foursday");
   assert.equal(summary.draftPrHeadRepository, "tester/foursday");
+});
+
+test("public pilot proof is derived from confirmed evidence and excludes private outcome data", () => {
+  const value = evidence();
+  const proof = createPublicPilotProof(value);
+  const markdown = publicPilotProofMarkdown(proof);
+  assert.equal(proof.schema, "foursday-public-pilot-proof/v1");
+  assert.equal(proof.validationStatus, "verified_closed_loop");
+  assert.equal(proof.issueUrl, "https://github.com/example/foursday/issues/1");
+  assert.equal(proof.draftPrUrl, "https://github.com/example/foursday/pull/1");
+  assert.equal(proof.evidenceDigest, value.integrity.digest);
+  assert.equal(proof.unsignedSelfReport, true);
+  assert.equal(proof.maintainerReadbackRequired, true);
+  assert.deepEqual(validatePublicPilotProof(proof), proof);
+  assert.match(markdown, /Alias: tester-XX/u);
+  assert.match(markdown, /maintainer target readback required: yes/iu);
+  const serialized = JSON.stringify({ proof, markdown });
+  for (const forbidden of [
+    "memory-1",
+    "time-1",
+    "rootDirectory",
+    "actionToken",
+    "modelOutput",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
+  assert.throws(
+    () => createPublicPilotProof(evidence(2, { confirmed: false })),
+    /not a confirmed closed loop/u,
+  );
+  assert.throws(
+    () => validatePublicPilotProof({ ...proof, runtime: "codex\nSecret: value" }),
+    /runtime is invalid/u,
+  );
+  assert.throws(
+    () => validatePublicPilotProof({ ...proof, unexpected: true }),
+    /fields are invalid/u,
+  );
 });
 
 test("committed validation evidence example stays sanitized and valid", async () => {

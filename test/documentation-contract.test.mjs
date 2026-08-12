@@ -524,6 +524,16 @@ test("外部体验入口使用 fork 推送并把来源与上游目标纳入审�
   }
   assert.match(readme, /never merge or deploy/u);
   assert.match(chineseReadme, /禁止合并或部署/u);
+  for (const value of [readme, pilot]) {
+    assert.match(value, /privacy-safe pilot proof/u);
+    assert.match(value, /unsigned/u);
+    assert.match(value, /maintainer (?:target )?read-back/u);
+  }
+  for (const value of [chineseReadme, chinesePilot]) {
+    assert.match(value, /隐私安全体验证明/u);
+    assert.match(value, /未签名/u);
+    assert.match(value, /独立回读/u);
+  }
 });
 
 test("英文核心文档覆盖产品、架构、能力记忆和部署边界", async () => {

@@ -12,7 +12,11 @@ import { executeWorkPlan } from "./work-executor.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
 import { safeCommandEnvironment } from "./controlled-command-runner.mjs";
 import { createStructuredArtifactRuntime } from "./artifact-runtime.mjs";
-import { sealValidationEvidence } from "./validation-evidence.mjs";
+import {
+  createPublicPilotProof,
+  publicPilotProofMarkdown,
+  sealValidationEvidence,
+} from "./validation-evidence.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -464,6 +468,14 @@ export class ActivationExecutionCoordinator {
       },
     };
     return sealValidationEvidence(core);
+  }
+
+  async exportPublicProof(id) {
+    const proof = createPublicPilotProof(await this.exportEvidence(id));
+    return {
+      proof,
+      markdown: publicPilotProofMarkdown(proof),
+    };
   }
 
   async cancel(id, { planHash }) {

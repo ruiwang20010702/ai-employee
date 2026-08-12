@@ -213,6 +213,7 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
     projectId: bounded(project.id, "project.id", 64),
     repository,
     sourceRepository,
+    startingCommit: project.startingCommit,
     issueUrl: issueIdentity.url,
     issueNumber: issueIdentity.number,
     draftPrUrl: prIdentity.url,
@@ -228,6 +229,143 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
     confirmed,
     integrityDigest: integrity.digest,
   };
+}
+
+export function createPublicPilotProof(value) {
+  const summary = validateValidationEvidence(value, { requireConfirmed: true });
+  return Object.freeze({
+    schema: "foursday-public-pilot-proof/v1",
+    validationStatus: "verified_closed_loop",
+    generatedAt: value.generatedAt,
+    repository: summary.repository,
+    sourceRepository: summary.sourceRepository,
+    startingCommit: summary.startingCommit,
+    issueUrl: summary.issueUrl,
+    draftPrUrl: summary.draftPrUrl,
+    draftPrHead: summary.draftPrHead,
+    draftPrHeadRepository: summary.draftPrHeadRepository,
+    draftPrBase: summary.draftPrBase,
+    draftPrCommit: summary.draftPrCommit,
+    runtime: summary.runtime,
+    planHash: summary.planHash,
+    evidenceDigest: summary.integrityDigest,
+    returnedMinutes: summary.returnedMinutes,
+    outcomesConfirmed: true,
+    unsignedSelfReport: true,
+    maintainerReadbackRequired: true,
+  });
+}
+
+export function validatePublicPilotProof(proof) {
+  const value = object(proof, "public pilot proof");
+  const expectedKeys = [
+    "draftPrBase",
+    "draftPrCommit",
+    "draftPrHead",
+    "draftPrHeadRepository",
+    "draftPrUrl",
+    "evidenceDigest",
+    "generatedAt",
+    "issueUrl",
+    "maintainerReadbackRequired",
+    "outcomesConfirmed",
+    "planHash",
+    "repository",
+    "returnedMinutes",
+    "runtime",
+    "schema",
+    "sourceRepository",
+    "startingCommit",
+    "unsignedSelfReport",
+    "validationStatus",
+  ];
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(expectedKeys)) {
+    throw new Error("Public pilot proof fields are invalid");
+  }
+  if (
+    value.schema !== "foursday-public-pilot-proof/v1" ||
+    value.validationStatus !== "verified_closed_loop"
+  ) {
+    throw new Error("Public pilot proof schema or status is unsupported");
+  }
+  const generatedAt = new Date(value.generatedAt);
+  if (Number.isNaN(generatedAt.getTime()) || generatedAt.toISOString() !== value.generatedAt) {
+    throw new Error("Public pilot proof time must be canonical ISO 8601 UTC");
+  }
+  const repository = repositorySlug(value.repository, "publicProof.repository");
+  const sourceRepository = repositorySlug(
+    value.sourceRepository,
+    "publicProof.sourceRepository",
+  );
+  const issue = githubIdentity(value.issueUrl, "issue.url");
+  const draftPr = githubIdentity(value.draftPrUrl, "draftPr.url");
+  if (issue.repository !== repository || draftPr.repository !== repository) {
+    throw new Error("Public pilot proof targets must match the project repository");
+  }
+  const headRepository = repositorySlug(
+    value.draftPrHeadRepository,
+    "publicProof.draftPrHeadRepository",
+  );
+  if (headRepository !== sourceRepository) {
+    throw new Error("Public pilot proof head repository must match the source repository");
+  }
+  const returnedMinutes = Number(value.returnedMinutes);
+  if (!Number.isFinite(returnedMinutes) || returnedMinutes < 0 || returnedMinutes > 10_080) {
+    throw new Error("Public pilot proof returnedMinutes is invalid");
+  }
+  if (
+    value.outcomesConfirmed !== true ||
+    value.unsignedSelfReport !== true ||
+    value.maintainerReadbackRequired !== true
+  ) {
+    throw new Error("Public pilot proof safety declarations are invalid");
+  }
+  const runtime = bounded(value.runtime, "publicProof.runtime", 100);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/u.test(runtime)) {
+    throw new Error("Public pilot proof runtime is invalid");
+  }
+  return {
+    ...value,
+    repository,
+    sourceRepository,
+    startingCommit: exactSha(value.startingCommit, "publicProof.startingCommit", 40),
+    draftPrHeadRepository: headRepository,
+    draftPrHead: branch(value.draftPrHead, "publicProof.draftPrHead", {
+      prefix: "foursday/",
+    }),
+    draftPrBase: branch(value.draftPrBase, "publicProof.draftPrBase"),
+    draftPrCommit: exactSha(value.draftPrCommit, "publicProof.draftPrCommit", 40),
+    runtime,
+    planHash: exactSha(value.planHash, "publicProof.planHash", 64),
+    evidenceDigest: exactSha(value.evidenceDigest, "publicProof.evidenceDigest", 64),
+    returnedMinutes,
+  };
+}
+
+export function publicPilotProofMarkdown(proof) {
+  const value = validatePublicPilotProof(proof);
+  return [
+    "Alias: tester-XX",
+    "Install-to-preview minutes:",
+    "Preview-to-Draft-PR minutes:",
+    `Validation: ${value.validationStatus}`,
+    `Issue: ${value.issueUrl}`,
+    `Draft PR: ${value.draftPrUrl}`,
+    `Source repository: ${value.sourceRepository}`,
+    `Draft PR head: ${value.draftPrHeadRepository}:${value.draftPrHead}`,
+    `Draft PR base: ${value.draftPrBase}`,
+    `Starting commit: ${value.startingCommit}`,
+    `Draft PR commit: ${value.draftPrCommit}`,
+    `Runtime: ${value.runtime}`,
+    `Plan hash: ${value.planHash}`,
+    `Evidence digest: ${value.evidenceDigest}`,
+    `Confirmed returned minutes: ${value.returnedMinutes}`,
+    "What was clear:",
+    "What blocked or slowed me down:",
+    "One improvement I would make:",
+    "Unsigned self-report; maintainer target readback required: yes",
+    "No secrets or private data were included: yes",
+  ].join("\n");
 }
 
 export const validationEvidenceCapabilities = capabilities;
