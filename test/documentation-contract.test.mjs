@@ -631,11 +631,17 @@ test("外部体验入口使用 fork 推送并把来源与上游目标纳入审�
     assert.match(value, /privacy-safe pilot proof/u);
     assert.match(value, /unsigned/u);
     assert.match(value, /maintainer (?:target )?read-back/u);
+    assert.match(value, /Copy privacy-safe readiness report/u);
+    assert.match(value, /never submits it/u);
+    assert.match(value, /paths, usernames|executable paths, usernames/u);
   }
   for (const value of [chineseReadme, chinesePilot]) {
     assert.match(value, /隐私安全体验证明/u);
     assert.match(value, /未签名/u);
     assert.match(value, /独立回读/u);
+    assert.match(value, /Copy privacy-safe readiness report/u);
+    assert.match(value, /不会自动提交/u);
+    assert.match(value, /路径、用户名|可执行文件路径、用户名/u);
   }
 });
 

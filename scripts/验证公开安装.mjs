@@ -94,6 +94,7 @@ export function validatePublicActivationHtml(html) {
   const value = String(html ?? "");
   for (const required of [
     "Create your unique pilot task",
+    "Copy privacy-safe readiness report",
     "Measured server-start-to-confirmed journey",
     "Package download time is not included",
   ]) {
@@ -164,7 +165,11 @@ async function launchPublicCandidate({ command, environment, workspace, fetchImp
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error("Public activation page did not return HTTP success");
     validatePublicActivationHtml(await response.text());
-    return { loopback: true, externalSystemsTouched: false };
+    return {
+      loopback: true,
+      readinessSupportAvailable: true,
+      externalSystemsTouched: false,
+    };
   } finally {
     await stopProcess(child);
   }
@@ -196,7 +201,11 @@ export async function verifyPublicInstall({
     const command = publicInstallCommand({ npmCliPath: npmCli, sourceSha: sha });
     const environment = publicInstallEnvironment({ workspace });
     const result = await launch({ command, environment, workspace, fetchImpl });
-    if (result?.loopback !== true || result?.externalSystemsTouched !== false) {
+    if (
+      result?.loopback !== true ||
+      result.readinessSupportAvailable !== true ||
+      result.externalSystemsTouched !== false
+    ) {
       throw new Error("Public install launch result is invalid");
     }
     return {
@@ -210,6 +219,7 @@ export async function verifyPublicInstall({
       credentialTokensForwarded: 0,
       lifecycleScriptsEnabled: false,
       loopbackWebPage: true,
+      readinessSupportAvailable: true,
       externalSystemsTouched: false,
       productionWrite: false,
     };

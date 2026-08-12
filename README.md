@@ -136,7 +136,7 @@ With Node.js 22 or 24 installed, launch the reviewed v0.5 Web flow directly
 from its immutable GitHub commit:
 
 ```bash
-npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#f86007c92937bd052d4a95a39a30805b134c63d1" foursday start --pilot-sha f86007c92937bd052d4a95a39a30805b134c63d1
+npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#3577615d906f54689c38f565b7c8b62d92a27f43" foursday start --pilot-sha 3577615d906f54689c38f565b7c8b62d92a27f43
 ```
 
 Open the printed loopback URL. The command downloads and runs that exact public
@@ -145,7 +145,12 @@ production database, or touch an external system at startup. Preview needs only
 Node.js. Before authorizing any write, select **Check pilot readiness**. This
 read-only check reports only whether GitHub CLI authentication and a supported
 agent runtime are available; it creates no fork, branch, push, or PR. After it
-finishes, **Copy setup check-in** produces the bounded, editable template for
+finishes, a blocked user can choose **Copy privacy-safe readiness report** and
+open the bug form. The report contains only the immutable candidate, Node major,
+readiness booleans, and redacted symptom placeholders—never paths, usernames,
+private repository details, logs, model output, or credentials. Copying and
+opening the form are local, separate actions; Foursday never submits it.
+**Copy setup check-in** produces the bounded, editable template for
 [Issue #50](https://github.com/ruiwang20010702/foursday/issues/50); opening the
 Issue is a separate click and Foursday never posts automatically. The copy
 action is disabled once pilot preparation begins because the no-fork setup
@@ -227,8 +232,8 @@ The equivalent manual fallback is:
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
 git fetch upstream codex/v0.5-candidate
-git merge-base --is-ancestor f86007c92937bd052d4a95a39a30805b134c63d1 FETCH_HEAD
-git switch --create pilot-v0.5-f86007c f86007c92937bd052d4a95a39a30805b134c63d1
+git merge-base --is-ancestor 3577615d906f54689c38f565b7c8b62d92a27f43 FETCH_HEAD
+git switch --create pilot-v0.5-3577615 3577615d906f54689c38f565b7c8b62d92a27f43
 npm ci --ignore-scripts
 npm start
 ```

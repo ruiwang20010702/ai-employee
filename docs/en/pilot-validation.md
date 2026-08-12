@@ -17,6 +17,15 @@ Opening the page never posts the clipboard; review and submit the comment
 yourself. The earlier setup check-in in Issue #50 is a separate installation
 signal and does not count as an external closed loop.
 
+If readiness is blocked, use **Copy privacy-safe readiness report** before
+opening the bug form. The server constructs this report from a strict whitelist:
+the immutable candidate, Node major, readiness booleans, and three editable
+symptom placeholders. It never includes executable paths, usernames, private
+repository details, command output, model output, environment variables, or
+credentials. Copying the report and opening the form are separate local actions;
+Foursday never submits it. A failed attempt is funnel evidence, not a completed
+installation or pilot loop.
+
 See the [sanitized validation evidence example](../examples/validation-evidence.example.json) for the expected bundle structure. Its `github.com/example` URLs are fictional, and the example does not count as pilot evidence.
 
 An installation, preview, test fixture, repeated Issue, repeated PR, unconfirmed outcome, or self-written JSON does not count.

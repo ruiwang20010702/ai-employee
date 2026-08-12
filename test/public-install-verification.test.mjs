@@ -71,6 +71,7 @@ test("公开安装隔离环境不转发令牌、Git 配置或 SSH 凭据", () =>
 test("公开安装页面必须保留唯一任务与真实计时边界", () => {
   assert.equal(validatePublicActivationHtml(`
     Create your unique pilot task
+    Copy privacy-safe readiness report
     Measured server-start-to-confirmed journey
     Package download time is not included
   `), true);
@@ -88,13 +89,18 @@ test("公开安装验收只返回脱敏的零写结果并清理临时目录", as
     npmCliPath,
     launch: async ({ command, environment, workspace }) => {
       observed.push({ command, environment, workspace });
-      return { loopback: true, externalSystemsTouched: false };
+      return {
+        loopback: true,
+        readinessSupportAvailable: true,
+        externalSystemsTouched: false,
+      };
     },
   });
   assert.equal(observed.length, 1);
   assert.equal(result.sourceSha, sha);
   assert.equal(result.credentialTokensForwarded, 0);
   assert.equal(result.lifecycleScriptsEnabled, false);
+  assert.equal(result.readinessSupportAvailable, true);
   assert.equal(result.productionWrite, false);
   assert.equal(result.externalSystemsTouched, false);
   assert.match(observed[0].workspace, /foursday-public-install-/u);
