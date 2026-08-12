@@ -114,7 +114,13 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
   const outcomes = object(bundle.outcomes, "outcomes");
   const safeguards = object(bundle.safeguards, "safeguards");
   const pr = bundle.evidence.find((entry) => entry.capability === "github_pr_draft");
-  const issueUrl = githubUrl(object(bundle.issue, "issue").url, "issue.url");
+  const issue = object(bundle.issue, "issue");
+  const issueUrl = githubUrl(issue.url, "issue.url");
+  const terminalIssueNumber = new URL(issueUrl).pathname
+    .match(/\/([1-9][0-9]*)\/?$/u)[1];
+  if (!Number.isSafeInteger(issue.number) || String(issue.number) !== terminalIssueNumber) {
+    throw new Error("issue.number must exactly match the terminal number in issue.url");
+  }
   const prUrl = githubUrl(pr.url, "draftPr.url");
   const planHash = exactSha(plan.planHash, "plan.planHash", 64);
   exactSha(project.startingCommit, "project.startingCommit", 40);

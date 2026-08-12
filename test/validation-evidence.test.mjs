@@ -71,6 +71,25 @@ test("validation evidence requires an intact confirmed five-step closed loop", (
   });
   assert.throws(() => validateValidationEvidence(privateBundle), /forbidden private field/u);
 });
+
+test("validation evidence allows an issue number matching the terminal URL number", () => {
+  const valid = evidence(12);
+  assert.equal(
+    validateValidationEvidence(valid).issueUrl,
+    "https://github.com/example/foursday/issues/12",
+  );
+});
+
+test("validation evidence denies an issue number differing from the terminal URL number", () => {
+  const mismatched = evidence(12);
+  const { integrity: ignored, ...core } = mismatched;
+  core.issue.number = 13;
+  assert.throws(
+    () => validateValidationEvidence(sealValidationEvidence(core)),
+    /issue\.number must exactly match the terminal number in issue\.url/u,
+  );
+});
+
 test("pilot verification requires ten self loops and ten distinct external testers", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "foursday-pilot-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
