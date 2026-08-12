@@ -20,6 +20,23 @@ test("activation UI is parseable, responsive, and honest about preview boundarie
   assert.doesNotMatch(activationHtml, /fake|testimonial|trusted by/iu);
 });
 
+test("evidence download announcements are accessible, truthful, and privacy bounded", () => {
+  const script = activationHtml.match(/<script nonce="__NONCE__">([\s\S]*?)<\/script>/u)?.[1];
+  const announcements = [...script.matchAll(/downloadStatus\.textContent='([^']+)'/gu)]
+    .map((match) => match[1]);
+  assert.match(activationHtml, /<p id="evidence-download-status" class="hint" role="status" aria-live="polite" aria-atomic="true"><\/p>/u);
+  assert.deepEqual(announcements, [
+    "Downloading evidence bundle...",
+    "Evidence bundle downloaded.",
+    "Evidence bundle download failed. Try again.",
+  ]);
+  assert.match(script, /await downloadEvidence\(\);downloadStatus\.textContent='Evidence bundle downloaded\.'/u);
+  for (const announcement of announcements) {
+    assert.doesNotMatch(announcement, /token|path|directory|[/\\]/iu);
+  }
+  assert.doesNotMatch(script, /downloadStatus\.textContent=error\.(?:message|stack)/u);
+});
+
 test("activation server exposes only loopback preview endpoints", async () => {
   const calls = [];
   const service = await startActivationServer({
