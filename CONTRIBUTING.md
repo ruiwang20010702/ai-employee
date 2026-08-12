@@ -49,6 +49,18 @@ npm audit --audit-level=high
 git diff --check
 ```
 
+For a community recipe or adapter manifest, run the fast, credential-free
+contract check before the full suite:
+
+```bash
+npm run extensions:validate -- --recipe examples/recipes/my-recipe.json
+# or
+npm run extensions:validate -- --adapter examples/adapters/my-adapter.json
+```
+
+This command validates JSON contracts only. It never installs or executes the
+extension and does not turn a reference manifest into a supported integration.
+
 Run `npm run check:full` when the change affects PostgreSQL, migrations, concurrent state, or SQLite/PostgreSQL parity.
 
 ## Pull request checklist

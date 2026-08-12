@@ -49,6 +49,16 @@ npm audit --audit-level=high
 git diff --check
 ```
 
+如果贡献社区配方或适配器清单，先运行不读取凭据的快速契约校验，再运行完整检查：
+
+```bash
+npm run extensions:validate -- --recipe examples/recipes/my-recipe.json
+# 或
+npm run extensions:validate -- --adapter examples/adapters/my-adapter.json
+```
+
+该命令只校验 JSON 契约，不会安装或执行扩展，也不会把参考清单升级为生产支持集成。
+
 如果改动涉及 PostgreSQL、迁移、并发状态或 SQLite/PostgreSQL 对等性，还必须运行 `npm run check:full`。
 
 ## Pull Request 清单

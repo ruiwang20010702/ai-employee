@@ -59,6 +59,7 @@
     "targets:update": "node scripts/更新监听目标.mjs",
     "projects:validate": "node scripts/校验项目能力.mjs",
     "projects:create": "node scripts/创建项目配置.mjs",
+    "extensions:validate": "node scripts/验证社区扩展.mjs",
     "setup:check": "node scripts/新环境向导.mjs check",
     "setup:init": "node scripts/新环境向导.mjs init",
     "setup:secrets": "node scripts/新环境向导.mjs secrets",

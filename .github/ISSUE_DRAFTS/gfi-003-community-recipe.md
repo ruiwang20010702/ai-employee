@@ -18,7 +18,8 @@ A contributor can copy a small versioned recipe example and understand how valid
 - Use the existing recipe schema and only existing capabilities.
 - Declare every input, expected evidence, and rollback boundary.
 - Include no token, account, person, internal URL, arbitrary executable, or free-form filesystem target.
-- The repository recipe validator and `npm run check` pass.
+- `npm run extensions:validate -- --recipe examples/recipes/<file>.json` and
+  `npm run check` pass.
 
 ## Non-goals
 

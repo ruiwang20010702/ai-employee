@@ -392,6 +392,8 @@ flowchart LR
 
 欢迎提交问题、使用案例、文档改进和代码贡献。可以先从 5 个已经开放的 [`good first issue` 首次贡献任务](./docs/首次贡献任务.md)中选择一项，开工前先留言避免重复开发，再阅读[贡献指南](./CONTRIBUTING_ZH.md)和[行为准则](./CODE_OF_CONDUCT_ZH.md)。每个真实 Issue 都对应仓库内可版本化审查的范围和验收契约。
 
+社区配方和适配器清单可以先运行无凭据快速校验：`npm run extensions:validate`。该命令只解析可审查 JSON，不安装、不授权、也不执行扩展。
+
 - 不要在 Issue、PR、截图或测试夹具中包含真实消息、人员编号、令牌或公司内部资料。
 - 新能力必须有明确边界、反向测试、目标回读和失败处理。
 - 当前 5 个首次贡献任务均已在 GitHub 中标记为 `good first issue`，以 Issue 的打开状态和认领留言为准。

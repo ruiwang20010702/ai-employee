@@ -397,6 +397,10 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 
 Issues, real-world use cases, documentation improvements, and code contributions are welcome. Pick one of the five live [`good first issue` tasks](./docs/en/first-contributions.md), comment before starting to avoid duplicate work, then read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). Each live Issue links back to a versioned in-repository scope and acceptance contract.
 
+Community recipes and adapter manifests have a fast, credential-free check:
+`npm run extensions:validate`. It parses reviewable JSON only and never installs,
+authorizes, or executes an extension.
+
 ## License
 
 [MIT](./LICENSE)

@@ -20,4 +20,13 @@ All five tasks are live. Claim a task by commenting on its GitHub Issue before e
 4. Add the allowed path and the relevant denied or failure path.
 5. Run the acceptance commands from the Issue and paste their real results into the PR.
 
+For GFI-003, the dedicated command is:
+
+```bash
+npm run extensions:validate -- --recipe examples/recipes/<file>.json
+```
+
+It validates the contribution without credentials, installation, network access,
+or execution. The full `npm run check` remains required before opening the PR.
+
 No first issue may enable production sending, plan execution, proactive triggers, credential storage, deployment, or a new external write. Those changes require a separate design and security review.
