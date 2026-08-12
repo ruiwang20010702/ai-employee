@@ -16,6 +16,8 @@ test("activation UI is parseable, responsive, and honest about preview boundarie
   assert.match(activationHtml, /Download evidence bundle/u);
   assert.match(activationHtml, /Copy privacy-safe pilot proof/u);
   assert.match(activationHtml, /Copy setup check-in/u);
+  assert.match(activationHtml, /Copy privacy-safe readiness report/u);
+  assert.match(activationHtml, /Open bug report/u);
   assert.match(activationHtml, /Open setup Issue #50/u);
   assert.match(activationHtml, /Open pilot Issue #49/u);
   assert.match(activationHtml, /Prepare unique task link/u);
@@ -85,6 +87,9 @@ test("readiness UI is read-only, accessible, and does not expose command errors"
   assert.match(script, /api\('\/api\/readiness',\{\}\)/u);
   assert.match(script, /Ready for fork preparation and governed execution/u);
   assert.match(script, /copyText\(readiness\.setupCheckin\.markdown\)/u);
+  assert.match(script, /copyText\(readiness\.supportReport\.markdown\)/u);
+  assert.match(script, /Readiness report copied\. Review it/u);
+  assert.match(script, /without paths, usernames, private repository details, logs, model output, or credentials/u);
   assert.match(script, /Setup check-in copied\. Choose your platform/u);
   assert.match(script, /Setup changed after pilot preparation/u);
   assert.match(script, /esc\(readiness\.setupCheckin\.issueUrl\)/u);
@@ -271,7 +276,12 @@ test("readiness endpoint is token protected, read-only, and error bounded", asyn
         schema: "foursday-activation-readiness/v1",
         externalSystemsModified: false,
         github: { cliAvailable: true, authenticated: true },
-        runtimes: { codex: true, claudeCode: false, openAiCompatible: false },
+        runtimes: {
+          codex: true,
+          claudeCode: false,
+          openAiCompatible: false,
+          openAiCompatibleConfigurationError: false,
+        },
         readyForPilotPreparation: true,
         readyForGovernedExecution: true,
       };
@@ -301,9 +311,16 @@ test("readiness endpoint is token protected, read-only, and error bounded", asyn
     assert.equal(body.externalSystemsModified, false);
     assert.equal(body.readyForGovernedExecution, true);
     assert.equal(body.setupCheckin.schema, "foursday-setup-checkin/v1");
+    assert.equal(body.supportReport.schema, "foursday-readiness-support/v1");
+    assert.match(body.supportReport.issueUrl, /issues\/new\?template=bug_report\.yml$/u);
+    assert.match(body.supportReport.markdown, /GitHub authentication: ready/u);
     assert.match(body.setupCheckin.markdown, /immutable candidate: e{40}/u);
     assert.match(body.setupCheckin.issueUrl, /issues\/50#new_comment_field$/u);
     assert.doesNotMatch(body.setupCheckin.markdown, /\/Users\/|token|credential/iu);
+    assert.doesNotMatch(
+      body.supportReport.markdown,
+      /\/Users\/|private\/home|secret-value|must-not-leak/iu,
+    );
     assert.equal(calls, 1);
   } finally {
     await service.stop();

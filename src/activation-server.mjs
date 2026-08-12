@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { buildActivationPreview } from "./activation.mjs";
 import { activationHtml } from "./activation-ui.mjs";
 import { buildPilotTaskDraft } from "./pilot-task-draft.mjs";
+import { buildReadinessSupportReport } from "./readiness-support.mjs";
 import { buildSetupCheckin } from "./setup-checkin.mjs";
 
 const securityHeaders = Object.freeze({
@@ -97,6 +98,13 @@ export async function startActivationServer({
           ...readiness,
           setupCheckin: pilotWorkspace
             ? buildSetupCheckin({
+              candidateSha: pilotWorkspace.sourceSha,
+              nodeVersion: process.versions.node,
+              readiness,
+            })
+            : null,
+          supportReport: pilotWorkspace
+            ? buildReadinessSupportReport({
               candidateSha: pilotWorkspace.sourceSha,
               nodeVersion: process.versions.node,
               readiness,
