@@ -195,10 +195,9 @@ async function verifyInstalledPlugin(packageDirectory) {
   };
 }
 
-async function verifyInstalledActivation(packageDirectory, projectDirectory) {
-  const script = join(packageDirectory, "scripts", "启动体验.mjs");
-  const child = spawn(process.execPath, [script, "--port", "0"], {
-    cwd: packageDirectory,
+async function verifyInstalledActivation(installedGuide, projectDirectory) {
+  const child = spawn(installedGuide, ["start", "--port", "0"], {
+    cwd: projectDirectory,
     env: isolatedEnvironment(),
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -389,9 +388,16 @@ export async function verifyReusableInstallation({
       installedDemo.evidence.every((item) => item.verified !== false),
       "Installed package demo did not complete with local read-back evidence",
     );
+    const installedGuide = join(
+      installDirectory,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "foursday.cmd" : "foursday",
+    );
+    await access(installedGuide, constants.X_OK);
     await run("/usr/bin/git", ["-C", projectDirectory, "init"]);
     const installedActivation = await verifyInstalledActivation(
-      packageDirectory,
+      installedGuide,
       projectDirectory,
     );
 
@@ -401,13 +407,6 @@ export async function verifyReusableInstallation({
       ((await stat(guideScript)).mode & 0o111) !== 0,
       "Installed reusable environment guide is not executable",
     );
-    const installedGuide = join(
-      installDirectory,
-      "node_modules",
-      ".bin",
-      process.platform === "win32" ? "foursday.cmd" : "foursday",
-    );
-    await access(installedGuide, constants.X_OK);
     const legacyInstalledGuide = join(
       installDirectory,
       "node_modules",

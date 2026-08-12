@@ -26,6 +26,7 @@ test("activation help is English and returns before loading runtime dependencies
   assert.equal(dependencyLoads, 0);
   assert.equal(output, activationHelp);
   assert.match(output, /Usage:\n  npm start -- \[options\]/u);
+  assert.match(output, /foursday start \[options\]/u);
   assert.match(output, /--help\s+Show this help and exit\./u);
   assert.match(output, /without starting a listener/u);
   assert.match(output, /model, Git, GitHub, SQLite, or production systems/u);

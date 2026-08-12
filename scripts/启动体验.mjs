@@ -5,6 +5,7 @@ export const activationHelp = `Foursday activation
 
 Usage:
   npm start -- [options]
+  foursday start [options]
 
 Options:
   --port <number>  Set the loopback preview port (default: 4173).
@@ -45,6 +46,7 @@ export async function runActivation({
   args = process.argv.slice(2),
   output = process.stdout,
   loadRuntime = loadActivationRuntime,
+  workingDirectory = process.cwd(),
 } = {}) {
   if (args.includes("--help")) {
     output.write(activationHelp);
@@ -56,7 +58,6 @@ export async function runActivation({
     createDefaultActivationExecutionCoordinator,
     openAiCompatibleProviderFromEnvironment,
   } = await loadRuntime();
-  const workingDirectory = process.cwd();
   const executionCoordinator = createDefaultActivationExecutionCoordinator({
     workingDirectory,
     modelProvider: openAiCompatibleProviderFromEnvironment(),
