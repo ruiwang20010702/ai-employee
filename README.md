@@ -319,7 +319,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 
 ## Contributing
 
-Issues, real-world use cases, documentation improvements, and code contributions are welcome. Start with one of the five [first-contribution drafts](./docs/en/first-contributions.md), then read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). The drafts become live `good first issue` items only after the v0.5 candidate is published.
+Issues, real-world use cases, documentation improvements, and code contributions are welcome. Start with one of the published starter issues: [#3](https://github.com/ruiwang20010702/foursday/issues/3), [#4](https://github.com/ruiwang20010702/foursday/issues/4), [#5](https://github.com/ruiwang20010702/foursday/issues/5), [#6](https://github.com/ruiwang20010702/foursday/issues/6), or [#7](https://github.com/ruiwang20010702/foursday/issues/7). Then read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
 ## License
 
