@@ -92,7 +92,7 @@ relationship. Never mass-message a workplace directory.
 > production credentials, and it cannot merge or deploy. Would you try the
 > ten-minute candidate and tell me the first place you get stuck?
 >
-> Demo: https://github.com/ruiwang20010702/foursday/blob/581bac466d4d9288079b52a180be2310974caf88/assets/foursday-v0.5-demo.mp4
+> Demo: https://github.com/ruiwang20010702/foursday/blob/e272f92dcebd10abbc599f32fed3e7db4428f9b7/assets/foursday-v0.5-demo.mp4
 >
 > Pilot: https://github.com/ruiwang20010702/foursday/issues/49
 
