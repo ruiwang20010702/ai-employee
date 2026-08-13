@@ -15,16 +15,22 @@ sending and plan execution are disabled by default, and chat content can never
 grant new permissions. Foursday should work like another you without silently
 impersonating you.
 
-**English** · [简体中文](./README_ZH.md) · [Quick Start](#quick-start) · [v0.5.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [Architecture](#architecture) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+**English** · [简体中文](./README_ZH.md) · [Quick Start](#quick-start) · [Public preview v0.5.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [Architecture](#architecture) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 [![Checks](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![Security](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
-[![Release: v0.5.0-rc.1](https://img.shields.io/badge/release-v0.5.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
+[![Public preview: v0.5.0-rc.1](https://img.shields.io/badge/public_preview-v0.5.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
+[![Development: v0.6.0](https://img.shields.io/badge/development-v0.6.0-6f7bf7)](./CHANGELOG.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
 [Start in 10 minutes](#quick-start) · [Open the v0.5.0-rc.1 pre-release](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [Report a successful install](https://github.com/ruiwang20010702/foursday/issues/50) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Join the v0.5 pilot](https://github.com/ruiwang20010702/foursday/issues/49) · [Track the 90-day launch](./docs/en/growth-scorecard.md) · [Review the public launch playbook](./docs/en/public-launch-playbook.md) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
+
+**Version status:** `v0.5.0-rc.1` is the latest tagged public preview. The
+repository and `package.json` currently target **v0.6.0, unreleased**. The
+package remains `private: true` to prevent accidental npm publication; it does
+not restrict cloning or reuse under the MIT license.
 
 <a href="./assets/foursday-v0.5-demo.mp4">
   <img src="./assets/foursday-v0.5-demo-poster.png" alt="Watch Foursday turn a synthetic GitHub Issue into a verified Draft PR" width="960">
@@ -96,7 +102,7 @@ and sees whether time was actually returned.
 | Project recipe shadow | Run a selected research/document recipe against a clean, exact Git snapshot before production execution | Preview is zero-write; explicit local run creates only a protected isolated ledger, review pack, and unconfirmed time-return question |
 | Project memory sync | Re-scan authorized files with Codex or Claude Code and keep durable facts current | Global capability plus bounded project authorization; only source-bound, conflict-free facts may auto-confirm |
 | Recipe library | Repeatable workflows instead of planning the same work from every message | Five versioned built-in recipes; durable project-memory updates use a separate evidence-bound recipe |
-| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, triggers, and the next best work to delegate | Deployed in 0.6: the local console and read-only Codex tool rank a weekly delegation queue by confirmed outcomes; they plan only and never treat an unverified recipe baseline as time returned |
+| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, triggers, and the next best work to delegate | Implemented on the unreleased 0.6.0 development line and deployed at production commit `ca43e02`: the local console and read-only Codex tool rank a weekly delegation queue by confirmed outcomes; they plan only and never treat an unverified recipe baseline as time returned |
 | Time-return dashboard | Evidence-backed minutes saved and automation coverage, confirmed by the user | The cockpit shows bounded delivery content before asking for actual post-AI review/edit time; north-star progress counts only confirmed recipe outcomes in the current local week |
 | Proactive mode | Scheduled or event-triggered work with daily limits, cooldowns, and idempotency | Implemented; every trigger is created disabled |
 | Meeting to execution | Notes → document → proposed decision memory → task → follow-up calendar | Implemented as an approval-bound recipe |
@@ -443,7 +449,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [x] Feishu Open Platform adapter without a DWS dependency
 - [x] Claude Code and direct model-provider runtime contracts
 - [x] Personal project onboarding, recipes, cockpit, and verified time-return ledger
-- [x] Deployed 0.6 weekly delegation queue toward the eight-hour goal, ranked by confirmed evidence without silently executing work or counting unverified estimates
+- [x] Weekly delegation queue on the unreleased 0.6.0 development line, deployed at production commit `ca43e02`, ranked by confirmed evidence without silently executing work or counting unverified estimates
 - [x] Proactive triggers, meeting-to-execution, and GitHub draft-PR delivery loops
 - [x] Versioned workspace/event adapter contracts and community examples
 - [x] Governed Work Graph v1 production implementation: typed nodes, allowlisted edges, recipe content binding, public Schema, and deterministic SQLite/PostgreSQL projections

@@ -520,6 +520,31 @@ test("中英文项目首页提供产品定位、快速开始和双语开源治�
   assert.match(license, /MIT License/u);
 });
 
+test("版本口径区分公开预览版与尚未发布的开发版本", async () => {
+  const [english, chinese, changelog, changelogChinese, packageText] =
+    await Promise.all([
+      projectText("README.md"),
+      projectText("README_ZH.md"),
+      projectText("CHANGELOG.md"),
+      projectText("CHANGELOG_ZH.md"),
+      projectText("package.json"),
+    ]);
+  const packageJson = JSON.parse(packageText);
+  assert.equal(packageJson.version, "0.6.0");
+  assert.equal(packageJson.private, true);
+  assert.match(english, /latest tagged public preview.+v0\.5\.0-rc\.1/su);
+  assert.match(english, /v0\.6\.0, unreleased/u);
+  assert.match(chinese, /最新带标签的公开预览版/u);
+  assert.match(chinese, /尚未公开发布的 v0\.6\.0 开发版本/u);
+  assert.match(changelog, /Target package version: `0\.6\.0`/u);
+  assert.match(changelogChinese, /目标包版本为 `0\.6\.0`/u);
+  for (const value of [changelog, changelogChinese]) {
+    assert.doesNotMatch(value, /^## \[0\.6\.0\] - /mu);
+    assert.match(value, /compare\/v0\.5\.0-rc\.1\.\.\.HEAD/u);
+    assert.match(value, /releases\/tag\/v0\.5\.0-rc\.1/u);
+  }
+});
+
 test("中英文首页、治理文件和英文核心文档的本地链接全部存在", async () => {
   for (const file of [
     "README.md",

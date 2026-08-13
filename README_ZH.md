@@ -10,16 +10,21 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 
 钉钉使用 DWS，飞书直接使用开放平台事件与消息 API。默认不自动发送，也不会从聊天内容中获得新权限。它在能力上成为你的分身，但不会在身份上偷偷冒充你。
 
-[English](./README.md) · **简体中文** · [快速开始](#快速开始) · [v0.5.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [设计总览](./docs/设计总览.md) · [产品需求](./docs/产品需求文档.md) · [安全说明](./安全说明.md)
+[English](./README.md) · **简体中文** · [快速开始](#快速开始) · [公开预览版 v0.5.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [设计总览](./docs/设计总览.md) · [产品需求](./docs/产品需求文档.md) · [安全说明](./安全说明.md)
 
 [![检查](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![安全扫描](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
-[![预发布版：v0.5.0-rc.1](https://img.shields.io/badge/%E9%A2%84%E5%8F%91%E5%B8%83%E7%89%88-v0.5.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
+[![公开预览版：v0.5.0-rc.1](https://img.shields.io/badge/%E5%85%AC%E5%BC%80%E9%A2%84%E8%A7%88%E7%89%88-v0.5.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
+[![开发版本：v0.6.0](https://img.shields.io/badge/%E5%BC%80%E5%8F%91%E7%89%88%E6%9C%AC-v0.6.0-6f7bf7)](./CHANGELOG_ZH.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
 [10 分钟开始](#快速开始) · [打开 v0.5.0-rc.1 预发布版](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [报告一次成功安装](https://github.com/ruiwang20010702/foursday/issues/50) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入 v0.5 外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [查看 90 天增长记分卡](./docs/公开增长记分卡.md) · [审阅公开发布手册](./docs/公开发布手册.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+
+**版本状态：**`v0.5.0-rc.1` 是最新带标签的公开预览版；仓库和
+`package.json` 当前面向**尚未公开发布的 v0.6.0 开发版本**。
+`private: true` 只用于防止误发布到 npm，不影响按 MIT 许可证克隆与复用。
 
 <a href="./assets/foursday-v0.5-demo.mp4">
   <img src="./assets/foursday-v0.5-demo-poster.png" alt="观看 Foursday 将合成 GitHub Issue 转化为经过验证的 Draft PR" width="960">
@@ -119,7 +124,7 @@ Foursday 默认服务一个人，不是为了给管理者监控团队。个人�
 | 项目配方影子验证 | 在生产执行前，用干净且精确绑定的 Git 快照演练已选择的研究/文档配方 | 默认零写预览；显式本地运行只生成受保护的隔离账本、审阅包和待本人填写的时间问题 |
 | 项目记忆同步 | 用 Codex 或 Claude Code 增量扫描已授权文件，持续更新稳定项目事实 | 全局能力与项目范围双重授权；只有来源明确、无冲突的低风险事实可以自动确认 |
 | 工作配方库 | 重复流程直接复用，不再每次从消息重新规划 | 已实现 5 个带版本的官方配方；项目记忆更新单独走证据绑定配方 |
-| 项目驾驶舱 | 汇总目标、计划、证据、交付物、正式记忆、主动触发器和下一项最值得委托的工作 | 已随 0.6 部署：本机控制台与只读 Codex 工具按本人确认的历史结果形成“本周工作返还队列”；只规划，不执行，未验证配方基线不冒充返还时间 |
+| 项目驾驶舱 | 汇总目标、计划、证据、交付物、正式记忆、主动触发器和下一项最值得委托的工作 | 已在尚未公开发布的 0.6.0 开发线上实现，并部署于生产提交 `ca43e02`：本机控制台与只读 Codex 工具按本人确认的历史结果形成“本周工作返还队列”；只规划，不执行，未验证配方基线不冒充返还时间 |
 | 时间返还仪表盘 | 只统计有执行证据且经本人确认的返还时间与自动化率 | 先展示有界交付正文，再填写 AI 交付后的真实审阅/修改耗时；北极星按本机时区周一开始计算本周进度，模型估算和未登记工作不计入 |
 | 主动工作模式 | 定时或事件触发日报、跟进与风险提醒 | 已实现；触发器创建后默认停用，并受每日次数与冷却限制 |
 | 会议到执行 | 会议记录→文档→决策记忆候选→待办→跟进日程 | 已实现为审批绑定配方 |
@@ -385,7 +390,7 @@ flowchart LR
 - [x] 一条命令启动 Web 接入页，复用真实 GitHub 受治理配方且零外部写入
 - [x] 带版本的 MessageAdapter、AgentRuntime 和 ModelProvider 契约
 - [x] 个人项目接入、配方库、项目驾驶舱和时间返还账本
-- [x] 已部署 0.6：面向八小时周目标、按确认证据排序的本周工作返还队列；不静默执行，也不把未验证估算计为返还
+- [x] 尚未公开发布的 0.6.0 开发线已实现本周工作返还队列，并部署于生产提交 `ca43e02`；按确认证据排序，不静默执行，也不把未验证估算计为返还
 - [x] 主动触发、会议到执行和 GitHub PR 草稿交付闭环
 - [x] 工作空间/事件适配器契约与社区示例清单
 - [x] 受治理工作图 V1 生产实现：类型化节点、关系白名单、配方内容绑定、公开 Schema 和 SQLite/PostgreSQL 确定性投影
