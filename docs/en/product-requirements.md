@@ -35,5 +35,5 @@ flowchart LR
 ```
 
 Implemented capability does not mean enabled capability. The V2.3 code is
-deployed at exact production SHA `34d04326d1d16ba92994107eb2f44bf89d74c759`;
+deployed at exact production SHA `4453246d68ae13a4f4f046a8babe6c5edf69b021`;
 project authorization and production enablement remain separate decisions.

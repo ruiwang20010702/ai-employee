@@ -69,10 +69,10 @@ test("技术部署与业务自动化放量的状态口径不互相冒充", async
     projectText("docs/验收报告.md"),
     projectText("docs/统一审查报告.md"),
   ]);
-  assert.match(matrix, /V2\.3 技术版本已部署/u);
-  assert.match(matrix, /技术发布完成，业务自动化尚未放量/u);
+  assert.match(matrix, /V2\.4 技术版本[^\n]*已部署/u);
+  assert.match(matrix, /业务自动化尚未放量/u);
   assert.match(acceptance, /技术发布完成不等于业务自动化放量/u);
-  assert.match(review, /技术版本已部署.+业务自动化尚未放量/u);
+  assert.match(review, /V2\.4 发布后补充[^\n]*仍未放量/u);
   for (const text of [matrix, acceptance, review]) {
     assert.doesNotMatch(text, /V2\.2[^\n|]*(?:尚未提交|尚未推送|尚未部署)/u);
   }
@@ -108,11 +108,10 @@ test("权威文档区分当前技术部署与业务放量状态", async () => {
   assert.ok(version);
   assert.ok(productionSha);
   assert.equal(version, "V2.4");
-  assert.match(matrix, /V2\.3 技术版本已部署/u);
-  assert.match(matrix, /V2\.4 工作区候选/u);
-  assert.match(matrix, /V2\.4[^\n]*当前尚未部署/u);
+  assert.match(matrix, /V2\.4 技术版本[^\n]*已部署/u);
+  assert.doesNotMatch(matrix, /V2\.4[^\n|]*(?:尚未提交|尚未推送|尚未部署)/u);
   assert.match(matrix, /业务自动化尚未放量/u);
-  assert.match(review, /V2\.3 提交/u);
+  assert.match(review, /V2\.4 发布后补充/u);
   assert.ok(technical.includes(`当前生产提交为 \`${productionSha}\``));
   for (const text of [readme, matrix, acceptance, review, technical, overview, operations]) {
     assert.doesNotMatch(

@@ -121,7 +121,7 @@ control plane that connects three bounded graphs:
 | Knowledge graph | Project ↔ message, document, decision, deliverable, and formal memory | What does this work know, and which source supports it? |
 | Governance graph | Person ↔ project, capability, policy, budget, approval, and audit record | Who authorized this transition, within which scope and version? |
 
-Production release `34d04326d1d16ba92994107eb2f44bf89d74c759` implements stable
+Production release `4453246d68ae13a4f4f046a8babe6c5edf69b021` implements stable
 node identities, versioned edge contracts, encrypted SQLite/PostgreSQL
 projections, intended-versus-runtime capture, and four bounded explanations in
 the personal project cockpit. This does not add a graph database or grant
