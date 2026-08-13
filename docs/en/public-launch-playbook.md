@@ -7,24 +7,25 @@ public claim tied to evidence.
 
 ## Current launch state
 
-Snapshot: **2026-08-12**. Re-check every number before publishing it.
+Snapshot: **2026-08-13**. Re-check every number before publishing it.
 
 | Signal | Verified state | Meaning |
 |---|---:|---|
-| Current-candidate maintainer loops | 0/10 | Historical 10/10 loops started from ancestor `ddd6646`; none are bound to the current candidate |
+| Current-candidate maintainer loops | 10/10 | Ten distinct Issue, plan, branch, Draft PR, memory, and time-return records are bound to `e272f92`; local integrity and all ten online targets were re-read successfully |
 | External tester loops | 0/10 | The public pilot remains open in [Issue #49](https://github.com/ruiwang20010702/foursday/issues/49) |
 | Successful installation identities | 1 | CI, package downloads, and repeated maintainer retries do not create extra users |
 | GitHub Stars | 1 | A dated repository-counter snapshot, not a product-quality claim |
-| Forks | 0 | No external fork has yet been counted as a completed pilot |
+| Forks | 2 | Public repository counter only; neither fork is counted as a completed external pilot |
 
 [Issue #49](https://github.com/ruiwang20010702/foursday/issues/49) and
 [Issue #50](https://github.com/ruiwang20010702/foursday/issues/50) are pinned so
 visitors can find the full pilot and the lower-friction setup check-in. Pinning
 improves discovery; it does not count as an install or validation loop.
 
-The historical maintainer cohort remains valid evidence that the earlier
-governed contract ran end to end. It is not reusable launch evidence after the
-candidate changed; the current candidate must complete its own 10/10 loops.
+The historical maintainer cohort remains evidence for the earlier contract but
+was not reused. The current candidate completed a separate 10/10 maintainer
+cohort through Issues #54–#63 and open Draft PRs #64–#73. One maintainer still
+counts as one verified user, not ten users.
 
 Run the anonymous aggregate read-back before every progress update:
 
@@ -103,7 +104,7 @@ The invitation asks for friction, not praise, stars, or a passing result.
 | Safe current wording | Do not claim yet |
 |---|---|
 | “v0.5 candidate” | “production-ready v0.5” |
-| “historical maintainer loops 10/10; current candidate 0/10; external 0/10” | “current candidate validated by 10 users” |
+| “current candidate maintainer loops 10/10; external 0/10” | “current candidate validated by 10 users” |
 | “one maintainer reproduced the public install” | “hundreds of installs” or package-download counts as users |
 | “server-start-to-confirmed is measured; package download is separate” | “every user finishes within ten minutes” |
 | “Codex, Claude Code, or a compatible provider can run the GitHub recipe” | “supports every model or workplace platform” |

@@ -530,6 +530,7 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
     headRepository: { nameWithOwner: "example/project" },
     baseRefName: "main",
     title: "修复问题",
+    body: "变更与测试说明\n",
   };
   await writeFile(readbackPath, JSON.stringify(readback));
   await writeFile(executable, [
@@ -593,11 +594,13 @@ test("GitHub PR 草稿只基于已核验推送并逐字段回读", async (t) => 
   assert.equal(invocations.length, 2);
   assert.equal(invocations[0].includes("--draft"), true);
   assert.match(invocations[1][invocations[1].indexOf("--json") + 1], /headRefOid/u);
+  assert.match(invocations[1][invocations[1].indexOf("--json") + 1], /body/u);
 
   for (const mutation of [
     { number: 41 },
     { isDraft: false },
     { headRefOid: "b".repeat(40) },
+    { body: "正文已被修改\n" },
   ]) {
     await writeFile(readbackPath, JSON.stringify({ ...readback, ...mutation }));
     await assert.rejects(

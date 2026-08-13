@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMainModule } from "../src/main-module.mjs";
 import { buildPilotTaskDraft } from "../src/pilot-task-draft.mjs";
+import { canonicalGitHubMarkdownBody } from "../src/github-markdown.mjs";
 import { validateValidationEvidence } from "../src/validation-evidence.mjs";
 
 const maximumEvidenceBytes = 2 * 1024 * 1024;
@@ -292,7 +293,7 @@ async function verifyTargetEntry(entry, candidateSha, fetchImpl, token) {
     String(issue.body ?? "") !== expectedTask.issueBody
   ) throw new Error("Pilot Issue online readback does not match the approved task");
   const titleDigest = sha256(pull.title);
-  const bodyDigest = sha256(pull.body);
+  const bodyDigest = sha256(canonicalGitHubMarkdownBody(pull.body));
   if (
     pull.number !== summary.draftPrNumber ||
     pull.html_url !== expectedPullUrl ||
