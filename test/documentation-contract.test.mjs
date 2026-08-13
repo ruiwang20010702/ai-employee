@@ -107,8 +107,10 @@ test("权威文档区分当前技术部署与业务放量状态", async () => {
   const productionSha = acceptance.match(/当前生产精确绑定提交 `([0-9a-f]{40})`/u)?.[1];
   assert.ok(version);
   assert.ok(productionSha);
-  assert.equal(version, "V2.3");
+  assert.equal(version, "V2.4");
   assert.match(matrix, /V2\.3 技术版本已部署/u);
+  assert.match(matrix, /V2\.4 工作区候选/u);
+  assert.match(matrix, /V2\.4[^\n]*当前尚未部署/u);
   assert.match(matrix, /业务自动化尚未放量/u);
   assert.match(review, /V2\.3 提交/u);
   assert.ok(technical.includes(`当前生产提交为 \`${productionSha}\``));
@@ -120,7 +122,10 @@ test("权威文档区分当前技术部署与业务放量状态", async () => {
     assert.doesNotMatch(text, /当前主机仍安装[^\n|]*0\.2\.0/u);
   }
   for (const text of [matrix, acceptance, review, technical, overview, operations]) {
-    assert.doesNotMatch(text, /V2\.3[^\n|]*(?:尚未提交|尚未推送|尚未部署)/u);
+    assert.doesNotMatch(
+      text,
+      /V2\.3(?:(?!V2\.4|。|\n|\|).)*(?:尚未提交|尚未推送|尚未部署)/u,
+    );
   }
 });
 

@@ -89,6 +89,9 @@ async function packageFileGate(files, root) {
     "scripts/启动体验.mjs",
     "scripts/运行代码检查.mjs",
     "scripts/创建项目配置.mjs",
+    "scripts/导入历史项目.mjs",
+    "scripts/同步项目记忆.mjs",
+    "scripts/自动同步项目记忆.mjs",
     "scripts/校验项目能力.mjs",
     "scripts/运行完整测试.mjs",
     "scripts/验证复用安装.mjs",
@@ -102,6 +105,11 @@ async function packageFileGate(files, root) {
     "src/activation-execution.mjs",
     "src/activation-server.mjs",
     "src/activation-ui.mjs",
+    "src/historical-memory.mjs",
+    "src/historical-project-import.mjs",
+    "src/historical-project-import-service.mjs",
+    "src/project-memory-sync.mjs",
+    "src/project-memory-sync-worker.mjs",
     "src/artifact-runtime.mjs",
     "src/openai-compatible-provider.mjs",
     "src/store.mjs",
@@ -110,6 +118,8 @@ async function packageFileGate(files, root) {
     "src/privacy-erasure.mjs",
     "src/reuse-readiness.mjs",
     "src/production-config-file.mjs",
+    "schemas/historical-project-import.schema.json",
+    "examples/historical-project-import.json",
     "plugins/foursday/.codex-plugin/plugin.json",
     "plugins/foursday/.mcp.json",
     "plugins/foursday/scripts/mcp-server.mjs",
@@ -707,6 +717,48 @@ export async function verifyReusableInstallation({
     const validationResult = JSON.parse(validation.stdout);
     assert(validationResult.valid === true && validationResult.projects === 1, "Installed project validation failed");
 
+    const historySourcePath = join(projectDirectory, "project-history.md");
+    await writeFile(
+      historySourcePath,
+      "Every imported historical fact must remain traceable to its source.\n",
+    );
+    const historyBundlePath = join(temporary, "history-import.json");
+    await writeFile(historyBundlePath, JSON.stringify({
+      schema: "foursday-historical-project-import/v1",
+      project: {
+        projectId: manifest.projectId,
+        name: manifest.name,
+        rootDirectory: manifest.rootDirectory,
+        requesterIds: manifest.requesters,
+        profile: manifest.profile,
+      },
+      sources: [{ id: "project_history", path: "project-history.md" }],
+      memories: [{
+        type: "project",
+        statement: "Every imported historical fact must remain traceable to its source.",
+        factKey: "history.source_rule",
+        sourceId: "project_history",
+        sourceQuote: "Every imported historical fact must remain traceable to its source.",
+      }],
+    }));
+    const historyPreview = JSON.parse((await run(
+      process.execPath,
+      [join(packageDirectory, "scripts", "导入历史项目.mjs"), "--bundle", historyBundlePath],
+      {
+        env: {
+          PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+          AI_EMPLOYEE_PROJECTS_DIRECTORY: join(runtimeDirectory, "projects"),
+        },
+      },
+    )).stdout);
+    assert(
+      historyPreview.projectAction === "reuse" &&
+      historyPreview.counts.candidates === 1 &&
+      historyPreview.databaseWrite === false &&
+      historyPreview.memoriesConfirmed === 0,
+      "Installed historical project import preview is unsafe or unavailable",
+    );
+
     return {
       valid: true,
       package: `${packageName}@${installedMetadata.version}`,
@@ -722,6 +774,7 @@ export async function verifyReusableInstallation({
       isolatedWorkspaces: 2,
       configMode: "600",
       projectMode: "600",
+      historicalProjectImportPreview: true,
       overwriteProtection: true,
       inlineSecretsWritten: 0,
       keychainProvisioningPreview: true,

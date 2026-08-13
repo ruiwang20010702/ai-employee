@@ -71,6 +71,37 @@ function json(response, status, value) {
   response.end(`${JSON.stringify(value)}\n`);
 }
 
+function projectMemorySyncState(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return null;
+    return {
+      state: ["synchronized", "unchanged", "review_required", "failed"]
+        .includes(parsed.state) ? parsed.state : "unknown",
+      lastCheckedAt: typeof parsed.lastCheckedAt === "string" ? parsed.lastCheckedAt : null,
+      lastSuccessAt: typeof parsed.lastSuccessAt === "string" ? parsed.lastSuccessAt : null,
+      sourceDigest: /^[a-f0-9]{64}$/u.test(String(parsed.sourceDigest ?? ""))
+        ? parsed.sourceDigest
+        : null,
+      candidatesCreated: Number.isSafeInteger(parsed.candidatesCreated)
+        ? Math.max(0, parsed.candidatesCreated)
+        : 0,
+      memoriesConfirmed: Number.isSafeInteger(parsed.memoriesConfirmed)
+        ? Math.max(0, parsed.memoriesConfirmed)
+        : 0,
+      reviewRequired: Number.isSafeInteger(parsed.reviewRequired)
+        ? Math.max(0, parsed.reviewRequired)
+        : 0,
+      errorCode: typeof parsed.errorCode === "string"
+        ? parsed.errorCode.slice(0, 100)
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function readJson(request, maxBytes = 65_536) {
   if (request.headers["content-type"]?.split(";", 1)[0] !== "application/json") {
     throw Object.assign(new Error("content_type_must_be_json"), { status: 415 });
@@ -563,13 +594,14 @@ export async function startAdminServer({
           manifestLoader(config.projectsDirectory),
           recipeLoader(config.recipesDirectory),
           store.listWorkPlans({ limit: 1_000 }),
-          store.listMemories({ status: "confirmed", limit: 1_000 }),
+          store.listMemories({ statuses: ["proposed", "confirmed"], limit: 1_000 }),
           store.listTimeReturns({ limit: 1_000 }),
         ]);
         const planSteps = new Map(await Promise.all(plans.map(async (plan) => [
           plan.id,
           await (store.listWorkPlanSteps?.(plan.id) ?? Promise.resolve([])),
         ])));
+        const dashboardNow = new Date();
         const graphByProject = new Map(await Promise.all(
           [...projects.values()].map(async (manifest) => {
             if (!store.listGraphNodes || !store.listGraphEdges) {
@@ -588,9 +620,17 @@ export async function startAdminServer({
               tenantId: config.tenantId,
               nodes,
               edges,
-              now: new Date(),
+              now: dashboardNow,
             }];
           }),
+        ));
+        const memorySyncByProject = new Map(await Promise.all(
+          [...projects.values()].map(async (manifest) => [
+            manifest.projectId,
+            projectMemorySyncState(await store.getCheckpoint?.(
+              `project-memory-sync:${manifest.projectId}:status`,
+            )),
+          ]),
         ));
         json(response, 200, {
           items: [...projects.values()].map((manifest) => buildProjectDashboard({
@@ -601,6 +641,8 @@ export async function startAdminServer({
             recipes: [...recipes.values()],
             planSteps,
             graph: graphByProject.get(manifest.projectId),
+            memorySyncState: memorySyncByProject.get(manifest.projectId),
+            now: dashboardNow,
           })),
         });
         return;

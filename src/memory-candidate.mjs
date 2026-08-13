@@ -85,7 +85,7 @@ function containsPaymentCardNumber(value) {
   return false;
 }
 
-function containsSensitivePersonMaterial(value) {
+export function containsSensitivePersonMaterial(value) {
   const text = String(value ?? "");
   return sensitivePersonPatterns.some((pattern) => pattern.test(text)) ||
     containsChineseResidentId(text) ||

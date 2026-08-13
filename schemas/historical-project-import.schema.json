@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ruiwang20010702/foursday/blob/main/schemas/historical-project-import.schema.json",
+  "title": "Foursday historical project import",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "project", "sources", "memories"],
+  "properties": {
+    "schema": { "const": "foursday-historical-project-import/v1" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "name", "rootDirectory", "requesterIds", "profile"],
+      "properties": {
+        "projectId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "rootDirectory": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "requesterIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "profile": { "type": "object" }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 100 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    },
+    "memories": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "statement", "factKey", "sourceId", "sourceQuote"],
+        "properties": {
+          "type": { "enum": ["project", "principle"] },
+          "statement": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "factKey": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*){1,4}$", "maxLength": 120 },
+          "sourceId": { "type": "string", "maxLength": 100 },
+          "sourceQuote": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "sensitivity": { "enum": ["public", "internal", "confidential"], "default": "internal" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+          "retentionDays": { "type": "integer", "minimum": 1, "maximum": 365 }
+        }
+      }
+    }
+  }
+}

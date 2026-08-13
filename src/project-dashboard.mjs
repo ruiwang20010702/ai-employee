@@ -13,14 +13,31 @@ export function buildProjectDashboard({
   recipes = [],
   planSteps = new Map(),
   graph = null,
+  memorySyncState = null,
+  now = new Date(),
 }) {
   if (!manifest?.projectId || !manifest?.name) {
     throw new Error("Project dashboard requires a project manifest");
   }
   const projectPlans = plans.filter((plan) => plan.project_id === manifest.projectId);
-  const projectMemories = memories.filter(
+  const allProjectMemories = memories.filter(
+    (memory) => memory.project_id === manifest.projectId,
+  );
+  const projectMemories = allProjectMemories.filter(
     (memory) => memory.project_id === manifest.projectId && memory.status === "confirmed",
   );
+  const proposedMemories = allProjectMemories.filter(
+    (memory) => memory.status === "proposed",
+  );
+  const memoryRule = manifest.capabilities?.project_memory_proposal ?? null;
+  const confirmedStatementsByFactKey = new Map();
+  for (const memory of projectMemories) {
+    const factKey = memory.scope?.factKey;
+    if (!factKey) continue;
+    const statements = confirmedStatementsByFactKey.get(factKey) ?? new Set();
+    statements.add(String(memory.statement ?? "").trim());
+    confirmedStatementsByFactKey.set(factKey, statements);
+  }
   const projectTimeReturns = timeReturns.filter(
     (entry) => entry.projectId === manifest.projectId,
   );
@@ -101,6 +118,15 @@ export function buildProjectDashboard({
     },
     memory: {
       confirmed: projectMemories.length,
+      proposed: proposedMemories.length,
+      reviewRequired: proposedMemories.filter((memory) =>
+        memory.source_type === "historical_project_import"
+      ).length,
+      conflictsPendingReview: proposedMemories.filter((memory) => {
+        const statements = confirmedStatementsByFactKey.get(memory.scope?.factKey);
+        return statements != null &&
+          !statements.has(String(memory.statement ?? "").trim());
+      }).length,
       decisions: projectMemories.filter((memory) => memory.scope?.factKey?.includes("decision")).length,
       risks: projectMemories.filter((memory) => memory.scope?.factKey?.includes("risk")).length,
       items: projectMemories.map((memory) => ({
@@ -109,6 +135,29 @@ export function buildProjectDashboard({
         statement: memory.statement,
         updatedAt: memory.updated_at,
       })),
+    },
+    memorySync: {
+      authorized: Boolean(memoryRule && memoryRule.mode !== "disabled"),
+      mode: memoryRule?.mode ?? "disabled",
+      autoConfirm: memoryRule?.autoConfirm === true,
+      sourcePaths: memoryRule?.sourcePaths ?? [],
+      allowedFactKeyPrefixes: memoryRule?.allowedFactKeyPrefixes ?? [],
+      maxRetentionDays: memoryRule?.maxRetentionDays ?? null,
+      state: memorySyncState?.state ?? "not_started",
+      lastCheckedAt: memorySyncState?.lastCheckedAt ?? null,
+      lastSuccessAt: memorySyncState?.lastSuccessAt ?? null,
+      sourceDigestPrefix: typeof memorySyncState?.sourceDigest === "string"
+        ? memorySyncState.sourceDigest.slice(0, 12)
+        : null,
+      candidatesCreated: Number(memorySyncState?.candidatesCreated ?? 0),
+      memoriesConfirmed: Number(memorySyncState?.memoriesConfirmed ?? 0),
+      reviewRequired: Math.max(
+        Number(memorySyncState?.reviewRequired ?? 0),
+        proposedMemories.filter((memory) =>
+          memory.source_type === "historical_project_import"
+        ).length,
+      ),
+      errorCode: memorySyncState?.errorCode ?? null,
     },
     deliverables,
     governedGraph: {
@@ -128,6 +177,7 @@ export function buildProjectDashboard({
     ),
     timeReturn: summarizeTimeReturns(
       projectTimeReturns,
+      { now },
     ),
     timeReturnCandidates: projectPlans
       .filter((plan) =>

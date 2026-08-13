@@ -5,7 +5,7 @@ import { instantiateWorkRecipe, validateWorkRecipe } from "../src/work-recipe.mj
 import { loadWorkRecipes } from "../src/recipe-library.mjs";
 import { assessWorkPlan, validateWorkPlan } from "../src/work-plan.mjs";
 
-test("四个官方工作配方均可加载并实例化", async () => {
+test("五个官方工作配方均可加载并实例化", async () => {
   const directory = new URL("../deploy/recipes/", import.meta.url);
   const recipes = await loadWorkRecipes(directory);
   assert.deepEqual([...recipes.keys()].sort(), [
@@ -13,6 +13,7 @@ test("四个官方工作配方均可加载并实例化", async () => {
     "daily-report",
     "meeting-follow-up",
     "project-follow-up",
+    "project-memory-update",
   ]);
   const result = instantiateWorkRecipe(recipes.get("project-follow-up"), {
     projectId: "project_1",
@@ -36,6 +37,22 @@ test("四个官方工作配方均可加载并实例化", async () => {
   });
   assert.deepEqual(meeting.plan.steps.find((step) => step.id === "create-todo").inputs.executorUserIds, ["user-1"]);
   assert.equal(meeting.plan.steps.some((step) => step.capability === "project_memory_proposal"), true);
+  const memoryUpdate = instantiateWorkRecipe(recipes.get("project-memory-update"), {
+    projectId: "project_1", requesterId: "owner_1", projectRoot: "/workspace/project",
+    values: {
+      projectFocus: "核对交付延期风险",
+      memoryStatement: "供应商交付存在一周延期风险。",
+      memoryFactKey: "risk.delivery_delay",
+      memoryRetentionDays: 90,
+    },
+  });
+  assert.deepEqual(memoryUpdate.plan.steps.map((step) => step.capability), [
+    "research", "document_draft", "project_memory_proposal",
+  ]);
+  assert.equal(
+    memoryUpdate.plan.steps.at(-1).inputs.documentStepId,
+    "draft-memory-review",
+  );
   const code = instantiateWorkRecipe(recipes.get("code-delivery"), {
     projectId: "project_1", requesterId: "owner_1", projectRoot: "/workspace/project",
     values: {

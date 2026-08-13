@@ -65,6 +65,48 @@ test("主动工作按时间生成受控计划且同一运行不会重复", async
   }), null);
 });
 
+test("主动项目记忆更新只生成证据绑定的待审批计划", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-12T01:30:00.000Z");
+  const memoryManifest = structuredClone(manifest);
+  memoryManifest.profile.selectedRecipeIds = ["project-memory-update"];
+  memoryManifest.profile.memoryScope = { allowedTypes: ["project"], retentionDays: 90 };
+  memoryManifest.capabilities.project_memory_proposal = {
+    mode: "approval_required",
+    allowedFactKeyPrefixes: ["risk."],
+    maxRetentionDays: 90,
+    maxRuns: 1,
+  };
+  store.createWorkTrigger({
+    version: 1,
+    id: "weekly-memory-review",
+    projectId: memoryManifest.projectId,
+    recipeId: "project-memory-update",
+    requesterId: "owner",
+    kind: "schedule",
+    enabled: true,
+    maxRunsPerDay: 1,
+    values: {
+      projectFocus: "核对供应商交付风险",
+      memoryStatement: "供应商交付存在一周延期风险。",
+      memoryFactKey: "risk.delivery_delay",
+      memoryRetentionDays: 90,
+    },
+    schedule: { startsAt: now.toISOString(), intervalMinutes: 10_080 },
+  }, "owner", now);
+  const result = await runDueProactiveTrigger({
+    store,
+    manifests: new Map([[memoryManifest.projectId, memoryManifest]]),
+    recipes: await loadWorkRecipes(new URL("../deploy/recipes/", import.meta.url)),
+    owner: "proactive-test",
+    now,
+  });
+  assert.equal(result.created, true);
+  assert.equal(result.plan.status, "awaiting_approval");
+  assert.equal(result.plan.plan.steps.at(-1).capability, "project_memory_proposal");
+  assert.equal(result.plan.plan.steps.at(-1).inputs.documentStepId, "draft-memory-review");
+});
+
 test("事件主动工作按事件编号幂等并受每日次数与冷却约束", async (t) => {
   const store = await fixture(t);
   const now = new Date("2026-08-12T02:00:00.000Z");

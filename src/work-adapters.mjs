@@ -20,6 +20,7 @@ import {
   runControlledCommand,
   safeCommandEnvironment,
 } from "./controlled-command-runner.mjs";
+import { workPlanMemoryEvidenceScope } from "./work-evidence.mjs";
 
 const execFileAsync = promisify(execFile);
 const patchDirectory = new URL("../.runtime/work-plan-temp/", import.meta.url);
@@ -814,9 +815,24 @@ export function createControlledWorkAdapters({
           throw new Error("Project memory is outside the approved memory scope");
         }
       },
-      async execute({ plan, step }) {
+      async execute({ plan, step, priorEvidence }) {
+        const evidenceStepId = referencedEarlierStep(
+          plan,
+          step,
+          "documentStepId",
+          "document_draft",
+        );
+        const evidence = priorEvidence[evidenceStepId];
+        if (evidence?.kind !== "document_markdown" || !evidence.sha256) {
+          throw new Error("Project memory requires verified document draft evidence");
+        }
         const retentionDays = Number(step.inputs.retentionDays);
         const expiresAt = new Date(Date.now() + retentionDays * 86_400_000);
+        const scope = workPlanMemoryEvidenceScope({
+          factKey: step.inputs.factKey,
+          stepId: evidenceStepId,
+          evidence,
+        });
         const result = await store.proposeWorkPlanMemory({
           type: "project",
           subject: plan.projectId,
@@ -824,7 +840,7 @@ export function createControlledWorkAdapters({
           statement: String(step.inputs.statement).trim(),
           sourceId: plan.planHash,
           sourceVersion: plan.recipe ? `${plan.recipe.id}@${plan.recipe.version}` : "work-plan-v1",
-          scope: { factKey: String(step.inputs.factKey).trim() },
+          scope,
           confidence: 1,
           sensitivity: "internal",
           expiresAt,
@@ -838,6 +854,9 @@ export function createControlledWorkAdapters({
             status: result.status,
             created: result.created,
             sourcePlanHash: plan.planHash,
+            sourceStepId: scope.evidenceStepId,
+            sourceEvidenceKind: scope.evidenceKind,
+            sourceEvidenceSha256: scope.evidenceSha256,
             statementSha256: createHash("sha256").update(String(step.inputs.statement).trim()).digest("hex"),
             verification: "stored_as_proposed_and_requires_human_confirmation",
           },

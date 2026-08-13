@@ -48,7 +48,7 @@ automation like production software:
 - **Authorize before executing** with project manifests, scoped capabilities, expiry, run budgets, and risk policies.
 - **Approve before side effects** by binding approval to the complete plan and authorization snapshot.
 - **Verify after execution** by reading the target system again instead of trusting the model or tool response.
-- **Keep memory accountable** through source-bound candidates, human confirmation, conflict replacement, expiry, and revocation.
+- **Keep memory accountable** through source-bound candidates, explicit confirmation or narrowly authorized fixed-source auto-confirmation, conflict replacement, expiry, and revocation.
 - **Let humans take over** by cancelling drafts, waiting chains, and active plans when manual work is detected.
 
 ## How it works
@@ -79,7 +79,7 @@ flowchart TD
 | Human control | Approval, rejection, pause, cancellation, takeover, dead-task handling | No automatic anomaly resolution |
 | Project work | Project manifests, plan hashes, leases, persistent run budgets | Global execution disabled by default |
 | Tools | Research, docs, code, tests, Git, release, DingTalk office actions | Explicit per-project authorization |
-| Memory | Automatic candidates, human confirmation, conflict replacement, expiry, erasure | Never auto-confirms formal memory |
+| Memory | Automatic candidates, governed historical-project import, confirmation, conflict replacement, expiry, erasure | Auto-confirm is limited to explicitly authorized, fixed-source, low-risk, conflict-free project facts |
 | Reliability | Side-effect ledger, idempotency, read-back verification, alerts, SLOs | Unknown outcomes fail closed |
 | Operations | PostgreSQL, encrypted backups, ten service definitions, immutable releases | Sending, execution, and proactive work require separate rollout |
 
@@ -92,9 +92,11 @@ and sees whether time was actually returned.
 | Capability | What the user gets | Current implementation |
 |---|---|---|
 | Project onboarding | Project goal, milestones, people, memory scope, recipes, and risk budgets in one safe draft | Implemented; external effects start disabled and local preparation requires approval |
-| Recipe library | Repeatable workflows instead of planning the same work from every message | Four versioned built-in recipes with validated inputs |
+| Historical project import | Bind existing project files to deduplicated, reviewable memory candidates | Preview first; exact confirmation creates candidates only, never confirmed facts |
+| Project memory sync | Re-scan authorized files with Codex or Claude Code and keep durable facts current | Global capability plus bounded project authorization; only source-bound, conflict-free facts may auto-confirm |
+| Recipe library | Repeatable workflows instead of planning the same work from every message | Five versioned built-in recipes; durable project-memory updates use a separate evidence-bound recipe |
 | Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, and triggers in one view | Implemented in the local personal console |
-| Time-return dashboard | Evidence-backed minutes saved, confirmed by the user | Implemented; estimates never count automatically |
+| Time-return dashboard | Evidence-backed minutes saved and automation coverage, confirmed by the user | Current local week starts Monday; all-time audit remains available, while the north-star progress counts only this week's confirmed recipe outcomes |
 | Proactive mode | Scheduled or event-triggered work with daily limits, cooldowns, and idempotency | Implemented; every trigger is created disabled |
 | Meeting to execution | Notes → document → proposed decision memory → task → follow-up calendar | Implemented as an approval-bound recipe |
 | GitHub delivery | Change request → patch → branch → tests → push → draft PR → report | Implemented for approved repositories and commands |

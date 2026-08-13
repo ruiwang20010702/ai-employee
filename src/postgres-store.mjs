@@ -10,7 +10,12 @@ import {
   splitMessageBursts,
 } from "./message-bundling.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "./memory-policy.mjs";
+import { assertWorkPlanMemoryEvidence } from "./work-evidence.mjs";
 import { validateAutomaticMemoryProposal } from "./memory-candidate.mjs";
+import {
+  historicalMemoryId,
+  validateHistoricalMemoryProposals,
+} from "./historical-memory.mjs";
 import { memoryDeletionConfirmation } from "./memory-portability.mjs";
 import { validateSourceAccessChange } from "./memory-source-access.mjs";
 import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
@@ -1703,6 +1708,20 @@ export class PostgresStore {
         [this.tenantId, memory.sourceId, memory.projectId],
       );
       if (plan.rowCount !== 1) throw new Error("Work plan memory source is not verifiable");
+      const evidenceStepId = String(memory.scope.evidenceStepId ?? "").trim();
+      const evidenceResult = await client.query(
+        `SELECT status, evidence_ciphertext FROM work_plan_steps
+         WHERE tenant_id = $1 AND work_plan_id = $2 AND step_id = $3 FOR SHARE`,
+        [this.tenantId, plan.rows[0].id, evidenceStepId],
+      );
+      if (evidenceResult.rowCount !== 1 || !evidenceResult.rows[0].evidence_ciphertext) {
+        throw new Error("Work plan memory evidence is not verifiable");
+      }
+      assertWorkPlanMemoryEvidence(memory.scope, {
+        stepId: evidenceStepId,
+        status: evidenceResult.rows[0].status,
+        evidence: JSON.parse(this.cipher.decrypt(evidenceResult.rows[0].evidence_ciphertext)),
+      });
       const inserted = await client.query(
         `INSERT INTO memory_items(
           id, tenant_id, type, subject_key, subject_ciphertext, project_id,
@@ -1830,6 +1849,105 @@ export class PostgresStore {
           (item) => item.status === "confirmed" && item.statement.trim() !== statement,
         ).length,
       };
+    });
+  }
+
+  async proposeHistoricalProjectMemories(inputs, now = new Date()) {
+    const memories = validateHistoricalMemoryProposals(inputs, now);
+    return this.transaction(async (client) => {
+      const results = [];
+      for (const memory of memories) {
+        const subjectKey = this.cipher.fingerprint(memory.subject);
+        const factKey = memory.scope.factKey;
+        const lockKey = memoryFactLockKey({
+          tenantId: this.tenantId,
+          type: memory.type,
+          subjectKey,
+          projectId: memory.projectId,
+          factKey,
+        });
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [lockKey]);
+        const selected = await client.query(
+          `SELECT * FROM memory_items
+           WHERE tenant_id = $1 AND deleted_at IS NULL
+             AND status IN ('proposed', 'confirmed')
+             AND type = $2 AND subject_key = $3
+             AND project_id IS NOT DISTINCT FROM $4
+             AND (expires_at IS NULL OR expires_at > $5)
+           ORDER BY updated_at DESC
+           FOR UPDATE`,
+          [this.tenantId, memory.type, subjectKey, memory.projectId, now],
+        );
+        const comparable = selected.rows.map((row) => memoryFromRow(row, this.cipher))
+          .filter((item) => memoryFactKey(item) === factKey);
+        const duplicate = comparable.find(
+          (item) => item.statement.trim() === memory.statement.trim(),
+        );
+        if (duplicate) {
+          results.push({
+            created: false,
+            id: duplicate.id,
+            reason: "duplicate",
+            conflictCount: 0,
+          });
+          continue;
+        }
+        const id = historicalMemoryId(memory);
+        const inserted = await client.query(
+          `INSERT INTO memory_items(
+            id, tenant_id, type, subject_key, subject_ciphertext, project_id,
+            statement_ciphertext, source_type, source_id_ciphertext,
+            source_version, source_access_status, source_access_reason,
+            scope_ciphertext, confidence, status,
+            sensitivity, expires_at, created_by, updated_by, supersedes_id,
+            created_at, updated_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'not_required',NULL,$11,$12,'proposed',$13,$14,$15,$15,NULL,$16,$16)
+          ON CONFLICT (tenant_id, id) DO NOTHING`,
+          [
+            id,
+            this.tenantId,
+            memory.type,
+            subjectKey,
+            this.cipher.encrypt(memory.subject),
+            memory.projectId,
+            this.cipher.encrypt(memory.statement),
+            memory.sourceType,
+            this.cipher.encrypt(memory.sourceId),
+            memory.sourceVersion,
+            this.cipher.encrypt(JSON.stringify(memory.scope)),
+            memory.confidence,
+            memory.sensitivity,
+            memory.expiresAt,
+            memory.createdBy,
+            now,
+          ],
+        );
+        if (inserted.rowCount === 0) {
+          results.push({
+            created: false,
+            id,
+            reason: "existing_import_record",
+            conflictCount: 0,
+          });
+          continue;
+        }
+        const conflictCount = comparable.filter(
+          (item) => item.status === "confirmed" &&
+            item.statement.trim() !== memory.statement.trim(),
+        ).length;
+        await this.audit(client, {
+          eventType: "memory.proposed",
+          actor: memory.createdBy,
+          details: {
+            memoryId: id,
+            type: memory.type,
+            projectId: memory.projectId,
+            historicalImport: true,
+          },
+        });
+        results.push({ created: true, id, status: "proposed", conflictCount });
+      }
+      return results;
     });
   }
 
