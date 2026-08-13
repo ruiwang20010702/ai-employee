@@ -1,6 +1,6 @@
 {
   "name": "foursday-runtime",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Foursday is an open-source work twin for authorized, verifiable workplace automation.",
   "bin": {
     "foursday": "scripts/新环境向导.mjs",

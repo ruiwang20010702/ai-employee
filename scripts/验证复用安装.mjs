@@ -110,6 +110,7 @@ async function packageFileGate(files, root) {
     "src/historical-project-import-service.mjs",
     "src/project-memory-sync.mjs",
     "src/project-memory-sync-worker.mjs",
+    "src/weekly-delegation-queue.mjs",
     "src/artifact-runtime.mjs",
     "src/openai-compatible-provider.mjs",
     "src/store.mjs",

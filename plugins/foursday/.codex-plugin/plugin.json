@@ -1,7 +1,7 @@
 {
   "name": "foursday",
-  "version": "0.5.0",
-  "description": "在 Codex 中安全查看本机 Foursday 状态、待审批草稿、计划与能力边界。",
+  "version": "0.6.0",
+  "description": "在 Codex 中安全查看本机 Foursday 状态、本周工作返还计划、待审批草稿、计划与能力边界。",
   "author": {
     "name": "Foursday"
   },
@@ -13,14 +13,14 @@
   "interface": {
     "displayName": "Foursday",
     "shortDescription": "在 Codex 中查看工作分身并进入人工控制台",
-    "longDescription": "连接本机只读管理接口，查看运行健康、待审批回复、工作计划、人工接管状态和已授权能力。插件不发送消息、不批准计划，也不扩大授权范围。",
+    "longDescription": "连接本机只读管理接口，查看运行健康、本周工作返还建议、待审批回复、工作计划、人工接管状态和已授权能力。插件不发送消息、不批准计划，也不扩大授权范围。",
     "developerName": "Foursday",
     "category": "Productivity",
     "capabilities": ["Read"],
     "defaultPrompt": [
       "查看 Foursday 当前运行状态。",
-      "列出等待我审核的回复草稿。",
-      "查看需要人工接管的工作计划。"
+      "查看本周还差多少返还时间，以及下一项适合委托的工作。",
+      "列出等待我审核的回复草稿。"
     ]
   }
 }

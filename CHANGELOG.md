@@ -6,6 +6,15 @@ Notable changes to this project are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- An evidence-ranked weekly delegation queue in the personal cockpit and a read-only Codex tool that reports the remaining eight-hour goal without creating or executing plans.
+- Bounded research and document previews before a completed recipe can become a time-return proposal; the entered human time is the user's actual review, verification, correction, and editing after the AI delivery.
+
+### Security
+
+- Weekly recommendations count only user-confirmed outcomes, fail closed on unknown capability modes or an older service without the weekly API, exclude active duplicates, and use a dedicated bounded endpoint so project objectives, memory statements, graph data, plan payloads, and blocked-capability details never enter the Codex plugin.
+
 ### Planned
 
 - Easier desktop distribution and production community connectors.

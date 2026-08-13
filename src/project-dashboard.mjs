@@ -4,6 +4,25 @@ import { buildGovernedGraphExplanations } from "./governed-work-graph-query.mjs"
 const activePlanStatuses = new Set([
   "ready", "awaiting_approval", "approved", "executing", "verifying",
 ]);
+const reviewableEvidenceKinds = new Set(["research_markdown", "document_markdown"]);
+const evidencePreviewCharacters = 4_000;
+
+function evidencePreview(step) {
+  const content = typeof step.evidence?.content === "string"
+    ? step.evidence.content.trim()
+    : "";
+  if (!content || !reviewableEvidenceKinds.has(step.evidence?.kind)) return null;
+  return {
+    stepId: step.step_id,
+    capability: step.capability,
+    kind: step.evidence.kind,
+    content: content.slice(0, evidencePreviewCharacters),
+    truncated: content.length > evidencePreviewCharacters,
+    bytes: step.evidence.bytes ?? Buffer.byteLength(content),
+    sha256: step.evidence.sha256 ?? null,
+    verification: step.evidence.verification ?? null,
+  };
+}
 
 export function buildProjectDashboard({
   manifest,
@@ -185,12 +204,18 @@ export function buildProjectDashboard({
         plan.plan?.recipe?.id &&
         !recordedPlanIds.has(plan.id)
       )
+      .slice(0, 20)
       .map((plan) => ({
         workPlanId: plan.id,
         objective: plan.objective,
         recipeId: plan.plan.recipe.id,
         baselineMinutes: plan.plan.recipe.baselineMinutes,
         baselineMethod: plan.plan.recipe.baselineMethod,
+        evidencePreviews: (planSteps.get(plan.id) ?? [])
+          .filter((step) => step.status === "completed")
+          .map(evidencePreview)
+          .filter(Boolean)
+          .slice(0, 3),
       })),
   };
 }

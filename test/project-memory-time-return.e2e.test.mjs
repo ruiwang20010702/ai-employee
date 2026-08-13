@@ -11,6 +11,7 @@ import { instantiateWorkRecipe } from "../src/work-recipe.mjs";
 import { loadWorkRecipes } from "../src/recipe-library.mjs";
 import { buildProjectDashboard } from "../src/project-dashboard.mjs";
 import { Store } from "../src/store.mjs";
+import { buildWeeklyDelegationQueue } from "../src/weekly-delegation-queue.mjs";
 
 test("Foursday 影子闭环把主动项目记忆和本人确认的时间返还汇入驾驶舱", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "foursday-self-shadow-"));
@@ -46,6 +47,17 @@ test("Foursday 影子闭环把主动项目记忆和本人确认的时间返还�
   };
   const recipes = await loadWorkRecipes(new URL("../deploy/recipes/", import.meta.url));
   const recipe = recipes.get("project-memory-update");
+  const now = new Date("2026-08-13T06:00:00.000Z");
+  const unverifiedQueue = buildWeeklyDelegationQueue({
+    manifests: [manifest],
+    recipes: [...recipes.values()],
+    plans: [],
+    timeReturns: [],
+    now,
+  });
+  assert.equal(unverifiedQueue.items[0].recipeId, "project-memory-update");
+  assert.equal(unverifiedQueue.items[0].evidenceStatus, "needs_validation");
+  assert.equal(unverifiedQueue.projectedVerifiedReturnedMinutes, 0);
   const instantiated = instantiateWorkRecipe(recipe, {
     projectId: manifest.projectId,
     requesterId: "owner",
@@ -110,9 +122,9 @@ test("Foursday 影子闭环把主动项目记忆和本人确认的时间返还�
   assert.equal(candidate.status, "proposed");
   assert.equal(candidate.scope.evidenceStepId, "draft-memory-review");
   store.confirmMemory(candidate.id, "owner");
-  const timeReturn = store.proposeTimeReturn(plan.id, 10, "owner");
+  const timeReturn = store.proposeTimeReturn(plan.id, 10, "owner", now);
   assert.equal(timeReturn.returnedMinutes, 25);
-  store.decideTimeReturn(timeReturn.id, "confirmed", "owner");
+  store.decideTimeReturn(timeReturn.id, "confirmed", "owner", now);
   const dashboard = buildProjectDashboard({
     manifest,
     plans: store.listWorkPlans({ limit: 10 }),
@@ -128,4 +140,17 @@ test("Foursday 影子闭环把主动项目记忆和本人确认的时间返还�
   assert.equal(dashboard.timeReturn.weeklyReturnedMinutes, 25);
   assert.equal(dashboard.timeReturn.weeklyAutomationCoverage, 0.7143);
   assert.equal(dashboard.timeReturn.evidenceBoundary, "confirmed_verified_outcomes_only");
+  const verifiedQueue = buildWeeklyDelegationQueue({
+    manifests: [manifest],
+    recipes: [...recipes.values()],
+    plans: store.listWorkPlans({ limit: 10 }),
+    timeReturns: store.listTimeReturns({ projectId: manifest.projectId }),
+    now,
+  });
+  assert.equal(verifiedQueue.weeklyReturnedMinutes, 25);
+  assert.equal(verifiedQueue.remainingMinutes, 455);
+  assert.equal(verifiedQueue.items[0].recipeId, "project-memory-update");
+  assert.equal(verifiedQueue.items[0].evidenceStatus, "verified_history");
+  assert.equal(verifiedQueue.items[0].conservativeReturnedMinutes, 25);
+  assert.equal(verifiedQueue.projectedVerifiedReturnedMinutes, 25);
 });

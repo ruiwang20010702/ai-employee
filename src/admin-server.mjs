@@ -39,6 +39,7 @@ import { validateWorkTrigger } from "./work-trigger.mjs";
 import { validateWorkEvent } from "./work-trigger.mjs";
 import { ingestProactiveEvent } from "./proactive-runtime.mjs";
 import { captureWorkPlanGraph } from "./governed-work-graph-runtime.mjs";
+import { buildWeeklyDelegationQueue } from "./weekly-delegation-queue.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -483,6 +484,22 @@ export async function startAdminServer({
       observedAt,
     });
   };
+  const readWeeklyDelegation = async (now = new Date()) => {
+    const [projects, recipes, plans, timeReturns] = await Promise.all([
+      manifestLoader(config.projectsDirectory),
+      recipeLoader(config.recipesDirectory),
+      store.listWorkPlans({ limit: 1_000 }),
+      store.listTimeReturns({ limit: 1_000 }),
+    ]);
+    return buildWeeklyDelegationQueue({
+      manifests: [...projects.values()],
+      recipes: [...recipes.values()],
+      plans,
+      timeReturns,
+      now,
+      executionEnabled: config.capabilities.has("work_plan_execution"),
+    });
+  };
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -589,6 +606,10 @@ export async function startAdminServer({
         json(response, 200, { items: [...recipes.values()] });
         return;
       }
+      if (request.method === "GET" && url.pathname === "/api/weekly-plan") {
+        json(response, 200, await readWeeklyDelegation());
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/api/projects") {
         const [projects, recipes, plans, memories, timeReturns] = await Promise.all([
           manifestLoader(config.projectsDirectory),
@@ -632,18 +653,27 @@ export async function startAdminServer({
             )),
           ]),
         ));
+        const projectItems = [...projects.values()].map((manifest) => buildProjectDashboard({
+          manifest,
+          plans,
+          memories,
+          timeReturns,
+          recipes: [...recipes.values()],
+          planSteps,
+          graph: graphByProject.get(manifest.projectId),
+          memorySyncState: memorySyncByProject.get(manifest.projectId),
+          now: dashboardNow,
+        }));
         json(response, 200, {
-          items: [...projects.values()].map((manifest) => buildProjectDashboard({
-            manifest,
-            plans,
-            memories,
-            timeReturns,
+          items: projectItems,
+          weeklyDelegation: buildWeeklyDelegationQueue({
+            manifests: [...projects.values()],
             recipes: [...recipes.values()],
-            planSteps,
-            graph: graphByProject.get(manifest.projectId),
-            memorySyncState: memorySyncByProject.get(manifest.projectId),
+            plans,
+            timeReturns,
             now: dashboardNow,
-          })),
+            executionEnabled: config.capabilities.has("work_plan_execution"),
+          }),
         });
         return;
       }

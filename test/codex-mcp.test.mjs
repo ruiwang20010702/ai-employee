@@ -99,7 +99,7 @@ test("Codex MCP 只提供只读工具且状态卡片具备无界面降级结果"
     },
   });
   const listed = await handler({ method: "tools/list" });
-  assert.equal(listed.tools.length, 7);
+  assert.equal(listed.tools.length, 8);
   assert.ok(listed.tools.every((tool) => tool.annotations.readOnlyHint));
   assert.ok(listed.tools.every((tool) => !/approve|send|execute/u.test(tool.name)));
   const panelTool = listed.tools.find((tool) => tool.name === "show_status_panel");
@@ -121,6 +121,86 @@ test("Codex MCP 只提供只读工具且状态卡片具备无界面降级结果"
     messageCoverage: { required: true, healthy: true },
   });
   assert.doesNotMatch(JSON.stringify(result), /不得返回/u);
+});
+
+test("Codex 只读返回本周工作返还计划且不暴露驾驶舱正文", async () => {
+  const handler = createMcpHandler({
+    readAdmin: async (path) => {
+      assert.equal(path, "/api/weekly-plan");
+      return {
+        weekStart: "2026-08-10T00:00:00.000Z",
+        weekEnd: "2026-08-17T00:00:00.000Z",
+        weeklyTargetMinutes: 480,
+        weeklyReturnedMinutes: 50,
+        remainingMinutes: 430,
+        targetMet: false,
+        executionEnabled: false,
+        projectedVerifiedReturnedMinutes: 35,
+        remainingAfterVerifiedQueueMinutes: 395,
+        evidenceBoundary: "confirmed_recipe_outcomes_only",
+        recommendationBoundary: "planning_only_no_execution",
+        items: [{
+          projectId: "private-project",
+          projectName: "Foursday",
+          recipeId: "project-memory-update",
+          recipeName: "项目记忆更新",
+          requiredInputs: ["projectFocus"],
+          requiredCapabilities: ["project_memory_proposal"],
+          approvalRequired: true,
+          executionPath: "global_execution_disabled",
+          evidenceStatus: "verified_history",
+          evidenceSamples: 2,
+          conservativeReturnedMinutes: 35,
+          unsafePlan: { payload: "不得返回的计划载荷" },
+        }],
+        inProgress: [{ status: "executing", workPlanId: "不得返回的计划编号" }],
+        blocked: [{ reason: "project_capability_disabled", disabledCapabilities: ["secret"] }],
+        objective: "不得返回的项目目标",
+        memory: { statement: "不得返回的记忆正文" },
+      };
+    },
+  });
+
+  const listed = await handler({ method: "tools/list" });
+  const tool = listed.tools.find((item) => item.name === "get_weekly_plan");
+  assert.ok(tool);
+  assert.equal(tool.annotations.readOnlyHint, true);
+  const result = await handler({
+    method: "tools/call",
+    params: { name: "get_weekly_plan", arguments: {} },
+  });
+  assert.equal(result.structuredContent.available, true);
+  assert.equal(result.structuredContent.remainingMinutes, 430);
+  assert.equal(result.structuredContent.items.length, 1);
+  assert.equal(result.structuredContent.items[0].recipeId, "project-memory-update");
+  assert.equal(result.structuredContent.items[0].executionPath, "global_execution_disabled");
+  assert.equal(result.structuredContent.inProgressCount, 1);
+  assert.equal(result.structuredContent.blockedCount, 1);
+  assert.match(result.content[0].text, /只规划，不执行/u);
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /不得返回|objective|statement|payload|workPlanId|disabledCapabilities/u,
+  );
+});
+
+test("新版 Codex 插件连接旧服务时不会把周计划不可用误报为零缺口", async () => {
+  const handler = createMcpHandler({
+    readAdmin: async (path) => {
+      assert.equal(path, "/api/weekly-plan");
+      return { available: false, reason: "weekly_plan_unavailable", items: [] };
+    },
+  });
+  const result = await handler({
+    method: "tools/call",
+    params: { name: "get_weekly_plan", arguments: {} },
+  });
+  assert.deepEqual(result.structuredContent, {
+    available: false,
+    reason: "weekly_plan_unavailable",
+    items: [],
+  });
+  assert.match(result.content[0].text, /尚未提供本周工作返还计划/u);
+  assert.doesNotMatch(result.content[0].text, /还差 0 分钟|目标已完成/u);
 });
 
 test("待审批草稿只在专用工具中返回并限制数量与字段", async () => {
@@ -181,6 +261,22 @@ test("管理客户端只访问本机只读接口且不泄露钥匙串令牌", as
   await assert.rejects(read("/api/system/pause"), /Unsupported/u);
 });
 
+test("旧服务缺少专用周计划接口时管理客户端返回兼容不可用状态", async () => {
+  const nonce = "w".repeat(43);
+  const read = createAdminReader({
+    baseUrl: "http://127.0.0.1:9465",
+    tokenReader: async () => "private-read-token",
+    request: async (url) => url.endsWith("/api/auth/challenge")
+      ? { ok: true, json: async () => ({ nonce }) }
+      : { ok: false, status: 404 },
+  });
+  assert.deepEqual(await read("/api/weekly-plan"), {
+    available: false,
+    reason: "weekly_plan_unavailable",
+    items: [],
+  });
+});
+
 test("stdio 传输完成初始化、工具枚举并稳定返回协议错误", async () => {
   const input = new PassThrough();
   const output = new PassThrough();
@@ -200,7 +296,7 @@ test("stdio 传输完成初始化、工具枚举并稳定返回协议错误", as
   const messages = text.trim().split("\n").map(JSON.parse);
   assert.equal(messages[0].result.serverInfo.name, "foursday");
   assert.equal(messages[0].result.serverInfo.version, pluginVersion);
-  assert.equal(messages[1].result.tools.length, 7);
+  assert.equal(messages[1].result.tools.length, 8);
   assert.equal(messages[2].error.code, -32601);
 });
 
