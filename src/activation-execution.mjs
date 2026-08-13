@@ -276,6 +276,8 @@ function publicEvidence(steps) {
     base: step.evidence?.base ?? null,
     state: step.evidence?.state ?? null,
     isDraft: step.evidence?.isDraft ?? null,
+    titleSha256: step.evidence?.titleSha256 ?? null,
+    bodySha256: step.evidence?.bodySha256 ?? null,
     error: step.error ?? null,
   }));
 }

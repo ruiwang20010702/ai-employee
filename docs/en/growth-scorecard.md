@@ -16,11 +16,111 @@ Snapshot: **2026-08-12**. A dated snapshot is intentionally not presented as liv
 | Community recipes or adapters | 5 | 0 | Maintainer-authored examples do not count as community contributions |
 | GitHub Stars | 1,000 | 1 | GitHub repository counter at the snapshot time |
 
-The launch cohort has separately completed **10/10 maintainer loops** and
-**0/10 external tester loops**. External progress remains open in
+Historical evidence contains **10/10 maintainer loops** started from commit
+`ddd6646486d5248197f43cdfefc6d83baaeb3235`. The current public candidate
+`3577615d906f54689c38f565b7c8b62d92a27f43` has **0/10 candidate-bound
+maintainer loops** and **0/10 external tester loops**; ancestor evidence remains
+useful product history but cannot unlock the current launch. External progress remains open in
 [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49).
 Successful setup reports are collected separately in
 [setup check-in Issue #50](https://github.com/ruiwang20010702/foursday/issues/50).
+
+For a current, read-only public snapshot, run:
+
+```bash
+npm run growth:report -- --sha <reviewed-40-character-candidate-sha>
+```
+
+The command reads GitHub's public API, emits aggregate counts only, and reports
+whether Issues #49/#50 still point to the same immutable
+candidate and whether that candidate is visible from the default branch. It
+does not emit usernames or comment bodies, modify GitHub, publish anything, or
+write production data. External contributors are derived from distinct
+non-maintainer authors of PRs merged into the current default branch—not from
+claim comments, open PRs, or the broader Contributors API. A merged external PR
+with a `community-extension`, `recipe`, or `adapter` label is reported only as a
+maintainer-attested community extension. The stronger
+`locallyVerifiedCommunityRecipesOrAdapters` remains `null` unless a versioned
+extension evidence manifest passes both local artifact validation and GitHub
+target read-back; `null` must not be converted to zero by guess.
+Anonymous access is the default. If GitHub's public rate limit is exhausted,
+the standard `GH_TOKEN` or `GITHUB_TOKEN` environment variable may authenticate
+the same fixed public-repository requests; the token is never emitted, stored,
+or forwarded anywhere else.
+Public checkboxes are reported as maintainer attestations, not verified loops.
+The same private evidence schema supports two separate gates. For honest
+90-day progress from the first verified person onward, use:
+
+```bash
+npm run growth:report -- --sha <reviewed-sha> --closed-loop-manifest /absolute/path/growth.json
+```
+
+This sets `locallyVerifiedClosedLoopUsers` to distinct external aliases plus at
+most one stable maintainer identity. Multiple maintainer loops never inflate the
+user count. It does not satisfy the public-candidate gate by itself.
+
+The next maintainer gate is:
+
+```bash
+npm run pilot:self:verify -- --manifest /absolute/path/maintainer.json --sha <reviewed-sha>
+```
+
+Do not invite the external cohort until it reports ten candidate-bound local
+loops and ten successful online target read-backs.
+
+After the private 10 + 10 manifest is complete, bind the stricter launch
+evidence without emitting aliases or bundle contents:
+
+```bash
+npm run growth:report -- --sha <reviewed-sha> --pilot-manifest /absolute/path/pilot.json
+```
+
+The pilot manifest must declare the same top-level `candidateSha`. Older valid
+loops may remain in the cumulative closed-loop manifest, but each strict launch
+bundle must also start from that candidate and old loops cannot unlock a
+new candidate's launch gate.
+
+This form runs both checks in one read-only command: local evidence validation
+and live GitHub read-back for every recorded Issue and Draft PR. The latter
+reconstructs the approved synthetic Issue, verifies the open Draft PR fields,
+and compares title/body SHA-256 values sealed into the evidence. Only the
+aggregate `onlineVerifiedPilotTargets` count is emitted. Local 10 + 10 evidence
+without this successful online read-back cannot set `broadLaunchReady` to true.
+
+Without a successful `pilot:verify` result, `locallyVerifiedExternalPilotLoops`
+remains `null` and `broadLaunchReady` must remain false.
+
+For community recipes or adapters, create a private or versioned manifest that
+contains only the reviewed candidate SHA and public repository facts:
+
+```json
+{
+  "schema": "foursday-community-extension-evidence/v1",
+  "candidateSha": "<40-character-sha>",
+  "entries": [{
+    "kind": "recipe",
+    "extensionId": "community-weekly-review",
+    "extensionPath": "examples/recipes/community-weekly-review.json",
+    "pullNumber": 123
+  }]
+}
+```
+
+Verify the local artifact first, then bind it into the aggregate report:
+
+```bash
+npm run extensions:evidence:verify -- --manifest /absolute/path/extensions.json --sha <reviewed-sha>
+npm run growth:report -- --sha <reviewed-sha> --extension-manifest /absolute/path/extensions.json
+```
+
+The verifier rejects candidate drift, duplicate IDs, paths, or PRs, symlinks,
+credential-bearing or invalid extensions, and files outside the fixed example
+directories. The public report independently requires the referenced PR to be
+authored externally, merged into the current default branch, carry a reviewed
+extension label, and include that exact file. Neither command emits contributor
+identities or modifies GitHub. The PR file blob, candidate file blob, and local
+SHA-256 must all agree, so a later maintainer rewrite cannot be counted as the
+original community artifact.
 
 ## Counting contract
 

@@ -96,16 +96,17 @@ Keep evidence files and `pilot.json` in one private local directory that is not 
 ```json
 {
   "schema": "foursday-pilot-evidence/v1",
+  "candidateSha": "<reviewed-40-character-candidate-sha>",
   "entries": [
     {
       "cohort": "self",
-      "participantAlias": "maintainer",
+      "participantAlias": "tester-maintainer",
       "evidencePath": "evidence/self-01.json",
       "reproducedFromQuickStart": true
     },
     {
       "cohort": "external",
-      "participantAlias": "tester-01",
+      "participantAlias": "tester-ext-01",
       "evidencePath": "evidence/external-01.json",
       "reproducedFromQuickStart": true,
       "feedback": "The exact-plan approval was clear; repository setup took four minutes."
@@ -117,10 +118,27 @@ Keep evidence files and `pilot.json` in one private local directory that is not 
 After collecting at least ten entries in each cohort:
 
 ```bash
-npm run pilot:verify -- --manifest /absolute/path/to/pilot.json
+npm run pilot:verify -- --manifest /absolute/path/to/pilot.json --sha <reviewed-40-character-candidate-sha>
 ```
 
-The verifier checks bundle integrity, the complete governed recipe, confirmed outcomes, unique plan/Issue/PR evidence, ten self loops, and ten unique external aliases.
+Before inviting external testers, keep the first ten maintainer entries in the
+same manifest shape and verify the current candidate separately:
+
+```bash
+npm run pilot:self:verify -- --manifest /absolute/path/maintainer.json --sha <reviewed-40-character-candidate-sha>
+```
+
+This read-only command requires ten candidate-bound maintainer loops, validates
+their sealed local evidence, and re-reads all ten Issues and Draft PRs from
+GitHub. It emits only aggregate counts. Historical loops from an ancestor
+commit do not pass this gate.
+
+The verifier checks bundle integrity, the complete governed recipe, confirmed outcomes, unique plan/Issue/PR evidence, ten self loops, and ten unique external aliases. Every launch-cohort alias, including the stable maintainer alias, must use the same `tester-` format so the approved synthetic Issue can be reconstructed without storing its body in the aggregate report.
+The strict launch verifier also requires the manifest and command to name the
+same immutable candidate, and every sealed bundle must report that candidate as
+its exact starting commit. Evidence from an older candidate can remain in the
+cumulative 90-day growth ledger, but it cannot satisfy a newer candidate's
+10 + 10 launch gate.
 
 The public proof is intake evidence, not a replacement for the private cohort
 manifest. It makes the first review reproducible without publishing local
@@ -134,6 +152,13 @@ Local bundle integrity and online GitHub proof are separate checks:
   - **Draft PR:** repository, number, URL, open state, draft flag, head branch, head commit SHA, base branch, title, and body must match the approved plan and verified push.
 
 A passing local report therefore keeps `targetReadbackReverificationRequired: true` until this separate online read-back is complete.
+The public growth command performs that bounded online read-back only when the
+private launch manifest is supplied. It rebuilds the approved synthetic Issue
+from the alias and candidate SHA, compares the live Issue fields, and compares
+the live Draft PR title and body to the SHA-256 values sealed into the local
+evidence. The report emits only `onlineVerifiedPilotTargets`; it does not emit
+aliases, URLs, repositories, titles, or bodies. `broadLaunchReady` stays false
+unless every launch-cohort target passes in the same run.
 
 ## Feedback decision
 

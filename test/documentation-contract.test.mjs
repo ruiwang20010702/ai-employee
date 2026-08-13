@@ -319,6 +319,10 @@ test("外部体验入口为每位体验者使用唯一合成 Issue", async () =>
   }
   assert.doesNotMatch(contract, /Use public pilot Issue #49 and base branch/u);
   assert.doesNotMatch(chineseContract, /随后使用公开体验 Issue #49/u);
+  assert.match(contract, /tester-maintainer/u);
+  assert.match(contract, /every launch-cohort target passes/u);
+  assert.match(chineseContract, /tester-maintainer/u);
+  assert.match(chineseContract, /任何一条不一致/u);
 });
 
 test("公开增长记分卡不把重复自测和社区意向冒充用户或贡献", async () => {
@@ -346,6 +350,8 @@ test("公开增长记分卡不把重复自测和社区意向冒充用户或贡�
   assert.match(chineseScorecard, /同一个人的 10 次闭环仍只算 1 人/u);
   assert.match(chineseScorecard, /认领留言.+不能提前记为完成/su);
   assert.match(chineseScorecard, /不会主动回传数据/u);
+  assert.match(scorecard, /current public candidate[\s\S]+0\/10 candidate-bound[\s\S]+maintainer loops/u);
+  assert.match(chineseScorecard, /当前公开候选[\s\S]+候选绑定维护者闭环为 \*\*0\/10\*\*/u);
   assert.match(readme, /Report a successful install.+issues\/50/u);
   assert.match(chineseReadme, /报告一次成功安装.+issues\/50/u);
 });
@@ -506,9 +512,11 @@ test("中英文首页、治理文件和英文核心文档的本地链接全部�
     "docs/en/demo.md",
     "docs/en/first-contributions.md",
     "docs/en/pilot-validation.md",
+    "docs/en/public-launch-playbook.md",
     "docs/真实演示录制说明.md",
     "docs/首次贡献任务.md",
     "docs/体验验证说明.md",
+    "docs/公开发布手册.md",
   ]) {
     const text = await projectText(file);
     const base = new URL(`../${file}`, import.meta.url);
@@ -522,6 +530,49 @@ test("中英文首页、治理文件和英文核心文档的本地链接全部�
         `${file} 的本地链接不存在：${target}`,
       );
     }
+  }
+});
+
+test("公开发布手册区分定向体验、公开候选和大范围发布", async () => {
+  const [readme, chineseReadme, english, chinese] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/public-launch-playbook.md"),
+    projectText("docs/公开发布手册.md"),
+  ]);
+  assert.match(readme, /public-launch-playbook\.md/u);
+  assert.match(chineseReadme, /公开发布手册\.md/u);
+  for (const value of [english, chinese]) {
+    assert.match(value, /10\/10/u);
+    assert.match(value, /0\/10/u);
+    assert.match(value, /Issue #49/u);
+    assert.match(value, /Issue #50/u);
+    assert.match(value, /1280 × 640/u);
+    assert.match(value, /Show HN:/u);
+    assert.match(value, /Draft PR/u);
+  }
+  assert.match(english, /Current-candidate maintainer loops \| 0\/10/u);
+  assert.match(english, /Historical 10\/10 loops/u);
+  assert.match(chinese, /当前候选维护者闭环 \| 0\/10/u);
+  assert.match(chinese, /历史 10\/10 闭环/u);
+  assert.match(english, /do not paste AI-generated or AI-edited copy/u);
+  assert.match(english, /never request votes/u);
+  assert.match(english, /ten distinct external loops/u);
+  assert.match(chinese, /不能粘贴 AI 生成或 AI 修改/u);
+  assert.match(chinese, /绝不索要投票/u);
+  assert.match(chinese, /10 位不同外部体验者/u);
+  assert.match(english, /Foursday never posts it/u);
+  assert.match(chinese, /Foursday 不会自动发帖/u);
+  for (const value of [english, chinese]) {
+    assert.match(value, /npm run growth:report -- --sha/u);
+    assert.match(value, /--pilot-manifest/u);
+    assert.match(value, /--closed-loop-manifest/u);
+    assert.match(value, /--extension-manifest/u);
+    assert.match(value, /extensions:evidence:verify/u);
+    assert.match(value, /pilot:self:verify/u);
+    assert.match(value, /locallyVerifiedClosedLoopUsers/u);
+    assert.match(value, /locallyVerifiedCommunityRecipesOrAdapters/u);
+    assert.match(value, /onlineVerifiedPilotTargets/u);
   }
 });
 
@@ -618,6 +669,10 @@ test("外部体验入口使用 fork 推送并把来源与上游目标纳入审�
     assert.match(value, /Issue #49/u);
     assert.match(value, /do not need to wait for a\s+maintainer|No maintainer assignment is\s+required/u);
   }
+  assert.match(pilot, /"candidateSha"/u);
+  assert.match(pilot, /pilot:verify -- --manifest .* --sha/u);
+  assert.match(chinesePilot, /candidateSha/u);
+  assert.match(chinesePilot, /pilot:verify -- --manifest .* --sha/u);
   for (const value of [chineseReadme, chinesePilot]) {
     assert.match(value, /fork/u);
     assert.match(value, /upstream/u);

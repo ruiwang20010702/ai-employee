@@ -220,6 +220,8 @@ test("activation coordinator executes only the approved hash then proposes confi
       base: "main",
       state: "OPEN",
       isDraft: true,
+      titleSha256: "3".repeat(64),
+      bodySha256: "4".repeat(64),
     },
   };
   const monotonicTimes = [0, 60_000, 120_000, 420_000, 540_000];
@@ -277,6 +279,8 @@ test("activation coordinator executes only the approved hash then proposes confi
   assert.equal(proposedEvidence.evidence[4].base, "main");
   assert.equal(proposedEvidence.evidence[4].state, "OPEN");
   assert.equal(proposedEvidence.evidence[4].isDraft, true);
+  assert.equal(proposedEvidence.evidence[4].titleSha256, "3".repeat(64));
+  assert.equal(proposedEvidence.evidence[4].bodySha256, "4".repeat(64));
   assert.equal(proposedEvidence.safeguards.mergePerformed, false);
   assert.equal(proposedEvidence.safeguards.deploymentPerformed, false);
   assert.match(proposedEvidence.integrity.digest, /^[a-f0-9]{64}$/u);

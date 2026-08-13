@@ -238,6 +238,8 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
   const planHash = exactSha(plan.planHash, "plan.planHash", 64);
   exactSha(project.startingCommit, "project.startingCommit", 40);
   exactSha(pr.commit, "draftPr.commit", 40);
+  const draftPrTitleSha256 = exactSha(pr.titleSha256, "draftPr.titleSha256", 64);
+  const draftPrBodySha256 = exactSha(pr.bodySha256, "draftPr.bodySha256", 64);
   const repository = repositorySlug(project.repository, "project.repository");
   const sourceRepository = repositorySlug(
     project.sourceRepository ?? repository,
@@ -295,6 +297,8 @@ export function validateValidationEvidence(value, { requireConfirmed = true } = 
     draftPrState: pr.state,
     draftPrIsDraft: pr.isDraft,
     draftPrCommit: pr.commit,
+    draftPrTitleSha256,
+    draftPrBodySha256,
     runtime: bounded(bundle.runtime, "runtime", 100),
     returnedMinutes: Number(outcomes.timeReturn?.returnedMinutes ?? 0),
     confirmed,

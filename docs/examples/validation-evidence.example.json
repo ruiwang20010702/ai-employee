@@ -59,7 +59,9 @@
       "headRepository": "example/foursday",
       "base": "main",
       "state": "OPEN",
-      "isDraft": true
+      "isDraft": true,
+      "titleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bodySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }
   ],
   "outcomes": {
@@ -83,7 +85,7 @@
   },
   "integrity": {
     "algorithm": "sha256",
-    "digest": "32169a8d343e2a141039832d999ac6db03683f55a4c7af3f797bc29e3dfbaa24",
+    "digest": "d44f5fa53a69be964e74435c09497daf1a7be04e22a9aafddaa9d1756b4811a0",
     "signed": false
   }
 }
