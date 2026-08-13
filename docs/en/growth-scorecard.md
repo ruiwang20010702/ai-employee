@@ -18,7 +18,7 @@ Snapshot: **2026-08-12**. A dated snapshot is intentionally not presented as liv
 
 Historical evidence contains **10/10 maintainer loops** started from commit
 `ddd6646486d5248197f43cdfefc6d83baaeb3235`. The current public candidate
-`3577615d906f54689c38f565b7c8b62d92a27f43` has **0/10 candidate-bound
+`581bac466d4d9288079b52a180be2310974caf88` has **0/10 candidate-bound
 maintainer loops** and **0/10 external tester loops**; ancestor evidence remains
 useful product history but cannot unlock the current launch. External progress remains open in
 [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49).
