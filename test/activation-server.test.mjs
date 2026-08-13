@@ -51,6 +51,28 @@ test("evidence download announcements are accessible, truthful, and privacy boun
   assert.doesNotMatch(script, /downloadStatus\.textContent=error\.(?:message|stack)/u);
 });
 
+test("plan hash can be copied with a visible action and accessible, hash-only feedback", () => {
+  const script = activationHtml.match(/<script nonce="__NONCE__">([\s\S]*?)<\/script>/u)?.[1];
+  const announcements = [...script.matchAll(/hashStatus\.textContent='([^']+)'/gu)]
+    .map((match) => match[1]);
+  assert.match(activationHtml, /Copy plan hash/u);
+  assert.match(activationHtml, /data-action="copy-plan-hash" data-hash="'\+esc\(data\.planHash\)\+'"/u);
+  assert.match(activationHtml, /<p id="plan-hash-status" class="hint" role="status" aria-live="polite" aria-atomic="true"><\/p>/u);
+  assert.deepEqual(announcements, [
+    "Copying plan hash...",
+    "Plan hash copied.",
+    "Copy failed. Select the plan hash text and copy it manually.",
+  ]);
+  assert.match(script, /action==='copy-plan-hash'/u);
+  assert.match(script, /await copyText\(target\.dataset\.hash\)/u);
+  assert.doesNotMatch(script, /hashStatus\.textContent=error\.(?:message|stack)/u);
+  // The copy action must only ever read the plan hash, never the action token,
+  // repository root/path, change-request prompt, or approval reason.
+  const copyBranch = script.match(/if\(action==='copy-plan-hash'\)\{([\s\S]*?)\}else if\(action==='create-session'\)/u)?.[1];
+  assert.ok(copyBranch);
+  assert.doesNotMatch(copyBranch, /actionToken|rootDirectory|changeRequest|approval-reason|currentInput|currentSession/u);
+});
+
 test("public proof is copied only after outcome confirmation with bounded status text", () => {
   const script = activationHtml.match(/<script nonce="__NONCE__">([\s\S]*?)<\/script>/u)?.[1];
   const announcements = [...script.matchAll(/proofStatus\.textContent='([^']+)'/gu)]
