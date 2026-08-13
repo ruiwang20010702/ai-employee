@@ -340,7 +340,7 @@ test("公开增长记分卡不把重复自测和社区意向冒充用户或贡�
     }
     assert.match(text, /10\/10/u);
     assert.match(text, /0\/10/u);
-    assert.match(text, /Issue #3/u);
+    assert.match(text, /PR #51/u);
     assert.match(text, /Issue #49/u);
     assert.match(text, /Issue #50/u);
   }
@@ -350,8 +350,8 @@ test("公开增长记分卡不把重复自测和社区意向冒充用户或贡�
   assert.match(chineseScorecard, /同一个人的 10 次闭环仍只算 1 人/u);
   assert.match(chineseScorecard, /认领留言.+不能提前记为完成/su);
   assert.match(chineseScorecard, /不会主动回传数据/u);
-  assert.match(scorecard, /current public candidate[\s\S]+0\/10 candidate-bound[\s\S]+maintainer loops/u);
-  assert.match(chineseScorecard, /当前公开候选[\s\S]+候选绑定维护者闭环为 \*\*0\/10\*\*/u);
+  assert.match(scorecard, /public candidate[\s\S]+10\/10 candidate-bound[\s\S]+maintainer loops/u);
+  assert.match(chineseScorecard, /当前公开候选[\s\S]+10\/10 次候选绑定维护者闭环/u);
   assert.match(readme, /Report a successful install.+issues\/50/u);
   assert.match(chineseReadme, /报告一次成功安装.+issues\/50/u);
 });
@@ -551,10 +551,10 @@ test("公开发布手册区分定向体验、公开候选和大范围发布", as
     assert.match(value, /Show HN:/u);
     assert.match(value, /Draft PR/u);
   }
-  assert.match(english, /Current-candidate maintainer loops \| 0\/10/u);
-  assert.match(english, /Historical 10\/10 loops/u);
-  assert.match(chinese, /当前候选维护者闭环 \| 0\/10/u);
-  assert.match(chinese, /历史 10\/10 闭环/u);
+  assert.match(english, /Current-candidate maintainer loops \| 10\/10/u);
+  assert.match(english, /Issues #54–#63/u);
+  assert.match(chinese, /当前候选维护者闭环 \| 10\/10/u);
+  assert.match(chinese, /Issue #54–#63/u);
   assert.match(english, /do not paste AI-generated or AI-edited copy/u);
   assert.match(english, /never request votes/u);
   assert.match(english, /ten distinct external loops/u);

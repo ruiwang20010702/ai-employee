@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { runCodexArtifact } from "./codex-artifact-runner.mjs";
 import { capabilityCatalog } from "./capability-policy.mjs";
 import { readGbrainPage } from "./gbrain-page.mjs";
+import { canonicalGitHubMarkdownBody } from "./github-markdown.mjs";
 import {
   runControlledCommand,
   safeCommandEnvironment,
@@ -1054,7 +1055,7 @@ export function createControlledWorkAdapters({
           }
           const readback = JSON.parse(await gh(ghPath, [
             "pr", "view", createdUrl, "--repo", rule.repository,
-            "--json", "number,url,state,isDraft,headRefName,headRefOid,headRepository,baseRefName,title",
+            "--json", "number,url,state,isDraft,headRefName,headRefOid,headRepository,baseRefName,title,body",
           ], rule.timeoutMs ?? 120_000));
           const readbackHeadRepository = String(
             readback.headRepository?.nameWithOwner ?? "",
@@ -1064,7 +1065,8 @@ export function createControlledWorkAdapters({
             readback.state !== "OPEN" || readback.isDraft !== true ||
             readback.headRefName !== pushEvidence.branch || readback.headRefOid !== pushEvidence.commit ||
             readbackHeadRepository !== headRepository ||
-            readback.baseRefName !== baseBranch || readback.title !== title
+            readback.baseRefName !== baseBranch || readback.title !== title ||
+            canonicalGitHubMarkdownBody(readback.body) !== body
           ) {
             throw new Error("GitHub PR readback did not match the approved intent");
           }
@@ -1082,7 +1084,9 @@ export function createControlledWorkAdapters({
               isDraft: readback.isDraft,
               commit: readback.headRefOid,
               titleSha256: createHash("sha256").update(title).digest("hex"),
-              bodySha256: createHash("sha256").update(body).digest("hex"),
+              bodySha256: createHash("sha256")
+                .update(canonicalGitHubMarkdownBody(readback.body))
+                .digest("hex"),
               verification: "gh_pr_view_matches_push_and_intent",
               rollback: "closing or deleting the remote branch requires separate approval",
             },

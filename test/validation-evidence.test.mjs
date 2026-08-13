@@ -386,7 +386,7 @@ test("pilot online readback verifies every Issue and Draft PR without emitting i
       state: "open",
       draft: true,
       title: record.task.prTitle,
-      body: record.prBody,
+      body: `${record.prBody}\n`,
       head: {
         ref: `foursday/self-${index}`,
         sha: index.toString(16).padStart(40, "0"),

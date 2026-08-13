@@ -6,21 +6,23 @@ or turn on production capabilities to improve these numbers.
 
 ## 90-day targets and baseline
 
-Snapshot: **2026-08-12**. A dated snapshot is intentionally not presented as live data.
+Snapshot: **2026-08-13**. A dated snapshot is intentionally not presented as live data.
 
 | Outcome | 90-day target | Verified baseline | What currently proves it |
 |---|---:|---:|---|
 | Successful installations | 200 | 1 | Maintainer reproduced the immutable public `npx` command with isolated HOME/Git/npm configuration, SSH and lifecycle scripts disabled, and no credential tokens forwarded; CI and reusable-install fixtures do not count |
 | Distinct users with a verified closed loop | 50 | 1 | One maintainer identity completed ten independently re-read loops; ten loops by one person still count as one user |
-| Completed external contributors | 10 | 0 | No non-maintainer contribution has been merged; one contributor has claimed [Issue #3](https://github.com/ruiwang20010702/foursday/issues/3) |
+| Completed external contributors | 10 | 1 | One non-maintainer contribution, [PR #51](https://github.com/ruiwang20010702/foursday/pull/51), passed review and was merged into `main` |
 | Community recipes or adapters | 5 | 0 | Maintainer-authored examples do not count as community contributions |
 | GitHub Stars | 1,000 | 1 | GitHub repository counter at the snapshot time |
 
 Historical evidence contains **10/10 maintainer loops** started from commit
-`ddd6646486d5248197f43cdfefc6d83baaeb3235`. The current public candidate
-`e272f92dcebd10abbc599f32fed3e7db4428f9b7` has **0/10 candidate-bound
-maintainer loops** and **0/10 external tester loops**; ancestor evidence remains
-useful product history but cannot unlock the current launch. External progress remains open in
+`ddd6646486d5248197f43cdfefc6d83baaeb3235`, but it was not reused for the
+current gate. The public candidate
+`e272f92dcebd10abbc599f32fed3e7db4428f9b7` now has **10/10 candidate-bound
+maintainer loops**, all ten online targets re-read successfully, and **0/10
+external tester loops**. Those ten runs still represent one maintainer identity.
+External progress remains open in
 [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49).
 Successful setup reports are collected separately in
 [setup check-in Issue #50](https://github.com/ruiwang20010702/foursday/issues/50).
@@ -59,14 +61,15 @@ This sets `locallyVerifiedClosedLoopUsers` to distinct external aliases plus at
 most one stable maintainer identity. Multiple maintainer loops never inflate the
 user count. It does not satisfy the public-candidate gate by itself.
 
-The next maintainer gate is:
+The completed maintainer gate can be reproduced with:
 
 ```bash
 npm run pilot:self:verify -- --manifest /absolute/path/maintainer.json --sha <reviewed-sha>
 ```
 
-Do not invite the external cohort until it reports ten candidate-bound local
-loops and ten successful online target read-backs.
+It reports ten candidate-bound local loops and ten successful online target
+read-backs. The next gate is ten distinct external participants completing the
+same evidence-backed workflow.
 
 After the private 10 + 10 manifest is complete, bind the stricter launch
 evidence without emitting aliases or bundle contents:
