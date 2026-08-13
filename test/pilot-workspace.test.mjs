@@ -116,6 +116,10 @@ test("pilot workspace creates and verifies one fixed fork checkout", async (t) =
     true,
   );
   assert.equal(
+    f.calls.some((call) => call[0] === "git" && call.includes("fetch") && call.at(-1) === "main"),
+    true,
+  );
+  assert.equal(
     f.calls.some((call) => call[0] === "git" && call.includes(sourceSha)),
     true,
   );

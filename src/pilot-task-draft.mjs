@@ -48,7 +48,7 @@ export function buildPilotTaskDraft({ participantAlias, candidateSha }) {
     issueBody,
     changeRequest,
     prTitle,
-    baseBranch: "codex/v0.5-candidate",
+    baseBranch: "main",
     testCommandId: "check",
     externalSystemsModified: false,
   });

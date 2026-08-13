@@ -14,7 +14,7 @@ test("外部体验任务草稿为自助化名生成唯一合成 Issue 和表单�
   assert.match(url.searchParams.get("body"), /source: external pilot intake Issue #49/u);
   assert.match(draft.changeRequest, /docs\/pilot-notes\/tester-bluebird\.md/u);
   assert.equal(draft.prTitle, "test(pilot): validate tester-bluebird fork loop");
-  assert.equal(draft.baseBranch, "codex/v0.5-candidate");
+  assert.equal(draft.baseBranch, "main");
   assert.equal(draft.testCommandId, "check");
   assert.equal(draft.externalSystemsModified, false);
   assert.doesNotMatch(
