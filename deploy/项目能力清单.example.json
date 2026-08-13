@@ -68,6 +68,7 @@
     "github_pr_draft": {
       "mode": "disabled",
       "repository": "owner/repository",
+      "headRepository": "owner/repository",
       "baseBranches": ["main"],
       "maxTitleChars": 120,
       "maxBodyBytes": 65536,

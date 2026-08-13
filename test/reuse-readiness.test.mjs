@@ -173,6 +173,41 @@ test("初始化入口默认只预览，显式应用后创建配置且拒绝覆�
   );
 });
 
+test("安装包的一条命令入口启动同一套回环 Web 接入页", async () => {
+  const calls = [];
+  const result = await runReuseGuide({
+    args: ["start", "--port", "4317"],
+    cwd: "/workspace/new-owner",
+    activationRunner: async (options) => {
+      calls.push(options);
+      return { url: "http://127.0.0.1:4317" };
+    },
+  });
+  assert.equal(result.schema, "foursday-activation-launch/v1");
+  assert.equal(result.url, "http://127.0.0.1:4317");
+  assert.equal(result.workingDirectory, "/workspace/new-owner");
+  assert.equal(result.externalSystemsTouched, false);
+  assert.match(result.boundary, /完整计划再次审批/u);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].args, ["--port", "4317"]);
+  assert.equal(calls[0].workingDirectory, "/workspace/new-owner");
+
+  const help = await runReuseGuide({
+    args: ["start", "--help"],
+    cwd: "/workspace/new-owner",
+    activationRunner: async () => { throw new Error("help must not start a listener"); },
+  });
+  assert.match(help.help, /foursday start \[options\]/u);
+  await assert.rejects(
+    runReuseGuide({
+      args: ["start", "--config", "production.json"],
+      cwd: "/workspace/new-owner",
+      activationRunner: async () => ({ url: "unexpected" }),
+    }),
+    /Usage: foursday start/u,
+  );
+});
+
 test("新环境钥匙串命令默认预览且显式应用参数单独传递", async (t) => {
   const { directory, configPath } = await fixture(t);
   await runReuseGuide({ args: ["init", "--apply"], cwd: directory });

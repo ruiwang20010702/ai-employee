@@ -1,5 +1,5 @@
-name: Bug 报告
-description: 提交可复现的软件缺陷，不要包含真实消息或凭据
+name: Bug report
+description: Report a reproducible defect without including real messages or credentials
 title: "[Bug] "
 labels:
   - bug
@@ -7,36 +7,41 @@ body:
   - type: markdown
     attributes:
       value: |
-        感谢反馈。安全漏洞请使用 GitHub Security Advisory 私下报告。
+        Thanks for helping improve Foursday. Report vulnerabilities privately through a GitHub Security Advisory.
   - type: input
     id: version
     attributes:
-      label: 版本
-      description: 请填写版本号或完整提交 SHA。
-      placeholder: 0.3.0 / 40-character SHA
+      label: Version
+      description: Provide the release version or complete commit SHA.
+      placeholder: 0.5.0 / 40-character SHA
     validations:
       required: true
   - type: dropdown
-    id: storage
+    id: path
     attributes:
-      label: 存储
+      label: Product path
       options:
-        - PostgreSQL
-        - SQLite（开发测试）
-        - 不确定或不相关
+        - Web onboarding / GitHub delivery
+        - Local demo
+        - DingTalk / DWS
+        - Feishu
+        - Project plans / recipes
+        - Memory / time return
+        - Installation / deployment
+        - Other or unknown
     validations:
       required: true
   - type: textarea
     id: problem
     attributes:
-      label: 问题描述
-      description: 实际发生了什么？请使用合成或脱敏数据。
+      label: What happened?
+      description: Describe the observed behavior using synthetic or redacted data.
     validations:
       required: true
   - type: textarea
     id: reproduce
     attributes:
-      label: 最小复现步骤
+      label: Minimal reproduction
       placeholder: |
         1. …
         2. …
@@ -46,20 +51,20 @@ body:
   - type: textarea
     id: expected
     attributes:
-      label: 预期行为
+      label: Expected behavior
     validations:
       required: true
   - type: textarea
     id: evidence
     attributes:
-      label: 已脱敏证据
-      description: 可附日志、截图或测试结果，但不要提交真实人员、消息、令牌、数据库 URL 或内部资料。
+      label: Redacted evidence
+      description: Add logs, screenshots, or test output. Never include real people, messages, tokens, database URLs, or internal material.
   - type: checkboxes
     id: safety
     attributes:
-      label: 安全确认
+      label: Safety confirmation
       options:
-        - label: 我已删除真实消息、个人信息、凭据和公司内部资料。
+        - label: I removed real messages, personal data, credentials, and company-confidential information.
           required: true
-        - label: 这不是需要私密报告的安全漏洞。
+        - label: This is not a vulnerability that requires private reporting.
           required: true

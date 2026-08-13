@@ -11,6 +11,8 @@ Thank you for helping improve Foursday. This project treats workplace messaging 
 - message adapters, work adapters, and target verifiers;
 - security, reliability, observability, and test improvements.
 
+New here? Start with the live [first-contribution queue](./docs/en/first-contributions.md). Each task has a narrow file surface, acceptance commands, and explicit non-goals. Comment on the matching GitHub Issue before starting so maintainers can prevent duplicate work.
+
 Sanitize anything related to real DingTalk accounts, production data, or internal company information. Report security issues privately according to [SECURITY.md](./SECURITY.md).
 
 ## Local development
@@ -46,6 +48,18 @@ npm run check
 npm audit --audit-level=high
 git diff --check
 ```
+
+For a community recipe or adapter manifest, run the fast, credential-free
+contract check before the full suite:
+
+```bash
+npm run extensions:validate -- --recipe examples/recipes/my-recipe.json
+# or
+npm run extensions:validate -- --adapter examples/adapters/my-adapter.json
+```
+
+This command validates JSON contracts only. It never installs or executes the
+extension and does not turn a reference manifest into a supported integration.
 
 Run `npm run check:full` when the change affects PostgreSQL, migrations, concurrent state, or SQLite/PostgreSQL parity.
 

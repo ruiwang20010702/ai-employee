@@ -38,7 +38,13 @@ test("四个官方工作配方均可加载并实例化", async () => {
   assert.equal(meeting.plan.steps.some((step) => step.capability === "project_memory_proposal"), true);
   const code = instantiateWorkRecipe(recipes.get("code-delivery"), {
     projectId: "project_1", requesterId: "owner_1", projectRoot: "/workspace/project",
-    values: { changeRequest: "修复登录", testCommandId: "检查", baseBranch: "main", prTitle: "修复登录" },
+    values: {
+      issueUrl: "https://github.com/example/project/issues/42",
+      changeRequest: "修复登录",
+      testCommandId: "检查",
+      baseBranch: "main",
+      prTitle: "修复登录",
+    },
   });
   assert.deepEqual(code.plan.steps.map((step) => step.capability), [
     "code_patch", "local_branch", "local_test", "git_push", "github_pr_draft",

@@ -11,6 +11,8 @@
 - 消息适配器、工作适配器和验证器
 - 安全、可靠性、可观测性和测试改进
 
+第一次参与可以从已经开放的[首次贡献任务](./docs/首次贡献任务.md)开始。每个任务都限定了修改范围、验收命令和明确不做的内容；开工前请先在对应 GitHub Issue 留言，避免重复开发。
+
 涉及真实钉钉账号、生产数据或公司内部信息的内容，请先脱敏；安全问题请按照 [SECURITY.md](./SECURITY.md) 私下报告。
 
 ## 本地开发
@@ -46,6 +48,16 @@ npm run check
 npm audit --audit-level=high
 git diff --check
 ```
+
+如果贡献社区配方或适配器清单，先运行不读取凭据的快速契约校验，再运行完整检查：
+
+```bash
+npm run extensions:validate -- --recipe examples/recipes/my-recipe.json
+# 或
+npm run extensions:validate -- --adapter examples/adapters/my-adapter.json
+```
+
+该命令只校验 JSON 契约，不会安装或执行扩展，也不会把参考清单升级为生产支持集成。
 
 如果改动涉及 PostgreSQL、迁移、并发状态或 SQLite/PostgreSQL 对等性，还必须运行 `npm run check:full`。
 

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 
 const execFileAsync = promisify(execFile);
-export const pluginVersion = "0.4.0";
+export const pluginVersion = "0.5.0";
 const statusResourceUri = "ui://foursday/status.html";
 const allowedAdminPaths = new Set([
   "/api/overview",

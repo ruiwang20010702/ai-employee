@@ -18,6 +18,15 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
+[10 分钟开始](#快速开始) · [报告一次成功安装](https://github.com/ruiwang20010702/foursday/issues/50) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入 v0.5 外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [查看 90 天增长记分卡](./docs/公开增长记分卡.md) · [审阅公开发布手册](./docs/公开发布手册.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+
+<a href="./assets/foursday-v0.5-demo.mp4">
+  <img src="./assets/foursday-v0.5-demo-poster.png" alt="观看 Foursday 将合成 GitHub Issue 转化为经过验证的 Draft PR" width="960">
+</a>
+
+**[观看 v0.5 候选版真实闭环 →](./assets/foursday-v0.5-demo.mp4)**<br>
+75 秒 · 静音字幕 · 合成 [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) → 已回读验证的 [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39) · 隐私复核已绑定媒体摘要 · 未合并 · 未部署
+
 </div>
 
 ## 为什么做 Foursday
@@ -103,7 +112,7 @@ Foursday 默认服务一个人，不是为了给管理者监控团队。个人�
 
 | 功能 | 用户价值 | 当前实现 |
 |---|---|---|
-| 项目接入向导 | 一次配置目标、里程碑、协作对象、记忆范围、配方和风险预算 | 已实现；所有外部副作用能力默认关闭 |
+| 项目接入向导 | 一次配置目标、里程碑、协作对象、记忆范围、配方和风险预算 | 已实现；外部副作用默认关闭，本地准备动作需审批 |
 | 工作配方库 | 重复流程直接复用，不再每次从消息重新规划 | 已实现 4 个带版本的官方配方 |
 | 项目驾驶舱 | 汇总目标、计划、证据、交付物、正式记忆和主动触发器 | 已集成本机个人控制台 |
 | 时间返还仪表盘 | 只统计有执行证据且经本人确认的返还时间 | 已实现；模型估算不自动计入 |
@@ -131,14 +140,81 @@ Loop Engineering 继续负责“一个任务如何反复做到有证据地完成
 
 ## 快速开始
 
-### 1. 五分钟本地演示
+### 1. 用一条命令启动 Web 接入与真实体验
 
-演示只需要 Node.js，不需要钉钉、DWS、PostgreSQL、Codex、Claude Code 或任何 API Key：
+安装 Node.js 22 或 24 后，可以直接从经过审核的不可变 GitHub 提交启动 v0.5 Web 体验：
+
+```bash
+npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#3577615d906f54689c38f565b7c8b62d92a27f43" foursday start --pilot-sha 3577615d906f54689c38f565b7c8b62d92a27f43
+```
+
+打开命令输出的回环地址。启动本身只下载并运行上述精确公开提交，同时禁用包生命周期脚本；它不安装生产服务、不读取钉钉、不连接生产数据库，也不触碰外部系统；只看预览仅需 Node.js。在批准任何写入前，先点击 **Check pilot readiness**：这项只读检查只返回 GitHub CLI 登录和受支持 Agent 运行时是否可用，不会创建 fork、分支、推送或 PR。若被阻断，可以点击 **Copy privacy-safe readiness report** 并打开缺陷表单；报告只包含不可变候选、Node 主版本、readiness 布尔值和脱敏现象占位符，不包含路径、用户名、私有仓库信息、日志、模型输出或凭据。复制与打开表单是两个独立本机动作，Foursday 不会自动提交。完成后也可以点击 **Copy setup check-in**，复制用于 [Issue #50](https://github.com/ruiwang20010702/foursday/issues/50) 的有界可编辑签到模板；打开 Issue 是独立点击，Foursday 不会自动发布。开始准备 pilot 后，系统会禁用这份“尚未创建 fork”的签到入口。若要加入真实公开体验，再核对页面显示的固定提交，勾选独立确认并点击 **Prepare my pilot fork**。只有这次确认才允许 Foursday 创建或复用你的个人 fork，在 `~/FoursdayPilot/` 私有目录克隆精确提交、绑定无凭据的官方 upstream，并以禁用生命周期脚本的方式安装锁定依赖。它仍不会调用模型、创建交付分支、推送、创建 PR、合并或部署；这些交付副作用还需要选择已获授权的运行时，并再次批准完整计划哈希。
+
+#### 从源码启动
+
+最快理解 Foursday 的方式是本地接入页。它只需要 Node.js，不需要钉钉、DWS、PostgreSQL、Codex、Claude Code、GitHub 登录或任何 API Key：
 
 ```bash
 git clone https://github.com/ruiwang20010702/foursday.git
 cd foursday
 npm ci
+npm start
+```
+
+打开 `http://127.0.0.1:4173`，绑定一个本地 Git 仓库并填写 GitHub Issue。Foursday 会使用真实的五步代码交付配方生成补丁、隔离分支、测试、推送和 Draft PR 计划，并展示计划哈希、风险等级和被锁定能力。生成预览不会触碰任何外部系统。
+
+如果要继续真实执行，请选择 Codex 或 Claude Code。Foursday 会再次检查工作区干净、`origin` 与 Issue 仓库相同，或者当前仓库是通过无凭据 `upstream` 精确绑定 Issue 仓库的 fork；同时核对测试命令已登记、GitHub CLI 已登录，然后要求你对完整计划哈希进行第二次审批。审批页会明确展示推送来源仓库、Issue/PR 目标仓库、交付模式和起始提交。只有这次审批才能生成补丁、创建 `foursday/` 分支、运行登记测试、推送分支并创建 Draft PR；fork 模式只向体验者自己的 fork 推送，再向获批的上游仓库创建 Draft PR。回读必须逐项匹配来源仓库、分支、提交、目标仓库、基础分支、标题、打开状态和草稿状态。它不能合并或部署。
+
+执行状态写入本地加密 SQLite 会话，项目记忆和时间返还仍只是候选，必须由你再次确认。证据包不会记录本机路径、远端 URL 或凭据，但会保留脱敏后的来源与目标仓库身份。确认后，证据包还会记录“本地服务启动→计划→审批→Draft PR→结果确认”的单调时钟分段耗时，并纳入完整性摘要；首次 `npx` 下载时间不在这个自动计时范围内，继续由体验者单独填写，不能拿局部计时冒充完整安装耗时。
+
+确认项目记忆和时间返还后，可以点击 **Copy privacy-safe pilot proof**。系统只从已验证证据包中提取公开 GitHub 目标身份、受治理哈希、运行时、已确认返还时间、取整后的本地旅程耗时和反馈占位符，不复制记忆正文、内部编号、本机路径、令牌或模型输出。公开证明会明确标出服务侧旅程是否在 10 分钟内完成，也会明确说明没有计算首次包下载。旁边的 **Open pilot Issue #49** 只打开自愿提交页面，不会发布剪贴板内容。公开证明属于未签名的本人陈述，不能替代维护者对 Issue 与 Draft PR 的独立回读；除非维护者另行约定私密传输方式，完整 JSON 证据包继续保留在本机。
+
+#### 加入外部体验
+
+外部体验者不需要 Foursday 上游仓库写权限。推荐直接使用上面固定提交的一条命令，并在 Web 中独立批准 **Prepare my pilot fork**。Foursday 会回读 GitHub 账号与 fork 的上游身份，在固定私有目录准备精确候选提交并自动填写仓库路径；若同名仓库并非 `ruiwang20010702/foursday` 的真实 fork，将安全拒绝。
+
+等价的手工备用路径如下：
+
+```bash
+gh repo fork ruiwang20010702/foursday --clone
+cd foursday
+git fetch upstream codex/v0.5-candidate
+git merge-base --is-ancestor 3577615d906f54689c38f565b7c8b62d92a27f43 FETCH_HEAD
+git switch --create pilot-v0.5-3577615 3577615d906f54689c38f565b7c8b62d92a27f43
+npm ci --ignore-scripts
+npm start
+```
+
+公开[体验 Issue #49](https://github.com/ruiwang20010702/foursday/issues/49)只用于自愿报名和提交最终反馈，不再要求等待维护者分配名额。完成 readiness 后，**Create your unique pilot task** 会在浏览器中生成随机化名；你可以直接使用，也可以改成另一个安全的 `tester-` 化名。Foursday 会在本机生成有界的 GitHub Issue 编辑链接，并自动填写变更任务、基础分支 `codex/v0.5-candidate`、登记测试 `check` 和 Draft PR 标题。它不会自动创建 Issue：请自行复核并提交，再把这个新的唯一 Issue URL 粘贴到表单。批准前必须确认页面把你的 fork 显示为推送来源，把 `ruiwang20010702/foursday` 显示为 Issue 和 Draft PR 目标。PR 必须保持打开和 Draft，禁止合并或部署。
+
+确认结果后复制隐私安全体验证明，把 `tester-XX` 替换为实际使用的化名，补充耗时与反馈，再粘贴到 Issue #49。自助化只取消等待，不降低证据要求：10 名外部体验者仍必须分别使用不同化名、Issue、计划哈希、证据文件和 Draft PR。
+
+#### Web 接入排障
+
+创建真实执行会话时如果前置检查失败，先修复对应的本地条件，再重新创建会话；不要绕过检查或扩大权限：
+
+- **工作区不干净：** 用 `git status --short` 识别已跟踪和未跟踪变更。保留并审查现有工作；提交应保留的变更，或改用单独的干净克隆/工作树。不要用会丢失更改的命令强行清理。
+- **仓库不一致：** 用 `git remote get-url origin` 和 `git remote get-url upstream` 对照 Issue URL 中的 `owner/repository`。同仓库模式要求 `origin` 一致；fork 模式要求 `upstream` 精确一致。两者都必须是无内嵌凭据的 GitHub 地址。不要为了通过检查伪造 Issue 或远端身份。
+- **缺少登记的测试脚本：** 检查 `package.json` 的 `scripts`，把“Registered test command ID”填写为已有脚本名（例如本仓库的 `check`）。如果项目没有所需脚本，应先由仓库维护者在 `package.json` 中登记固定、可审查的脚本；不要填写任意 shell 命令，也不要跳过测试。
+
+闭环完成后可以下载 JSON 证据包；确认记忆和时间返还后再次下载，状态才会变为 `verified_closed_loop`。证据包不包含本机路径、Git 远端、操作令牌、凭据或模型原始输出，只保留 Issue、计划哈希、目标回读、记忆与时间返还状态以及明确的安全边界。
+
+使用 OpenAI-compatible 模型时，在 `npm start` 前同时配置三个值。它们只在运行时读取，API Key 不会写入本地会话：
+
+```bash
+export FOURSDAY_OPENAI_BASE_URL="https://your-provider.example/v1/"
+export FOURSDAY_OPENAI_API_KEY="..."
+export FOURSDAY_OPENAI_MODEL="your-model"
+npm start
+```
+
+除显式回环地址上的本地模型服务外，接口必须使用 HTTPS；只有完整计划获批后，模型才会收到工件生成提示。
+
+### 2. 运行终端安全演示
+
+终端演示使用确定性的内存目标解释“审批后执行、执行后回读”：
+
+```bash
 npm run demo
 ```
 
@@ -148,7 +224,7 @@ npm run demo
 npm run demo -- --message "帮我准备一份上线检查清单" --approve --json
 ```
 
-### 2. 本地验证代码
+### 3. 本地验证代码
 
 这条路径不会连接你的钉钉、生产数据库或 Codex 账号：
 
@@ -159,7 +235,7 @@ npm ci
 npm run check
 ```
 
-### 3. 检查运行环境
+### 4. 检查运行环境
 
 钉钉生产配置当前面向 macOS 登录会话，需要 Node.js 22.5+、PostgreSQL 16/17、已授权的 DWS，以及 Codex 或 Claude Code：
 
@@ -169,7 +245,7 @@ npm run setup:check
 
 `setup:check` 只检查依赖、配置权限和危险能力开关，不读取钉钉消息，不连接生产数据库，也不修改系统。
 
-### 4. 从固定版本复用
+### 5. 从固定版本复用
 
 在新的空白工作目录中固定到已经审核的完整提交：
 
@@ -280,6 +356,7 @@ flowchart LR
 - [x] 项目能力网关、工作计划、执行证据与结果回传
 - [x] 正式记忆、人工接管、SLO 和不可变生产发布
 - [x] 无需企业账号或模型凭据的交互式本地演示
+- [x] 一条命令启动 Web 接入页，复用真实 GitHub 受治理配方且零外部写入
 - [x] 带版本的 MessageAdapter、AgentRuntime 和 ModelProvider 契约
 - [x] 个人项目接入、配方库、项目驾驶舱和时间返还账本
 - [x] 主动触发、会议到执行和 GitHub PR 草稿交付闭环
@@ -305,15 +382,21 @@ flowchart LR
 | [生产运维手册](./docs/生产运维手册.md) | 运维与负责人 | 配置、部署、监控、备份和恢复 |
 | [人工判断标注手册](./docs/人工判断标注操作手册.md) | 运营与标注人员 | 回应必要性和草稿质量口径 |
 | [集成扩展指南](./docs/集成扩展指南.md) | 适配器贡献者 | 消息、事件、办公空间、配方契约和安全证据 |
+| [首次贡献任务](./docs/首次贡献任务.md) | 新贡献者 | 5 个已开放、边界清晰的 `good first issue` 入门任务 |
+| [真实演示录制说明](./docs/真实演示录制说明.md) | 发布负责人 | 75 秒演示分镜、公开证据和真实性门禁 |
+| [体验验证说明](./docs/体验验证说明.md) | 发布负责人和体验者 | 10 次自测、10 名外测和证据汇总门禁 |
+| [公开增长记分卡](./docs/公开增长记分卡.md) | 维护者与社区 | 90 天目标、当前证据基线、计数与隐私边界 |
 | [安全说明](./安全说明.md) | 安全审查人员 | 数据边界、密钥、报告渠道和风险 |
 
 ## 参与贡献
 
-欢迎提交问题、使用案例、文档改进和代码贡献。开始之前请阅读[贡献指南](./CONTRIBUTING_ZH.md)和[行为准则](./CODE_OF_CONDUCT_ZH.md)。
+欢迎提交问题、使用案例、文档改进和代码贡献。可以先从 5 个已经开放的 [`good first issue` 首次贡献任务](./docs/首次贡献任务.md)中选择一项，开工前先留言避免重复开发，再阅读[贡献指南](./CONTRIBUTING_ZH.md)和[行为准则](./CODE_OF_CONDUCT_ZH.md)。每个真实 Issue 都对应仓库内可版本化审查的范围和验收契约。
+
+社区配方和适配器清单可以先运行无凭据快速校验：`npm run extensions:validate`。该命令只解析可审查 JSON，不安装、不授权、也不执行扩展。
 
 - 不要在 Issue、PR、截图或测试夹具中包含真实消息、人员编号、令牌或公司内部资料。
 - 新能力必须有明确边界、反向测试、目标回读和失败处理。
-- 适合第一次贡献的任务会标记为 `good first issue`。
+- 当前 5 个首次贡献任务均已在 GitHub 中标记为 `good first issue`，以 Issue 的打开状态和认领留言为准。
 
 ## 许可证
 

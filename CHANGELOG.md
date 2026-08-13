@@ -6,8 +6,18 @@ Notable changes to this project are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- Easier desktop distribution and production community connectors.
+
+## [0.5.0] - 2026-08-12
+
 ### Added
 
+- A ten-minute local Web onboarding path that requires no DingTalk, DWS, or production PostgreSQL for preview.
+- Approval-bound Codex, Claude Code, and OpenAI-compatible execution from one GitHub Issue to a verified Draft PR.
+- Downloadable privacy-bounded validation evidence plus a verifier for ten maintainer loops and ten external testers.
+- A result-led English-default README, new Foursday visual identity, authentic 75-second demo contract, and five bounded first-contribution drafts.
 - Personal project onboarding, a four-recipe library, project cockpit, and human-confirmed time-return ledger.
 - Disabled-by-default schedule and event triggers with idempotent runs, daily limits, cooldowns, and leases.
 - Meeting-to-execution and GitHub patch-to-Draft-PR recipes.
@@ -20,10 +30,6 @@ Notable changes to this project are documented here. The format follows [Keep a 
 - Project onboarding verifies the canonical Git repository root in the shared server boundary, not only in the CLI.
 - Trigger definitions reject credential material, schedule runs bind to their lease owner, and triggered plans cannot consume authorization before the exact run is durably completed.
 - Community manifests must use contract version `1.0` and explicitly enable all five safety guarantees.
-
-### Planned
-
-- Easier desktop distribution and production community connectors.
 
 ## [0.4.0] - 2026-08-11
 
@@ -69,7 +75,8 @@ Notable changes to this project are documented here. The format follows [Keep a 
 - A local admin console, read-only Codex plugin, and macOS background services.
 - SQLite development storage and the initial production diagnostic workflow.
 
-[Unreleased]: https://github.com/ruiwang20010702/foursday/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ruiwang20010702/foursday/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ruiwang20010702/foursday/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ruiwang20010702/foursday/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ruiwang20010702/foursday/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ruiwang20010702/foursday/releases/tag/v0.2.0

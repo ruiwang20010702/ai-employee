@@ -1,0 +1,91 @@
+{
+  "schema": "foursday-validation-evidence/v1",
+  "validationStatus": "verified_closed_loop",
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "project": {
+    "id": "example-project",
+    "repository": "example/foursday",
+    "sourceRepository": "example/foursday",
+    "startingCommit": "1111111111111111111111111111111111111111"
+  },
+  "issue": {
+    "url": "https://github.com/example/foursday/issues/8",
+    "number": 8
+  },
+  "runtime": "codex",
+  "plan": {
+    "planHash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "status": "completed"
+  },
+  "evidence": [
+    {
+      "stepId": "step-1",
+      "capability": "code_patch",
+      "status": "completed",
+      "kind": "verified_code_patch",
+      "verification": "target_read_back"
+    },
+    {
+      "stepId": "step-2",
+      "capability": "local_branch",
+      "status": "completed",
+      "kind": "verified_local_branch",
+      "verification": "target_read_back"
+    },
+    {
+      "stepId": "step-3",
+      "capability": "local_test",
+      "status": "completed",
+      "kind": "verified_local_test",
+      "verification": "target_read_back"
+    },
+    {
+      "stepId": "step-4",
+      "capability": "git_push",
+      "status": "completed",
+      "kind": "verified_git_push",
+      "verification": "target_read_back"
+    },
+    {
+      "stepId": "step-5",
+      "capability": "github_pr_draft",
+      "status": "completed",
+      "kind": "verified_github_pr_draft",
+      "verification": "gh_pr_view_matches_push_and_intent",
+      "commit": "3333333333333333333333333333333333333333",
+      "number": 8,
+      "url": "https://github.com/example/foursday/pull/8",
+      "head": "foursday/example-8",
+      "headRepository": "example/foursday",
+      "base": "main",
+      "state": "OPEN",
+      "isDraft": true,
+      "titleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bodySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "outcomes": {
+    "memory": {
+      "id": "memory-example",
+      "status": "confirmed"
+    },
+    "timeReturn": {
+      "id": "time-example",
+      "status": "confirmed",
+      "returnedMinutes": 30
+    }
+  },
+  "safeguards": {
+    "exactPlanApproval": true,
+    "targetReadBack": true,
+    "mergePerformed": false,
+    "deploymentPerformed": false,
+    "productionSendingEnabled": false,
+    "proactiveWorkEnabled": false
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "digest": "d44f5fa53a69be964e74435c09497daf1a7be04e22a9aafddaa9d1756b4811a0",
+    "signed": false
+  }
+}

@@ -23,6 +23,15 @@ impersonating you.
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
+[Start in 10 minutes](#quick-start) · [Report a successful install](https://github.com/ruiwang20010702/foursday/issues/50) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Join the v0.5 pilot](https://github.com/ruiwang20010702/foursday/issues/49) · [Track the 90-day launch](./docs/en/growth-scorecard.md) · [Review the public launch playbook](./docs/en/public-launch-playbook.md) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
+
+<a href="./assets/foursday-v0.5-demo.mp4">
+  <img src="./assets/foursday-v0.5-demo-poster.png" alt="Watch Foursday turn a synthetic GitHub Issue into a verified Draft PR" width="960">
+</a>
+
+**[Watch the real v0.5 candidate loop →](./assets/foursday-v0.5-demo.mp4)**<br>
+75 seconds · silent captions · synthetic [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29) → verified [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39) · digest-bound privacy review · no merge · no deployment
+
 </div>
 
 ## Why Foursday?
@@ -81,7 +90,7 @@ and sees whether time was actually returned.
 
 | Capability | What the user gets | Current implementation |
 |---|---|---|
-| Project onboarding | Project goal, milestones, people, memory scope, recipes, and risk budgets in one safe draft | Implemented; side-effect capabilities start disabled |
+| Project onboarding | Project goal, milestones, people, memory scope, recipes, and risk budgets in one safe draft | Implemented; external effects start disabled and local preparation requires approval |
 | Recipe library | Repeatable workflows instead of planning the same work from every message | Four versioned built-in recipes with validated inputs |
 | Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, and triggers in one view | Implemented in the local personal console |
 | Time-return dashboard | Evidence-backed minutes saved, confirmed by the user | Implemented; estimates never count automatically |
@@ -121,22 +130,169 @@ proves that a dedicated graph database is necessary.
 
 ## Quick Start
 
-### Run the five-minute local demo
+### Start the Web onboarding and pilot with one command
 
-The demo needs only Node.js. It does not require DingTalk, DWS, PostgreSQL,
-Codex, Claude Code, or an API key:
+With Node.js 22 or 24 installed, launch the reviewed v0.5 Web flow directly
+from its immutable GitHub commit:
+
+```bash
+npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#3577615d906f54689c38f565b7c8b62d92a27f43" foursday start --pilot-sha 3577615d906f54689c38f565b7c8b62d92a27f43
+```
+
+Open the printed loopback URL. The command downloads and runs that exact public
+commit with package lifecycle scripts disabled; it does not install a production service, read DingTalk, connect to a
+production database, or touch an external system at startup. Preview needs only
+Node.js. Before authorizing any write, select **Check pilot readiness**. This
+read-only check reports only whether GitHub CLI authentication and a supported
+agent runtime are available; it creates no fork, branch, push, or PR. After it
+finishes, a blocked user can choose **Copy privacy-safe readiness report** and
+open the bug form. The report contains only the immutable candidate, Node major,
+readiness booleans, and redacted symptom placeholders—never paths, usernames,
+private repository details, logs, model output, or credentials. Copying and
+opening the form are local, separate actions; Foursday never submits it.
+**Copy setup check-in** produces the bounded, editable template for
+[Issue #50](https://github.com/ruiwang20010702/foursday/issues/50); opening the
+Issue is a separate click and Foursday never posts automatically. The copy
+action is disabled once pilot preparation begins because the no-fork setup
+claim is no longer sufficient. To join
+the real public pilot, review the fixed commit and select **Prepare my pilot
+fork**. Only after that separate checkbox confirmation may Foursday create or
+reuse your personal fork, clone the exact commit under `~/FoursdayPilot/`, bind
+the credential-free official upstream, and install lockfile dependencies
+without lifecycle scripts.
+It still does not run a model, create a delivery branch, push, open a PR, merge,
+or deploy. Those delivery effects require an authorized runtime and a second
+approval bound to the complete plan hash.
+
+### Start from a source checkout
+
+The fastest way to understand Foursday is the local activation page. It needs
+only Node.js and does not require DingTalk, DWS, PostgreSQL, Codex, Claude Code,
+GitHub authentication, or an API key:
 
 ```bash
 git clone https://github.com/ruiwang20010702/foursday.git
 cd foursday
 npm ci
+npm start
+```
+
+Open `http://127.0.0.1:4173`, bind a local Git repository, and describe one
+GitHub issue. Foursday builds its real five-step delivery recipe—patch, isolated
+branch, tests, push, and Draft PR—and shows the plan hash, risk levels, and
+disabled capabilities. Building this preview touches zero external systems.
+
+To continue beyond the preview, choose Codex or Claude Code. Foursday then
+requires a clean Git repository whose origin matches the Issue, or whose
+credential-free `upstream` remote matches it. It also requires a registered
+`package.json` test script, an authenticated GitHub CLI, and a second approval
+bound to the exact plan hash. The approval screen shows the push-source
+repository, Issue/PR target repository, mode, and starting commit. Only that
+approval can generate a patch, create a `foursday/` branch, run the registered
+test, push the branch, and open a Draft PR. A fork delivery pushes only to the
+contributor fork and opens the Draft PR against the approved upstream. The
+read-back must match the source repository, branch, commit, target repository,
+base, title, open state, and draft state. It cannot merge or deploy.
+
+Execution state is stored in an encrypted local SQLite session; project memory
+and returned time remain proposals until you confirm them. After completion,
+download the JSON evidence bundle; download it again after confirmation to
+capture the final `verified_closed_loop` status. The bundle omits local paths,
+remotes, action tokens, credentials, and model output while retaining the
+Issue, source and target repository identities, plan hash, target read-back,
+memory status, time-return status, explicit safety boundaries, and a locally
+measured server-start-to-confirmed journey. The measurement uses a monotonic
+process clock and is covered by the evidence digest. It deliberately excludes
+the initial package download, which remains a separate self-reported field.
+
+After confirming memory and returned time, use **Copy privacy-safe pilot proof**
+to copy a public Issue comment template derived from that verified bundle. The
+template contains only public GitHub target identities, governed hashes,
+runtime, confirmed returned minutes, the rounded local journey duration, and
+explicit feedback placeholders. It says whether the server-side journey stayed
+within ten minutes and explicitly says that package download time was not
+measured. It is
+an unsigned self-report, so it never replaces maintainer read-back of the Issue
+and Draft PR. Keep the complete JSON bundle local unless a maintainer requests
+it through an agreed private channel. The adjacent **Open pilot Issue #49** link
+only opens the voluntary submission page; it does not publish the clipboard.
+
+### Join the external pilot
+
+External testers do not need upstream write access. Use the immutable one-command
+flow above and approve **Prepare my pilot fork**. Foursday reads back the GitHub
+account and fork parent, prepares the exact candidate in a fixed private local
+directory, and fills the repository field. If a fork already exists, it must be
+an actual fork of `ruiwang20010702/foursday`; an unrelated repository with the
+same name is rejected.
+
+The equivalent manual fallback is:
+
+```bash
+gh repo fork ruiwang20010702/foursday --clone
+cd foursday
+git fetch upstream codex/v0.5-candidate
+git merge-base --is-ancestor 3577615d906f54689c38f565b7c8b62d92a27f43 FETCH_HEAD
+git switch --create pilot-v0.5-3577615 3577615d906f54689c38f565b7c8b62d92a27f43
+npm ci --ignore-scripts
+npm start
+```
+
+Use [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49)
+only for optional intent and final feedback. You do not need to wait for a
+maintainer assignment. After readiness, **Create your unique pilot task**
+generates a random local pseudonym; you may keep it or choose another safe
+`tester-` alias. Foursday prepares a bounded GitHub Issue composer and fills the change request, base branch
+`codex/v0.5-candidate`, registered test `check`, and Draft PR title locally. It
+does not create the Issue: review and submit it yourself, then paste that new,
+unique Issue URL into the form. Before approval, verify that the Web page names
+your fork as the push source and `ruiwang20010702/foursday` as the Issue and
+Draft PR target. Keep the PR open and Draft; never merge or deploy it. After
+confirming the outcomes, copy the privacy-safe pilot proof, replace the
+`tester-XX` placeholder with the alias you used, add timings and feedback, and
+post it to Issue #49. The cohort verifier still requires ten distinct aliases,
+Issues, plan hashes, evidence files, and Draft PRs; self-service removes waiting,
+not the evidence boundary.
+
+### Troubleshoot Web onboarding
+
+| Check | Safe next action |
+|---|---|
+| Dirty worktree | Stop and inspect `git status`; commit or stash changes intentionally, then retry. |
+| Repository mismatch | Use the same repository, or a fork whose credential-free `upstream` remote exactly matches the Issue repository. |
+| Missing registered test script | Register the existing project test command in `package.json`, run it manually, then retry. |
+
+Foursday does not clean the worktree or switch repositories automatically.
+Never paste credentials into onboarding fields or logs.
+
+For an OpenAI-compatible provider, configure all three values before `npm
+start`; they are read at runtime and the API key is never written to the local
+session:
+
+```bash
+export FOURSDAY_OPENAI_BASE_URL="https://your-provider.example/v1/"
+export FOURSDAY_OPENAI_API_KEY="..."
+export FOURSDAY_OPENAI_MODEL="your-model"
+npm start
+```
+
+HTTPS is required except for an explicit loopback endpoint such as a local
+model server. The provider receives an artifact prompt only after exact-plan
+approval.
+
+### Run the terminal safety demo
+
+The terminal demo teaches the approval and read-back model with a deterministic
+in-memory target:
+
+```bash
 npm run demo
 ```
 
-Enter a message, review the draft, and choose whether to approve the local
-simulation. Before approval, the effect ledger and evidence list remain empty.
-After approval, the demo records intent, performs only an in-memory action, and
-reads the simulated target back. For a non-interactive reproducible run:
+Enter a message, review the draft, and decide whether to approve the simulation.
+Before approval, the effect ledger and evidence list remain empty. After
+approval, the demo records intent, performs only an in-memory action, and reads
+the simulated target back. For a reproducible non-interactive run:
 
 ```bash
 npm run demo -- --message "Prepare a launch checklist" --approve --json
@@ -235,6 +391,10 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 | [Integrations](./docs/en/integrations.md) | DingTalk/DWS, Feishu events, Codex, Claude Code, and provider contracts |
 | [Capabilities and Memory](./docs/en/capabilities.md) | Project authorization, plans, formal memory, and takeover |
 | [Deployment](./docs/en/deployment.md) | Safe setup, exact-SHA releases, verification, and forward-only boundaries |
+| [First contributions](./docs/en/first-contributions.md) | Five bounded, issue-ready tasks for new contributors |
+| [Authentic demo and evidence contract](./docs/en/demo.md) | The 75-second candidate video, storyboard, evidence boundary, and external-reproduction gate |
+| [Pilot validation](./docs/en/pilot-validation.md) | What counts toward 10 maintainer loops and 10 external testers |
+| [Public growth scorecard](./docs/en/growth-scorecard.md) | 90-day targets, dated baseline, counting rules, and privacy boundary |
 | [Security Policy](./SECURITY.md) | Private reporting and supported security boundaries |
 
 ## Roadmap
@@ -243,6 +403,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [x] Project capability gateway, work plans, execution evidence, and result reporting
 - [x] Formal memory, takeover controls, SLOs, and immutable production releases
 - [x] Interactive local demo without enterprise accounts or model credentials
+- [x] One-command local Web onboarding with a real governed GitHub recipe and zero external writes
 - [x] Versioned MessageAdapter, AgentRuntime, and ModelProvider contracts
 - [ ] Easier desktop distribution
 - [x] Feishu Open Platform adapter without a DWS dependency
@@ -259,7 +420,11 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 
 ## Contributing
 
-Issues, real-world use cases, documentation improvements, and code contributions are welcome. Read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before contributing.
+Issues, real-world use cases, documentation improvements, and code contributions are welcome. Pick one of the five live [`good first issue` tasks](./docs/en/first-contributions.md), comment before starting to avoid duplicate work, then read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). Each live Issue links back to a versioned in-repository scope and acceptance contract.
+
+Community recipes and adapter manifests have a fast, credential-free check:
+`npm run extensions:validate`. It parses reviewable JSON only and never installs,
+authorizes, or executes an extension.
 
 ## License
 

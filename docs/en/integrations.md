@@ -117,3 +117,18 @@ package signing, publisher identity, revocation, and trust review are designed.
 Manifest contract version `1.0` is mandatory, and all five guarantees—allowlist,
 idempotency, human takeover, target read-back, and unknown-outcome handling—must
 be explicitly enabled or validation fails closed.
+
+Validate all repository examples or one contribution with the credential-free,
+read-only contributor command:
+
+```bash
+npm run extensions:validate
+npm run extensions:validate -- --recipe examples/recipes/my-recipe.json
+npm run extensions:validate -- --adapter examples/adapters/my-adapter.json
+```
+
+The command only parses bounded JSON files. It does not read runtime credential
+files, import contributor code, install an extension, call a network service, or
+authorize a capability. `valid: true` therefore means “ready for contract review,”
+not “production ready.” Implemented adapters still require the full contract
+checklist above and target-system mismatch tests.

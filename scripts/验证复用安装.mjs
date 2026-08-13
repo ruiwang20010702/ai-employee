@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { constants } from "node:fs";
 import {
   access,
@@ -81,16 +82,29 @@ async function packageFileGate(files, root) {
     "scripts/初始化钥匙串密钥.mjs",
     "scripts/新环境向导.mjs",
     "scripts/交互式演示.mjs",
+    "scripts/验证公开演示.mjs",
+    "assets/foursday-v0.5-demo.manifest.json",
+    "assets/foursday-v0.5-demo.mp4",
+    "assets/foursday-v0.5-demo-poster.png",
+    "scripts/启动体验.mjs",
     "scripts/运行代码检查.mjs",
     "scripts/创建项目配置.mjs",
     "scripts/校验项目能力.mjs",
     "scripts/运行完整测试.mjs",
     "scripts/验证复用安装.mjs",
+    "scripts/验证公开安装.mjs",
     ...migrationFiles,
     "src/capability-policy.mjs",
     "src/adapter-contracts.mjs",
     "src/agent-runtime.mjs",
     "src/demo.mjs",
+    "src/activation.mjs",
+    "src/activation-execution.mjs",
+    "src/activation-server.mjs",
+    "src/activation-ui.mjs",
+    "src/artifact-runtime.mjs",
+    "src/openai-compatible-provider.mjs",
+    "src/store.mjs",
     "src/feishu.mjs",
     "src/control-access.mjs",
     "src/privacy-erasure.mjs",
@@ -184,6 +198,84 @@ async function verifyInstalledPlugin(packageDirectory) {
     checkedFiles: packageValidation.checkedDistributionFiles,
     version: manifest.version,
   };
+}
+
+async function verifyInstalledActivation(installedGuide, projectDirectory) {
+  const child = spawn(installedGuide, ["start", "--port", "0"], {
+    cwd: projectDirectory,
+    env: isolatedEnvironment(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-4_096); });
+  child.stdout.setEncoding("utf8");
+  try {
+    const url = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Installed activation server did not start")), 10_000);
+      const fail = (code) => {
+        clearTimeout(timeout);
+        reject(new Error(`Installed activation server exited early (${code}): ${stderr}`));
+      };
+      child.once("exit", fail);
+      child.stdout.on("data", (chunk) => {
+        const match = chunk.match(/http:\/\/127\.0\.0\.1:[0-9]+\//u);
+        if (!match) return;
+        clearTimeout(timeout);
+        child.off("exit", fail);
+        resolve(match[0]);
+      });
+    });
+    const [page, environment] = await Promise.all([
+      fetch(url),
+      fetch(new URL("/api/environment", url)),
+    ]);
+    assert(page.ok && environment.ok, "Installed activation server endpoints are unavailable");
+    assert(
+      (await page.text()).includes("Give your coding agent one real job."),
+      "Installed activation page lost its public first-run experience",
+    );
+    const environmentResult = await environment.json();
+    assert(
+      environmentResult.externalSystemsTouched === false,
+      "Installed activation environment touched an external system",
+    );
+    const previewResponse = await fetch(new URL("/api/preview", url), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId: "reuse-example",
+        projectName: "Reusable example",
+        rootDirectory: projectDirectory,
+        requesterId: "local-owner",
+        runtime: "demo",
+        issueUrl: "https://github.com/example/project/issues/1",
+        changeRequest: "Add one documented example without changing public APIs.",
+        testCommandId: "check",
+        baseBranch: "main",
+        prTitle: "docs: add one verified example",
+      }),
+    });
+    const preview = await previewResponse.json();
+    assert(
+      previewResponse.ok &&
+      preview.schema === "foursday-activation/v1" &&
+      preview.externalSystemsTouched === false &&
+      preview.decision === "DENY" &&
+      preview.presentation?.steps?.length === 5,
+      "Installed activation preview did not preserve the safe five-step plan",
+    );
+    return true;
+  } finally {
+    if (child.exitCode === null) child.kill("SIGTERM");
+    if (child.exitCode === null) {
+      await Promise.race([
+        once(child, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 2_000)),
+      ]);
+    }
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
 }
 
 export async function verifyReusableInstallation({
@@ -301,13 +393,6 @@ export async function verifyReusableInstallation({
       installedDemo.evidence.every((item) => item.verified !== false),
       "Installed package demo did not complete with local read-back evidence",
     );
-
-    const configPath = join(runtimeDirectory, "production.json");
-    const guideScript = join(packageDirectory, "scripts", "新环境向导.mjs");
-    assert(
-      ((await stat(guideScript)).mode & 0o111) !== 0,
-      "Installed reusable environment guide is not executable",
-    );
     const installedGuide = join(
       installDirectory,
       "node_modules",
@@ -315,6 +400,18 @@ export async function verifyReusableInstallation({
       process.platform === "win32" ? "foursday.cmd" : "foursday",
     );
     await access(installedGuide, constants.X_OK);
+    await run("/usr/bin/git", ["-C", projectDirectory, "init"]);
+    const installedActivation = await verifyInstalledActivation(
+      installedGuide,
+      projectDirectory,
+    );
+
+    const configPath = join(runtimeDirectory, "production.json");
+    const guideScript = join(packageDirectory, "scripts", "新环境向导.mjs");
+    assert(
+      ((await stat(guideScript)).mode & 0o111) !== 0,
+      "Installed reusable environment guide is not executable",
+    );
     const legacyInstalledGuide = join(
       installDirectory,
       "node_modules",
@@ -567,7 +664,6 @@ export async function verifyReusableInstallation({
       "Installed lifecycle apply boundaries changed",
     );
 
-    await run("/usr/bin/git", ["-C", projectDirectory, "init"]);
     const projectScript = join(packageDirectory, "scripts", "创建项目配置.mjs");
     const projectArgs = [
       projectScript,
@@ -622,6 +718,7 @@ export async function verifyReusableInstallation({
       reusableGuide: true,
       installedCodeCheck: true,
       installedDemo: true,
+      installedActivation,
       isolatedWorkspaces: 2,
       configMode: "600",
       projectMode: "600",

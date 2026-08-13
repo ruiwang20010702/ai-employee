@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import test from "node:test";
 
 async function projectText(path) {
@@ -260,6 +260,118 @@ test("公开仓库安装说明固定到已审核完整提交", async () => {
   assert.match(chinese, /完整 40 位提交编号/u);
 });
 
+test("中英文快速开始提供不可变的一条命令 Web 体验入口", async () => {
+  const [readme, chinese] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+  ]);
+  const immutableStart =
+    /npx --yes --ignore-scripts --package "github:ruiwang20010702\/foursday#([a-f0-9]{40})" foursday start --pilot-sha \1/u;
+  for (const text of [readme, chinese]) {
+    assert.match(text, immutableStart);
+    assert.match(text, /Node\.js 22 (?:or|或) 24/u);
+  }
+  assert.match(readme, /does not install a production service/u);
+  assert.match(readme, /touch an external system at startup/u);
+  assert.match(readme, /Prepare my pilot fork/u);
+  assert.match(readme, /second\s+approval bound to the complete plan hash/u);
+  assert.match(chinese, /不安装生产服务/u);
+  assert.match(chinese, /不触碰外部系统/u);
+  assert.match(chinese, /Prepare my pilot fork/u);
+  assert.match(chinese, /再次批准完整计划哈希/u);
+});
+
+test("公开安装验收使用隔离无凭据环境且不冒充外部用户", async () => {
+  const [pilot, chinesePilot, scorecard, chineseScorecard] = await Promise.all([
+    projectText("docs/en/pilot-validation.md"),
+    projectText("docs/体验验证说明.md"),
+    projectText("docs/en/growth-scorecard.md"),
+    projectText("docs/公开增长记分卡.md"),
+  ]);
+  for (const text of [pilot, scorecard]) {
+    assert.match(text, /public-install:verify/u);
+    assert.match(text, /credential token/u);
+    assert.match(text, /does not count as an external tester|do not count/u);
+  }
+  for (const text of [chinesePilot, chineseScorecard]) {
+    assert.match(text, /public-install:verify/u);
+    assert.match(text, /不转发.*令牌|转发凭据令牌 0/u);
+    assert.match(text, /不能冒充外部用户|外部用户.*不计数/u);
+  }
+});
+
+test("外部体验入口为每位体验者使用唯一合成 Issue", async () => {
+  const [readme, chinese, contract, chineseContract] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/pilot-validation.md"),
+    projectText("docs/体验验证说明.md"),
+  ]);
+  for (const text of [readme, contract]) {
+    assert.match(text, /Create your unique\s+pilot task/u);
+    assert.match(text, /Issue #49.+(?:intake|claim|optional intent).+feedback/su);
+    assert.match(text, /unique Issue/u);
+  }
+  for (const text of [chinese, chineseContract]) {
+    assert.match(text, /Create your unique pilot task/u);
+    assert.match(text, /Issue #49.+只用于.+反馈/su);
+    assert.match(text, /唯一 Issue/u);
+  }
+  assert.doesNotMatch(contract, /Use public pilot Issue #49 and base branch/u);
+  assert.doesNotMatch(chineseContract, /随后使用公开体验 Issue #49/u);
+  assert.match(contract, /tester-maintainer/u);
+  assert.match(contract, /every launch-cohort target passes/u);
+  assert.match(chineseContract, /tester-maintainer/u);
+  assert.match(chineseContract, /任何一条不一致/u);
+});
+
+test("公开增长记分卡不把重复自测和社区意向冒充用户或贡献", async () => {
+  const [readme, chineseReadme, scorecard, chineseScorecard] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/growth-scorecard.md"),
+    projectText("docs/公开增长记分卡.md"),
+  ]);
+  assert.match(readme, /Public growth scorecard/u);
+  assert.match(chineseReadme, /公开增长记分卡/u);
+  for (const text of [scorecard, chineseScorecard]) {
+    for (const target of ["200", "50", "10", "5", "1,000"]) {
+      assert.match(text, new RegExp(target, "u"));
+    }
+    assert.match(text, /10\/10/u);
+    assert.match(text, /0\/10/u);
+    assert.match(text, /Issue #3/u);
+    assert.match(text, /Issue #49/u);
+    assert.match(text, /Issue #50/u);
+  }
+  assert.match(scorecard, /ten loops by one person still count as one user/u);
+  assert.match(scorecard, /Claim comments.+are not completed contributors/su);
+  assert.match(scorecard, /does not phone home/u);
+  assert.match(chineseScorecard, /同一个人的 10 次闭环仍只算 1 人/u);
+  assert.match(chineseScorecard, /认领留言.+不能提前记为完成/su);
+  assert.match(chineseScorecard, /不会主动回传数据/u);
+  assert.match(scorecard, /current public candidate[\s\S]+0\/10 candidate-bound[\s\S]+maintainer loops/u);
+  assert.match(chineseScorecard, /当前公开候选[\s\S]+候选绑定维护者闭环为 \*\*0\/10\*\*/u);
+  assert.match(readme, /Report a successful install.+issues\/50/u);
+  assert.match(chineseReadme, /报告一次成功安装.+issues\/50/u);
+});
+
+test("社交预览候选图满足 GitHub 推荐尺寸且不冒充已经上传", async () => {
+  const assetUrl = new URL("../assets/foursday-social-preview.png", import.meta.url);
+  const [image, metadata, english, chinese] = await Promise.all([
+    readFile(assetUrl),
+    stat(assetUrl),
+    projectText("docs/en/growth-scorecard.md"),
+    projectText("docs/公开增长记分卡.md"),
+  ]);
+  assert.equal(image.subarray(1, 4).toString("ascii"), "PNG");
+  assert.equal(image.readUInt32BE(16), 1280);
+  assert.equal(image.readUInt32BE(20), 640);
+  assert.ok(metadata.size < 1024 * 1024);
+  assert.match(english, /separate public metadata change.+not implied/su);
+  assert.match(chinese, /独立的公开元数据变更.+不能.+声称已经上传/su);
+});
+
 test("五分钟演示和三类扩展契约在中英文入口保持一致", async () => {
   const [
     readme,
@@ -397,6 +509,14 @@ test("中英文首页、治理文件和英文核心文档的本地链接全部�
     "docs/en/architecture.md",
     "docs/en/capabilities.md",
     "docs/en/deployment.md",
+    "docs/en/demo.md",
+    "docs/en/first-contributions.md",
+    "docs/en/pilot-validation.md",
+    "docs/en/public-launch-playbook.md",
+    "docs/真实演示录制说明.md",
+    "docs/首次贡献任务.md",
+    "docs/体验验证说明.md",
+    "docs/公开发布手册.md",
   ]) {
     const text = await projectText(file);
     const base = new URL(`../${file}`, import.meta.url);
@@ -410,6 +530,196 @@ test("中英文首页、治理文件和英文核心文档的本地链接全部�
         `${file} 的本地链接不存在：${target}`,
       );
     }
+  }
+});
+
+test("公开发布手册区分定向体验、公开候选和大范围发布", async () => {
+  const [readme, chineseReadme, english, chinese] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/public-launch-playbook.md"),
+    projectText("docs/公开发布手册.md"),
+  ]);
+  assert.match(readme, /public-launch-playbook\.md/u);
+  assert.match(chineseReadme, /公开发布手册\.md/u);
+  for (const value of [english, chinese]) {
+    assert.match(value, /10\/10/u);
+    assert.match(value, /0\/10/u);
+    assert.match(value, /Issue #49/u);
+    assert.match(value, /Issue #50/u);
+    assert.match(value, /1280 × 640/u);
+    assert.match(value, /Show HN:/u);
+    assert.match(value, /Draft PR/u);
+  }
+  assert.match(english, /Current-candidate maintainer loops \| 0\/10/u);
+  assert.match(english, /Historical 10\/10 loops/u);
+  assert.match(chinese, /当前候选维护者闭环 \| 0\/10/u);
+  assert.match(chinese, /历史 10\/10 闭环/u);
+  assert.match(english, /do not paste AI-generated or AI-edited copy/u);
+  assert.match(english, /never request votes/u);
+  assert.match(english, /ten distinct external loops/u);
+  assert.match(chinese, /不能粘贴 AI 生成或 AI 修改/u);
+  assert.match(chinese, /绝不索要投票/u);
+  assert.match(chinese, /10 位不同外部体验者/u);
+  assert.match(english, /Foursday never posts it/u);
+  assert.match(chinese, /Foursday 不会自动发帖/u);
+  for (const value of [english, chinese]) {
+    assert.match(value, /npm run growth:report -- --sha/u);
+    assert.match(value, /--pilot-manifest/u);
+    assert.match(value, /--closed-loop-manifest/u);
+    assert.match(value, /--extension-manifest/u);
+    assert.match(value, /extensions:evidence:verify/u);
+    assert.match(value, /pilot:self:verify/u);
+    assert.match(value, /locallyVerifiedClosedLoopUsers/u);
+    assert.match(value, /locallyVerifiedCommunityRecipesOrAdapters/u);
+    assert.match(value, /onlineVerifiedPilotTargets/u);
+  }
+});
+
+test("首批贡献任务已公开、范围受限且进入复用安装包", async () => {
+  const [english, chinese, packageText, entries] = await Promise.all([
+    projectText("docs/en/first-contributions.md"),
+    projectText("docs/首次贡献任务.md"),
+    projectText("package.json"),
+    readdir(new URL("../.github/ISSUE_DRAFTS/", import.meta.url)),
+  ]);
+  const drafts = entries.filter((entry) => /^gfi-\d{3}-.+\.md$/u.test(entry)).sort();
+  assert.equal(drafts.length, 5);
+  assert.deepEqual(
+    drafts.map((entry) => entry.slice(0, 7)),
+    ["gfi-001", "gfi-002", "gfi-003", "gfi-004", "gfi-005"],
+  );
+  for (const draft of drafts) {
+    const text = await projectText(`.github/ISSUE_DRAFTS/${draft}`);
+    assert.match(text, /Labels: .*`good first issue`/u);
+    assert.match(text, /## User outcome/u);
+    assert.match(text, /## Scope/u);
+    assert.match(text, /## Acceptance/u);
+    assert.match(text, /## Non-goals/u);
+    assert.doesNotMatch(text, /(?:enable|开启).{0,30}(?:production sending|生产发送)/iu);
+    assert.match(english, new RegExp(draft.replace(".", "\\."), "u"));
+  }
+  for (const issueNumber of [3, 4, 5, 6, 7]) {
+    const issueUrl = `https://github.com/ruiwang20010702/foursday/issues/${issueNumber}`;
+    assert.match(english, new RegExp(issueUrl, "u"));
+    assert.match(chinese, new RegExp(issueUrl, "u"));
+  }
+  assert.match(english, /All five tasks are live/u);
+  assert.match(chinese, /5 个任务都已经开放/u);
+  assert.doesNotMatch(english, /do not claim they are already open Issues/u);
+  assert.doesNotMatch(chinese, /不宣称任务已经开放领取/u);
+  assert.ok(JSON.parse(packageText).files.includes(".github/ISSUE_DRAFTS/"));
+});
+
+test("真实演示来自同一次闭环并保留外部复现边界", async () => {
+  const [readme, chineseReadme, demo, chineseDemo, packageText, manifestText] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/demo.md"),
+    projectText("docs/真实演示录制说明.md"),
+    projectText("package.json"),
+    projectText("assets/foursday-v0.5-demo.manifest.json"),
+  ]);
+  assert.match(readme, /Watch the 75-second demo/u);
+  assert.match(readme, /Issue #29/u);
+  assert.match(readme, /Draft PR #39/u);
+  assert.match(chineseReadme, /观看 75 秒真实演示/u);
+  assert.match(chineseReadme, /Issue #29/u);
+  assert.match(chineseReadme, /Draft PR #39/u);
+  for (const value of [
+    "public, synthetic GitHub Issue",
+    "complete plan hash",
+    "verified Draft PR",
+    "memory: proposed → confirmed",
+    "No merge. No deploy.",
+  ]) assert.match(demo, new RegExp(value, "u"));
+  assert.match(demo, /does not prove external reproducibility/u);
+  assert.match(demo, /ten independent testers/u);
+  assert.match(demo, /verified_closed_loop/u);
+  assert.match(demo, /integrity digest/u);
+  assert.match(demo, /npm run demo:verify/u);
+  assert.match(demo, /does not claim automated OCR/u);
+  assert.match(demo, /\/workspace\/foursday/u);
+  assert.match(chineseDemo, /不能把本地预览、无关 PR 和模拟结果剪接/u);
+  assert.match(chineseDemo, /不代表外部可复现性已经验收/u);
+  assert.match(chineseDemo, /10 位独立测试者/u);
+  assert.match(chineseDemo, /verified_closed_loop/u);
+  assert.match(chineseDemo, /不声称能够自动 OCR/u);
+  assert.match(chineseDemo, /\/workspace\/foursday/u);
+  const packageJson = JSON.parse(packageText);
+  const manifest = JSON.parse(manifestText);
+  assert.equal(packageJson.scripts["demo:verify"], "node scripts/验证公开演示.mjs");
+  assert.equal(manifest.media.durationSeconds, 75);
+  assert.equal(manifest.privacyReview.localAbsolutePathsShown, false);
+  assert.equal(manifest.publicEvidence.merged, false);
+  assert.equal(manifest.publicEvidence.deployed, false);
+});
+
+test("外部体验入口使用 fork 推送并把来源与上游目标纳入审批证据", async () => {
+  const [readme, chineseReadme, pilot, chinesePilot] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/pilot-validation.md"),
+    projectText("docs/体验验证说明.md"),
+  ]);
+  for (const value of [readme, pilot]) {
+    assert.match(value, /gh repo fork ruiwang20010702\/foursday|fork as the push source/u);
+    assert.match(value, /upstream/u);
+    assert.match(value, /codex\/v0\.5-candidate/u);
+    assert.match(value, /Issue #49/u);
+    assert.match(value, /do not need to wait for a\s+maintainer|No maintainer assignment is\s+required/u);
+  }
+  assert.match(pilot, /"candidateSha"/u);
+  assert.match(pilot, /pilot:verify -- --manifest .* --sha/u);
+  assert.match(chinesePilot, /candidateSha/u);
+  assert.match(chinesePilot, /pilot:verify -- --manifest .* --sha/u);
+  for (const value of [chineseReadme, chinesePilot]) {
+    assert.match(value, /fork/u);
+    assert.match(value, /upstream/u);
+    assert.match(value, /来源/u);
+    assert.match(value, /Draft/u);
+    assert.match(value, /不再要求等待维护者分配名额|不再要求等待维护者分配/u);
+  }
+  assert.match(readme, /never merge or deploy/u);
+  assert.match(chineseReadme, /禁止合并或部署/u);
+  for (const value of [readme, pilot]) {
+    assert.match(value, /privacy-safe pilot proof/u);
+    assert.match(value, /unsigned/u);
+    assert.match(value, /maintainer (?:target )?read-back/u);
+    assert.match(value, /Copy privacy-safe readiness report/u);
+    assert.match(value, /never submits it/u);
+    assert.match(value, /paths, usernames|executable paths, usernames/u);
+  }
+  for (const value of [chineseReadme, chinesePilot]) {
+    assert.match(value, /隐私安全体验证明/u);
+    assert.match(value, /未签名/u);
+    assert.match(value, /独立回读/u);
+    assert.match(value, /Copy privacy-safe readiness report/u);
+    assert.match(value, /不会自动提交/u);
+    assert.match(value, /路径、用户名|可执行文件路径、用户名/u);
+  }
+});
+
+test("十分钟接入证据区分服务侧自动计时与首次包下载", async () => {
+  const [readme, chineseReadme, pilot, chinesePilot, scorecard, chineseScorecard] =
+    await Promise.all([
+      projectText("README.md"),
+      projectText("README_ZH.md"),
+      projectText("docs/en/pilot-validation.md"),
+      projectText("docs/体验验证说明.md"),
+      projectText("docs/en/growth-scorecard.md"),
+      projectText("docs/公开增长记分卡.md"),
+    ]);
+  for (const value of [readme, pilot, scorecard]) {
+    assert.match(value, /server-start-to-confirmed/u);
+    assert.match(value, /monotonic/u);
+    assert.match(value, /package download/u);
+  }
+  for (const value of [chineseReadme, chinesePilot, chineseScorecard]) {
+    assert.match(value, /服务启动/u);
+    assert.match(value, /单调时钟/u);
+    assert.match(value, /包下载/u);
+    assert.match(value, /不能.*单独|不能拿.*冒充/u);
   }
 });
 

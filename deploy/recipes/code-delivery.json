@@ -4,10 +4,16 @@
   "name": "代码交付",
   "description": "从代码任务生成补丁、隔离提交、运行登记测试、推送受控分支并创建可回读的 GitHub PR 草稿。",
   "category": "development",
-  "objective": "完成代码任务：{{changeRequest}}",
+  "objective": "完成 GitHub Issue {{issueUrl}} 的代码任务：{{changeRequest}}",
   "baselineMinutes": 120,
   "baselineMethod": "user_confirmed",
   "inputs": [
+    {
+      "name": "issueUrl",
+      "type": "string",
+      "required": true,
+      "description": "绑定到审批计划的规范 GitHub Issue URL"
+    },
     {
       "name": "changeRequest",
       "type": "string",
@@ -78,7 +84,7 @@
       "inputs": {
         "pushStepId": "push",
         "title": "{{prTitle}}",
-        "body": "Foursday 依据已确认请求生成此草稿：\n\n{{changeRequest}}\n\n提交前仍需负责人审查代码、测试证据和权限边界。",
+        "body": "Foursday 依据已确认的 GitHub Issue 生成此草稿：\n\nIssue: {{issueUrl}}\n\n{{changeRequest}}\n\n提交前仍需负责人审查代码、测试证据和权限边界。",
         "baseBranch": "{{baseBranch}}"
       },
       "expectedEvidence": "PR 编号、URL、草稿状态、分支和提交逐字段回读一致",

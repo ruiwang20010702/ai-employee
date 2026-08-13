@@ -620,7 +620,11 @@ async function resolveIsolatedWorkspace({
   return { root, target, branch, commit, workspace };
 }
 
-export function createReadOnlyWorkAdapters({ codexPath, gbrainPath = "gbrain" }) {
+export function createReadOnlyWorkAdapters({
+  codexPath,
+  gbrainPath = "gbrain",
+  artifactRuntime = null,
+}) {
   const artifact = (capability, instruction, verification) => ({
     async preflight({ plan, step, manifest }) {
       await verifiedWorkingDirectory(manifest, step.workingDirectory);
@@ -641,9 +645,9 @@ export function createReadOnlyWorkAdapters({ codexPath, gbrainPath = "gbrain" })
         step,
         priorEvidence,
       );
-      const result = await runCodexArtifact({
-        codexPath,
+      const artifactInput = {
         workingDirectory: target,
+        outputDirectory: fileURLToPath(patchDirectory),
         timeoutMs: rule.timeoutMs ?? 120_000,
         prompt: [
           ...basePrompt({ plan, step }),
@@ -653,7 +657,10 @@ export function createReadOnlyWorkAdapters({ codexPath, gbrainPath = "gbrain" })
           instruction,
         ].filter(Boolean).join("\n\n"),
         signal,
-      });
+      };
+      const result = artifactRuntime
+        ? await artifactRuntime.generateArtifact(artifactInput)
+        : await runCodexArtifact({ codexPath, ...artifactInput });
       return verification({ ...result, root, target });
     },
   });
@@ -788,13 +795,14 @@ export function createReadOnlyWorkAdapters({ codexPath, gbrainPath = "gbrain" })
 
 export function createControlledWorkAdapters({
   codexPath,
+  artifactRuntime = null,
   dwsPath = null,
   gbrainPath = "gbrain",
   ghPath = null,
   store = null,
 }) {
   return {
-    ...createReadOnlyWorkAdapters({ codexPath, gbrainPath }),
+    ...createReadOnlyWorkAdapters({ codexPath, gbrainPath, artifactRuntime }),
     project_memory_proposal: {
       async preflight({ plan, step, manifest }) {
         referencedEarlierStep(plan, step, "documentStepId", "document_draft");
@@ -987,8 +995,10 @@ export function createControlledWorkAdapters({
         if (!rule?.repository || !pushRule?.expectedRemoteUrl) {
           throw new Error("github_pr_draft project rule is incomplete");
         }
-        if (githubRepositoryFromRemote(pushRule.expectedRemoteUrl) !== rule.repository.toLowerCase()) {
-          throw new Error("GitHub repository differs from the approved Git remote");
+        const pushRepository = githubRepositoryFromRemote(pushRule.expectedRemoteUrl);
+        const headRepository = String(rule.headRepository ?? rule.repository).toLowerCase();
+        if (pushRepository !== headRepository) {
+          throw new Error("GitHub PR head repository differs from the approved Git remote");
         }
       },
       async execute({ plan, step, manifest, priorEvidence }) {
@@ -1003,6 +1013,11 @@ export function createControlledWorkAdapters({
           throw new Error("GitHub PR draft requires verified push evidence");
         }
         const rule = manifest.capabilities.github_pr_draft;
+        const headRepository = String(rule.headRepository ?? rule.repository).toLowerCase();
+        const headOwner = headRepository.split("/")[0];
+        const headArgument = headRepository === rule.repository.toLowerCase()
+          ? pushEvidence.branch
+          : `${headOwner}:${pushEvidence.branch}`;
         const title = String(step.inputs.title).trim();
         const body = String(step.inputs.body).trim();
         const baseBranch = String(step.inputs.baseBranch).trim();
@@ -1015,25 +1030,40 @@ export function createControlledWorkAdapters({
           await writeFile(bodyPath, `${body}\n`, { mode: 0o600, flag: "wx" });
           const createdUrl = await gh(ghPath, [
             "pr", "create", "--draft", "--repo", rule.repository,
-            "--head", pushEvidence.branch, "--base", baseBranch,
+            "--head", headArgument, "--base", baseBranch,
             "--title", title, "--body-file", bodyPath,
           ], rule.timeoutMs ?? 120_000);
           const parsed = new URL(createdUrl);
+          const normalizedPath = parsed.pathname.toLowerCase().replace(/\/$/u, "");
           const expectedPrefix = `/${rule.repository.toLowerCase()}/pull/`;
+          const numberText = normalizedPath.startsWith(expectedPrefix)
+            ? normalizedPath.slice(expectedPrefix.length)
+            : "";
+          const createdNumber = Number(numberText);
           if (
             parsed.protocol !== "https:" ||
             parsed.hostname.toLowerCase() !== "github.com" ||
-            !parsed.pathname.toLowerCase().startsWith(expectedPrefix)
+            parsed.username ||
+            parsed.password ||
+            parsed.search ||
+            parsed.hash ||
+            !/^[1-9]\d*$/u.test(numberText) ||
+            !Number.isSafeInteger(createdNumber)
           ) {
             throw new Error("GitHub PR create returned an unexpected URL");
           }
           const readback = JSON.parse(await gh(ghPath, [
             "pr", "view", createdUrl, "--repo", rule.repository,
-            "--json", "number,url,state,isDraft,headRefName,headRefOid,baseRefName,title",
+            "--json", "number,url,state,isDraft,headRefName,headRefOid,headRepository,baseRefName,title",
           ], rule.timeoutMs ?? 120_000));
+          const readbackHeadRepository = String(
+            readback.headRepository?.nameWithOwner ?? "",
+          ).toLowerCase();
           if (
-            readback.url !== createdUrl || readback.state !== "OPEN" || readback.isDraft !== true ||
+            readback.url !== createdUrl || readback.number !== createdNumber ||
+            readback.state !== "OPEN" || readback.isDraft !== true ||
             readback.headRefName !== pushEvidence.branch || readback.headRefOid !== pushEvidence.commit ||
+            readbackHeadRepository !== headRepository ||
             readback.baseRefName !== baseBranch || readback.title !== title
           ) {
             throw new Error("GitHub PR readback did not match the approved intent");
@@ -1046,7 +1076,10 @@ export function createControlledWorkAdapters({
               number: readback.number,
               url: readback.url,
               head: readback.headRefName,
+              headRepository: readbackHeadRepository,
               base: readback.baseRefName,
+              state: readback.state,
+              isDraft: readback.isDraft,
               commit: readback.headRefOid,
               titleSha256: createHash("sha256").update(title).digest("hex"),
               bodySha256: createHash("sha256").update(body).digest("hex"),

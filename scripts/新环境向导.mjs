@@ -8,6 +8,7 @@ import { initializeProductionConfig } from "./初始化生产配置.mjs";
 import { provisionGeneratedKeychainSecrets } from "./初始化钥匙串密钥.mjs";
 import { inspectReuseReadiness } from "../src/reuse-readiness.mjs";
 import { isMainModule } from "../src/main-module.mjs";
+import { activationHelp, runActivation } from "./启动体验.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -187,6 +188,7 @@ function help() {
   return {
     usage: [
       "foursday check [--config /absolute/path.json]",
+      "foursday start [--port 4173]",
       "foursday init [--apply] [--config /absolute/path.json]",
       "foursday secrets [--apply] [--config /absolute/path.json]",
       "foursday preflight [--dry-run] [--config /absolute/path.json]",
@@ -222,9 +224,32 @@ export async function runReuseGuide({
   keychainProvisioner = provisionGeneratedKeychainSecrets,
   configInitializer = initializeProductionConfig,
   scriptRunner = defaultScriptRunner,
+  activationRunner = runActivation,
 } = {}) {
   const command = args[0] ?? "check";
   if (["help", "--help", "-h"].includes(command)) return help();
+  if (["start", "onboard"].includes(command)) {
+    const activationArgs = args.slice(1);
+    if (activationArgs.some((value) => ["--apply", "--dry-run", "--config"].includes(value))) {
+      throw new Error("Usage: foursday start [--port 4173]");
+    }
+    if (activationArgs.some((value) => ["--help", "-h"].includes(value))) {
+      return { command: "start", help: activationHelp };
+    }
+    const server = await activationRunner({
+      args: activationArgs,
+      workingDirectory: resolve(cwd),
+      output: { write() {} },
+    });
+    return {
+      schema: "foursday-activation-launch/v1",
+      command: "start",
+      url: server.url,
+      workingDirectory: resolve(cwd),
+      externalSystemsTouched: false,
+      boundary: "Web 预览绑定回环地址且不写外部系统；模型、Git 和 GitHub 只会在完整计划再次审批后使用。",
+    };
+  }
   const options = parsedArguments(args);
   const configPath = reuseConfigPath(args, cwd);
 

@@ -1,64 +1,102 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="640" viewBox="0 0 1440 640" role="img" aria-labelledby="title desc">
-  <title id="title">Foursday</title>
-  <desc id="desc">Your open-source work twin. One more you, one less workday.</desc>
+  <title id="title">Foursday — your open-source work twin</title>
+  <desc id="desc">A governed handoff from a GitHub Issue to a verified Draft PR, designed to return one workday.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#07111f"/>
-      <stop offset="0.55" stop-color="#0b1f38"/>
-      <stop offset="1" stop-color="#102c44"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#53a7ff"/>
-      <stop offset="1" stop-color="#53e3c2"/>
-    </linearGradient>
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="18"/>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#14201b" flood-opacity="0.12"/>
     </filter>
+    <pattern id="grain" width="48" height="48" patternUnits="userSpaceOnUse">
+      <circle cx="5" cy="7" r="0.7" fill="#14201b" opacity="0.06"/>
+      <circle cx="29" cy="19" r="0.6" fill="#14201b" opacity="0.05"/>
+      <circle cx="42" cy="39" r="0.8" fill="#14201b" opacity="0.04"/>
+    </pattern>
   </defs>
-  <rect width="1440" height="640" rx="32" fill="url(#bg)"/>
-  <circle cx="1190" cy="96" r="220" fill="#1f7aff" opacity="0.12" filter="url(#glow)"/>
-  <circle cx="1060" cy="560" r="250" fill="#37d7b5" opacity="0.09" filter="url(#glow)"/>
 
-  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
-    <rect x="86" y="72" width="170" height="42" rx="21" fill="#122d49" stroke="#2e6d9c"/>
-    <circle cx="111" cy="93" r="6" fill="#53e3c2"/>
-    <text x="129" y="100" fill="#b8d4ea" font-size="18" font-weight="600">Safety-first</text>
+  <rect width="1440" height="640" rx="32" fill="#f3f0e8"/>
+  <rect width="1440" height="640" rx="32" fill="url(#grain)"/>
+  <rect x="0" y="0" width="520" height="640" rx="32" fill="#14201b"/>
+  <path d="M488 0h32v640h-32z" fill="#155f49" opacity="0.28"/>
 
-    <text x="84" y="220" fill="#ffffff" font-size="78" font-weight="760" letter-spacing="2">Foursday</text>
-    <text x="86" y="276" fill="#9fc2df" font-size="26">Your open-source work twin.</text>
-    <text x="86" y="332" fill="#dcebf7" font-size="26">One more you. One less workday.</text>
+  <!-- Four-day handoff mark: three focused days and one returned day. -->
+  <g transform="translate(72 60)">
+    <rect width="66" height="66" rx="16" fill="#fffdf8"/>
+    <rect x="14" y="14" width="16" height="16" rx="4" fill="#155f49"/>
+    <rect x="36" y="14" width="16" height="16" rx="4" fill="#155f49"/>
+    <rect x="14" y="36" width="16" height="16" rx="4" fill="#155f49"/>
+    <path d="M37 44h14m-6-6 6 6-6 6" fill="none" stroke="#155f49" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 
-    <g transform="translate(86 396)">
-      <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
-      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">Context</text>
-      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">消息与项目记忆</text>
-    </g>
-    <g transform="translate(316 396)">
-      <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
-      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">Judgment</text>
-      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">判断、计划与审批</text>
-    </g>
-    <g transform="translate(546 396)">
-      <rect width="210" height="64" rx="16" fill="#102b46" stroke="#275d86"/>
-      <text x="105" y="28" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">Verified work</text>
-      <text x="105" y="49" text-anchor="middle" fill="#8fb4d2" font-size="14">执行、回读与证据</text>
-    </g>
+  <g font-family="Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <text x="72" y="198" fill="#a9cabb" font-size="14" font-weight="700" letter-spacing="3">YOUR OPEN-SOURCE WORK TWIN</text>
+    <text x="68" y="286" fill="#fffdf8" font-size="76" font-weight="780" letter-spacing="-4">Foursday</text>
+    <text x="72" y="344" fill="#cbd4cf" font-size="25">One more you.</text>
+    <text x="72" y="382" fill="#fffdf8" font-size="25" font-weight="700">One less workday.</text>
 
-    <g transform="translate(890 142)">
-      <path d="M110 0L220 62v124l-110 62L0 186V62z" fill="#0e2943" stroke="url(#accent)" stroke-width="3"/>
-      <path d="M110 38l74 42v86l-74 42-74-42V80z" fill="#102f4d" stroke="#2f739e"/>
-      <circle cx="110" cy="123" r="44" fill="none" stroke="#53e3c2" stroke-width="8" stroke-dasharray="45 14"/>
-      <circle cx="110" cy="123" r="13" fill="#53a7ff"/>
-      <path d="M110 61v24M110 161v24M48 123h24M148 123h24" stroke="#d4edff" stroke-width="6" stroke-linecap="round"/>
+    <g transform="translate(72 452)">
+      <path d="M0 10h15l8 9 10-19" fill="none" stroke="#77b99d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="48" y="16" fill="#a9b8b1" font-size="15">Exact-plan approval</text>
+      <path d="M0 54h15l8 9 10-19" fill="none" stroke="#77b99d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="48" y="60" fill="#a9b8b1" font-size="15">Target-system read-back</text>
+      <path d="M0 98h15l8 9 10-19" fill="none" stroke="#77b99d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="48" y="104" fill="#a9b8b1" font-size="15">Human-confirmed memory and time</text>
     </g>
 
-    <g transform="translate(840 454)">
-      <rect width="440" height="82" rx="20" fill="#0a2035" stroke="#235a7e"/>
-      <circle cx="42" cy="41" r="16" fill="#163852" stroke="#53e3c2" stroke-width="3"/>
-      <path d="M35 41l5 5 10-12" fill="none" stroke="#53e3c2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="76" y="35" fill="#ffffff" font-size="18" font-weight="700">Human approval before side effects</text>
-      <text x="76" y="59" fill="#8fb4d2" font-size="15">默认草稿模式 · 结果回读 · 可暂停 · 可审计</text>
+    <g transform="translate(594 62)" filter="url(#shadow)">
+      <rect width="770" height="516" rx="24" fill="#fffdf8" stroke="#d9d7cc"/>
+      <rect width="770" height="58" rx="24" fill="#f8f6ef"/>
+      <path d="M0 58h770" stroke="#d9d7cc"/>
+      <circle cx="28" cy="29" r="6" fill="#d2cec3"/>
+      <circle cx="49" cy="29" r="6" fill="#d2cec3"/>
+      <circle cx="70" cy="29" r="6" fill="#d2cec3"/>
+      <rect x="110" y="17" width="312" height="24" rx="12" fill="#ebe8df"/>
+      <text x="128" y="34" fill="#5f6f67" font-size="12">127.0.0.1 · governed delivery</text>
+
+      <text x="36" y="105" fill="#155f49" font-size="11" font-weight="750" letter-spacing="2">ONE APPROVED HANDOFF</text>
+      <text x="36" y="141" fill="#14201b" font-size="25" font-weight="760">GitHub Issue → verified Draft PR</text>
+      <rect x="594" y="99" width="138" height="30" rx="15" fill="#dcebe3"/>
+      <text x="663" y="119" text-anchor="middle" fill="#155f49" font-size="11" font-weight="750">0 silent actions</text>
+
+      <g transform="translate(36 176)">
+        <g>
+          <circle cx="18" cy="20" r="18" fill="#155f49"/>
+          <text x="18" y="25" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="800">1</text>
+          <text x="54" y="18" fill="#14201b" font-size="16" font-weight="720">Bind the Issue and repository</text>
+          <text x="54" y="39" fill="#5f6f67" font-size="12">Requester, commit, remote, recipe, and risk scope</text>
+          <rect x="565" y="7" width="118" height="27" rx="13" fill="#dcebe3"/>
+          <text x="624" y="25" text-anchor="middle" fill="#155f49" font-size="10" font-weight="750">SCOPE CHECKED</text>
+        </g>
+        <path d="M18 43v34" stroke="#c8c9c1" stroke-width="2" stroke-dasharray="4 5"/>
+        <g transform="translate(0 78)">
+          <circle cx="18" cy="20" r="18" fill="#155f49"/>
+          <text x="18" y="25" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="800">2</text>
+          <text x="54" y="18" fill="#14201b" font-size="16" font-weight="720">Review the complete plan hash</text>
+          <text x="54" y="39" fill="#5f6f67" font-size="12">Patch, branch, test, push, Draft PR, and rollback</text>
+          <rect x="565" y="7" width="118" height="27" rx="13" fill="#f7ead7"/>
+          <text x="624" y="25" text-anchor="middle" fill="#82500b" font-size="10" font-weight="750">APPROVAL</text>
+        </g>
+        <path d="M18 121v34" stroke="#c8c9c1" stroke-width="2" stroke-dasharray="4 5"/>
+        <g transform="translate(0 156)">
+          <circle cx="18" cy="20" r="18" fill="#155f49"/>
+          <text x="18" y="25" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="800">3</text>
+          <text x="54" y="18" fill="#14201b" font-size="16" font-weight="720">Execute in an isolated worktree</text>
+          <text x="54" y="39" fill="#5f6f67" font-size="12">Codex, Claude Code, or an OpenAI-compatible model</text>
+          <rect x="565" y="7" width="118" height="27" rx="13" fill="#ebe8df"/>
+          <text x="624" y="25" text-anchor="middle" fill="#425149" font-size="10" font-weight="750">BOUNDED</text>
+        </g>
+        <path d="M18 199v34" stroke="#c8c9c1" stroke-width="2" stroke-dasharray="4 5"/>
+        <g transform="translate(0 234)">
+          <circle cx="18" cy="20" r="18" fill="#155f49"/>
+          <path d="M10 20l6 6 11-14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="54" y="18" fill="#14201b" font-size="16" font-weight="720">Read the Draft PR back</text>
+          <text x="54" y="39" fill="#5f6f67" font-size="12">URL, draft state, branch, commit, title, and evidence</text>
+          <rect x="565" y="7" width="118" height="27" rx="13" fill="#dcebe3"/>
+          <text x="624" y="25" text-anchor="middle" fill="#155f49" font-size="10" font-weight="750">VERIFIED</text>
+        </g>
+      </g>
+
+      <rect x="36" y="466" width="698" height="1" fill="#d9d7cc"/>
+      <text x="36" y="493" fill="#5f6f67" font-size="12">npm start</text>
+      <text x="734" y="493" text-anchor="end" fill="#155f49" font-size="12" font-weight="750">LOCAL-FIRST · DEFAULT-DENY</text>
     </g>
   </g>
-  <rect x="0" y="624" width="1440" height="16" fill="url(#accent)" opacity="0.85"/>
 </svg>
