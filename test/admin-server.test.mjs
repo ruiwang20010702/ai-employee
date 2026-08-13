@@ -34,6 +34,7 @@ test("个人工作台脚本可解析并展示四项个人闭环", () => {
   assert.match(personalDashboardHtml, /项目接入向导/u);
   assert.match(personalDashboardHtml, /可用配方/u);
   assert.match(personalDashboardHtml, /本周返还/u);
+  assert.match(personalDashboardHtml, /本周工作返还队列/u);
   assert.match(personalDashboardHtml, /周目标进度/u);
   assert.match(personalDashboardHtml, /本周已验证自动化率/u);
   assert.match(script, /\/api\/projects\/onboarding/u);
@@ -45,6 +46,9 @@ test("个人工作台脚本可解析并展示四项个人闭环", () => {
   assert.match(personalDashboardHtml, /工作台不会替你扩大权限/u);
   assert.match(script, /sync\.sourcePaths/u);
   assert.match(script, /conflictsPendingReview/u);
+  assert.match(script, /weeklyDelegationCard/u);
+  assert.match(script, /只规划，不执行/u);
+  assert.match(script, /未验证配方不计入预计返还/u);
 });
 
 test("项目接口只读展示自动记忆授权、同步状态和待审例外", async () => {
@@ -57,7 +61,8 @@ test("项目接口只读展示自动记忆授权、同步状态和待审例外",
     requesters: ["owner"],
     profile: {
       objective: "持续更新项目记忆",
-      successCriteria: [], milestones: [], collaborationObjects: [], selectedRecipeIds: [],
+      successCriteria: [], milestones: [], collaborationObjects: [],
+      selectedRecipeIds: ["project-memory-update"],
       memoryScope: { allowedTypes: ["project", "principle"], retentionDays: 90 },
     },
     capabilities: {
@@ -79,7 +84,16 @@ test("项目接口只读展示自动记忆授权、同步状态和待审例外",
     source_type: "historical_project_import", statement: "待审决策",
     scope: { factKey: "decision.release" },
   }];
-  store.listTimeReturns = async () => [];
+  store.listTimeReturns = async () => [{
+    projectId: "project_1",
+    workPlanId: "completed-plan",
+    recipeId: "project-memory-update",
+    baselineMinutes: 60,
+    humanActiveMinutes: 10,
+    returnedMinutes: 50,
+    status: "confirmed",
+    confirmedAt: "2026-08-13T01:00:00.000Z",
+  }];
   store.getCheckpoint = async (key) => key.endsWith(":status")
     ? JSON.stringify({
         state: "review_required",
@@ -96,7 +110,14 @@ test("项目接口只读展示自动记忆授权、同步状态和待审例外",
     store,
     config,
     manifestLoader: async () => new Map([[manifest.projectId, manifest]]),
-    recipeLoader: async () => new Map(),
+    recipeLoader: async () => new Map([["project-memory-update", {
+      id: "project-memory-update",
+      name: "项目记忆更新",
+      baselineMinutes: 60,
+      baselineMethod: "user_confirmed",
+      inputs: [],
+      steps: [{ capability: "project_memory_proposal" }],
+    }]]),
   });
   const base = `http://127.0.0.1:${service.server.address().port}`;
   try {
@@ -104,7 +125,8 @@ test("项目接口只读展示自动记忆授权、同步状态和待审例外",
       headers: { authorization: "Bearer read-secret" },
     });
     assert.equal(response.status, 200);
-    const [project] = (await response.json()).items;
+    const body = await response.json();
+    const [project] = body.items;
     assert.equal(project.memory.proposed, 1);
     assert.equal(project.memorySync.mode, "automatic");
     assert.equal(project.memorySync.autoConfirm, true);
@@ -112,6 +134,29 @@ test("项目接口只读展示自动记忆授权、同步状态和待审例外",
     assert.equal(project.memorySync.state, "review_required");
     assert.equal(project.memorySync.sourceDigestPrefix, "bbbbbbbbbbbb");
     assert.equal(project.memorySync.reviewRequired, 1);
+    assert.equal(body.weeklyDelegation.weeklyTargetMinutes, 480);
+    assert.equal(body.weeklyDelegation.weeklyReturnedMinutes, 50);
+    assert.equal(body.weeklyDelegation.remainingMinutes, 430);
+    assert.equal(body.weeklyDelegation.executionEnabled, false);
+    assert.equal(body.weeklyDelegation.items[0].recipeId, "project-memory-update");
+    assert.equal(body.weeklyDelegation.items[0].evidenceStatus, "verified_history");
+    assert.equal(body.weeklyDelegation.items[0].conservativeReturnedMinutes, 50);
+    assert.equal(
+      body.weeklyDelegation.items[0].executionPath,
+      "global_execution_disabled",
+    );
+    const weeklyResponse = await fetch(`${base}/api/weekly-plan`, {
+      headers: { authorization: "Bearer read-secret" },
+    });
+    assert.equal(weeklyResponse.status, 200);
+    const weekly = await weeklyResponse.json();
+    assert.equal(weekly.weeklyReturnedMinutes, 50);
+    assert.equal(weekly.remainingMinutes, 430);
+    assert.equal(weekly.items[0].recipeId, "project-memory-update");
+    assert.doesNotMatch(
+      JSON.stringify(weekly),
+      /持续更新项目记忆|待审决策|successCriteria|memorySync/u,
+    );
   } finally {
     await service.stop("test");
   }

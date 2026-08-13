@@ -95,7 +95,7 @@ and sees whether time was actually returned.
 | Historical project import | Bind existing project files to deduplicated, reviewable memory candidates | Preview first; exact confirmation creates candidates only, never confirmed facts |
 | Project memory sync | Re-scan authorized files with Codex or Claude Code and keep durable facts current | Global capability plus bounded project authorization; only source-bound, conflict-free facts may auto-confirm |
 | Recipe library | Repeatable workflows instead of planning the same work from every message | Five versioned built-in recipes; durable project-memory updates use a separate evidence-bound recipe |
-| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, and triggers in one view | Implemented in the local personal console |
+| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, triggers, and the next best work to delegate | Unreleased 0.6 candidate: the local console and read-only Codex tool rank a weekly delegation queue by confirmed outcomes; they plan only and never treat an unverified recipe baseline as time returned |
 | Time-return dashboard | Evidence-backed minutes saved and automation coverage, confirmed by the user | Current local week starts Monday; all-time audit remains available, while the north-star progress counts only this week's confirmed recipe outcomes |
 | Proactive mode | Scheduled or event-triggered work with daily limits, cooldowns, and idempotency | Implemented; every trigger is created disabled |
 | Meeting to execution | Notes → document → proposed decision memory → task → follow-up calendar | Implemented as an approval-bound recipe |
@@ -418,6 +418,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [x] Feishu Open Platform adapter without a DWS dependency
 - [x] Claude Code and direct model-provider runtime contracts
 - [x] Personal project onboarding, recipes, cockpit, and verified time-return ledger
+- [x] Unreleased 0.6 candidate: evidence-ranked weekly delegation queue toward the eight-hour goal, without silently executing work or counting unverified estimates
 - [x] Proactive triggers, meeting-to-execution, and GitHub draft-PR delivery loops
 - [x] Versioned workspace/event adapter contracts and community examples
 - [x] Governed Work Graph v1 production implementation: typed nodes, allowlisted edges, recipe content binding, public Schema, and deterministic SQLite/PostgreSQL projections

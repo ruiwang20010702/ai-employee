@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 
 const execFileAsync = promisify(execFile);
-export const pluginVersion = "0.5.0";
+export const pluginVersion = "0.6.0";
 const statusResourceUri = "ui://foursday/status.html";
 const allowedAdminPaths = new Set([
   "/api/overview",
@@ -13,6 +13,7 @@ const allowedAdminPaths = new Set([
   "/api/plans",
   "/api/takeover",
   "/api/capabilities",
+  "/api/weekly-plan",
 ]);
 
 const statusPanelHtml = String.raw`<!doctype html>
@@ -137,6 +138,13 @@ export function createAdminReader({
       throw stableError("Foursday admin service is unavailable");
     }
     if (!response.ok) {
+      if (path === "/api/weekly-plan" && response.status === 404) {
+        return {
+          available: false,
+          reason: "weekly_plan_unavailable",
+          items: [],
+        };
+      }
       throw stableError(response.status === 401
         ? "Foursday read credential was rejected"
         : "Foursday admin request failed");
@@ -266,6 +274,109 @@ function capabilityItems(value) {
   };
 }
 
+function safeMinute(value) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 && number <= 10_080
+    ? number
+    : 0;
+}
+
+function validAggregateMinute(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000;
+}
+
+function safeIso(value) {
+  if (typeof value !== "string") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function safeList(value, limit = 30) {
+  return (Array.isArray(value) ? value : [])
+    .slice(0, limit)
+    .map((item) => String(item ?? "").slice(0, 100));
+}
+
+function weeklyPlan(value) {
+  if (value?.available === false && value?.reason === "weekly_plan_unavailable") {
+    return {
+      available: false,
+      reason: "weekly_plan_unavailable",
+      items: [],
+    };
+  }
+  const weekly = value;
+  const weekStart = safeIso(weekly?.weekStart);
+  const weekEnd = safeIso(weekly?.weekEnd);
+  const valid = weekly && typeof weekly === "object" && !Array.isArray(weekly) &&
+    weekStart && weekEnd && new Date(weekStart) < new Date(weekEnd) &&
+    validAggregateMinute(weekly.weeklyTargetMinutes) &&
+    validAggregateMinute(weekly.weeklyReturnedMinutes) &&
+    validAggregateMinute(weekly.remainingMinutes) &&
+    validAggregateMinute(weekly.projectedVerifiedReturnedMinutes) &&
+    validAggregateMinute(weekly.remainingAfterVerifiedQueueMinutes) &&
+    weekly.remainingMinutes === Math.max(
+      0,
+      weekly.weeklyTargetMinutes - weekly.weeklyReturnedMinutes,
+    ) &&
+    weekly.remainingAfterVerifiedQueueMinutes <= weekly.remainingMinutes &&
+    weekly.targetMet === (weekly.remainingMinutes === 0) &&
+    typeof weekly.executionEnabled === "boolean" &&
+    weekly.evidenceBoundary === "confirmed_recipe_outcomes_only" &&
+    weekly.recommendationBoundary === "planning_only_no_execution" &&
+    Array.isArray(weekly.items) && Array.isArray(weekly.inProgress) &&
+    Array.isArray(weekly.blocked);
+  if (!valid) {
+    return {
+      available: false,
+      reason: "weekly_plan_unavailable",
+      items: [],
+    };
+  }
+  const allowedEvidenceStatuses = new Set(["verified_history", "needs_validation"]);
+  const allowedExecutionPaths = new Set([
+    "global_execution_disabled",
+    "approval_required_after_instantiation",
+    "project_policy_after_instantiation",
+  ]);
+  const items = (Array.isArray(weekly.items) ? weekly.items : []).slice(0, 8).map((item) => ({
+    projectId: String(item.projectId ?? "").slice(0, 100),
+    projectName: String(item.projectName ?? "").slice(0, 100),
+    recipeId: String(item.recipeId ?? "").slice(0, 100),
+    recipeName: String(item.recipeName ?? "").slice(0, 100),
+    requiredInputs: safeList(item.requiredInputs),
+    requiredCapabilities: safeList(item.requiredCapabilities),
+    approvalRequired: Boolean(item.approvalRequired),
+    executionPath: allowedExecutionPaths.has(item.executionPath)
+      ? item.executionPath
+      : "unavailable",
+    evidenceStatus: allowedEvidenceStatuses.has(item.evidenceStatus)
+      ? item.evidenceStatus
+      : "unavailable",
+    evidenceSamples: safeMinute(item.evidenceSamples),
+    conservativeReturnedMinutes: item.conservativeReturnedMinutes == null
+      ? null
+      : safeMinute(item.conservativeReturnedMinutes),
+  }));
+  return {
+    available: true,
+    weekStart,
+    weekEnd,
+    weeklyTargetMinutes: weekly.weeklyTargetMinutes,
+    weeklyReturnedMinutes: weekly.weeklyReturnedMinutes,
+    remainingMinutes: weekly.remainingMinutes,
+    targetMet: weekly.targetMet,
+    executionEnabled: weekly.executionEnabled,
+    projectedVerifiedReturnedMinutes: weekly.projectedVerifiedReturnedMinutes,
+    remainingAfterVerifiedQueueMinutes: weekly.remainingAfterVerifiedQueueMinutes,
+    evidenceBoundary: weekly.evidenceBoundary,
+    recommendationBoundary: weekly.recommendationBoundary,
+    inProgressCount: Array.isArray(weekly.inProgress) ? weekly.inProgress.length : 0,
+    blockedCount: Array.isArray(weekly.blocked) ? weekly.blocked.length : 0,
+    items,
+  };
+}
+
 const toolDefinitions = Object.freeze([
   { name: "get_status", title: "查看 Foursday 状态", description: "读取本机 Foursday 当前健康、暂停状态和待处理数量。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
   { name: "show_status_panel", title: "显示 Foursday 状态卡片", description: "读取当前状态并以内嵌卡片呈现；宿主不支持组件时仍返回结构化结果。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false }, _meta: { ui: { resourceUri: statusResourceUri }, "openai/outputTemplate": statusResourceUri } },
@@ -273,6 +384,7 @@ const toolDefinitions = Object.freeze([
   { name: "list_work_plans", title: "查看工作计划", description: "读取最多 30 个近期工作计划和步骤状态，不执行计划。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
   { name: "list_takeovers", title: "查看人工接管状态", description: "读取需要人工核对、停止或接管的计划状态和当前证据。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
   { name: "list_capabilities", title: "查看授权能力", description: "读取当前全局开关和项目能力配置；配置不等于执行结果。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
+  { name: "get_weekly_plan", title: "查看本周工作返还计划", description: "按本人确认的历史结果读取本周剩余目标和最多 8 条受控委托建议；只规划，不创建或执行计划。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
   { name: "open_admin_console", title: "打开 Foursday 管理台", description: "返回本机完整管理台入口，用于人工审批、暂停和深度核对。", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
 ]);
 
@@ -325,6 +437,21 @@ export function createMcpHandler({ readAdmin = createAdminReader() } = {}) {
       if (name === "list_capabilities") {
         const result = capabilityItems(await readAdmin("/api/capabilities"));
         return toolResult(result, `当前返回 ${result.projects.length} 个项目的能力配置。`);
+      }
+      if (name === "get_weekly_plan") {
+        const result = weeklyPlan(await readAdmin("/api/weekly-plan"));
+        if (!result.available) {
+          return toolResult(
+            result,
+            "本机 Foursday 服务尚未提供本周工作返还计划；请先升级服务并重新核验，只规划，不执行。",
+          );
+        }
+        return toolResult(
+          result,
+          result.targetMet
+            ? `本周已返还 ${result.weeklyReturnedMinutes} 分钟，目标已完成；只规划，不执行。`
+            : `本周已返还 ${result.weeklyReturnedMinutes} 分钟，还差 ${result.remainingMinutes} 分钟，返回 ${result.items.length} 条建议；只规划，不执行。`,
+        );
       }
       if (name === "open_admin_console") {
         return {

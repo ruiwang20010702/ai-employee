@@ -43,7 +43,7 @@ export const personalDashboardHtml = `<!doctype html>
 <script nonce="__NONCE__">
 const byId=id=>document.getElementById(id);
 const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
-let state={projects:[],recipes:[],timeReturns:[],triggers:[]};
+let state={projects:[],recipes:[],timeReturns:[],triggers:[],weeklyDelegation:null};
 async function api(path,{method='GET',body,write=false}={}){
   const headers={Authorization:'Bearer '+sessionStorage.getItem('foursday-read')};
   if(body)headers['Content-Type']='application/json';
@@ -92,6 +92,20 @@ function projectCard(project){
   const coverage=project.timeReturn.weeklyAutomationCoverage==null?'—':Math.round(project.timeReturn.weeklyAutomationCoverage*1000)/10+'%';
   return '<article class="card"><div class="row"><div><h2>'+escapeHtml(project.name)+'</h2><p>'+escapeHtml(project.objective||'尚未设置目标')+'</p></div><span class="pill">'+project.plans.active+' 个进行中</span></div><div class="grid"><div class="metric">里程碑<strong>'+project.milestones.length+'</strong></div><div class="metric">正式记忆<strong>'+project.memory.confirmed+'</strong></div><div class="metric">决策 / 风险<strong>'+project.memory.decisions+' / '+project.memory.risks+'</strong></div><div class="metric">本周返还<strong>'+project.timeReturn.weeklyReturnedHours+'h</strong></div><div class="metric">本周已验证自动化率<strong>'+coverage+'</strong></div></div>'+projectDetails(project)+'<h3>可用配方</h3>'+recipeCards(project)+'<h3>主动工作</h3>'+triggerRows(project)+timeReturnCandidates(project)+'<p class="hint">本周从周一开始；自动化率只统计本周有完整证据并经本人确认的配方基线，不代表全部工作。</p><p class="hint">成功标准：'+escapeHtml(project.successCriteria.join('；')||'尚未设置')+'</p></article>';
 }
+function weeklyDelegationCard(){
+  const weekly=state.weeklyDelegation;if(!weekly)return '';
+  const hours=Math.round(weekly.remainingMinutes/6)/10;
+  const projected=Math.round(weekly.projectedVerifiedReturnedMinutes/6)/10;
+  if(weekly.targetMet)return '<article class="card"><h2>本周工作返还队列</h2><p><span class="pill">本周目标已完成</span> 已返还 '+Math.round(weekly.weeklyReturnedMinutes/6)/10+' 小时。</p><p class="hint">队列不会为了增加数字而重复推荐工作。</p></article>';
+  const rows=(weekly.items||[]).slice(0,8).map(item=>{
+    const evidence=item.evidenceStatus==='verified_history'?'保守预计返还 '+Math.round(item.conservativeReturnedMinutes/6)/10+'h · '+item.evidenceSamples+' 条本人确认记录':'尚无本人确认的返还记录 · 本次只用于验证基线';
+    const gate=weekly.executionEnabled?(item.approvalRequired?' · 需要审批':' · 可按项目策略进入计划'):' · 计划执行仍关闭';
+    return '<div class="recipe"><strong>'+escapeHtml(item.projectName)+' · '+escapeHtml(item.recipeName)+'</strong><p class="hint">'+escapeHtml(evidence+gate)+'</p><button class="btn" data-recipe="'+escapeHtml(item.recipeId)+'" data-project="'+escapeHtml(item.projectId)+'">生成受控计划</button></div>';
+  }).join('');
+  const pending=weekly.remainingAfterVerifiedQueueMinutes>0?'按已有证据排完后仍差 '+Math.round(weekly.remainingAfterVerifiedQueueMinutes/6)/10+'h；需要验证更多配方或继续由本人完成。':'已有证据队列覆盖本周剩余目标，但只有完成、回读并由本人确认后才计入。';
+  const exclusions='进行中 '+(weekly.inProgress||[]).length+' 项 · 权限阻断 '+(weekly.blocked||[]).length+' 项';
+  return '<article class="card"><div class="row"><div><h2>本周工作返还队列</h2><p>距离 8 小时目标还差 '+hours+'h；已验证候选保守覆盖 '+projected+'h。</p></div><span class="pill">只规划，不执行</span></div>'+(rows?'<div class="recipes">'+rows+'</div>':'<p class="hint">暂无可推荐配方。先接入项目、选择配方，或等待正在进行的计划完成。</p>')+'<p class="hint">'+escapeHtml(pending)+' 未验证配方不计入预计返还；禁用能力和活动中的同配方不会重复推荐。</p><p class="hint">'+escapeHtml(exclusions)+'</p></article>';
+}
 function render(){
   const proposed=state.timeReturns.filter(item=>item.status==='proposed');
   const returnedMinutes=state.projects.reduce((sum,item)=>sum+item.timeReturn.weeklyReturnedMinutes,0);
@@ -99,12 +113,12 @@ function render(){
   const coverage=baselineMinutes===0?'—':Math.round(returnedMinutes/baselineMinutes*1000)/10+'%';
   const targetProgress=Math.min(100,Math.round(returnedMinutes/480*1000)/10)+'%';
   byId('summary').innerHTML=[['项目',state.projects.length],['已完成计划',state.projects.reduce((sum,item)=>sum+item.plans.completed,0)],['待确认返还',proposed.length],['本周返还小时',Math.round(returnedMinutes/6)/10],['周目标进度',targetProgress],['本周已验证自动化率',coverage]].map(item=>'<div class="metric">'+item[0]+'<strong>'+item[1]+'</strong></div>').join('');
-  byId('projects').innerHTML=state.projects.map(projectCard).join('')||'<div class="empty">还没有项目。点击“接入项目”，10 分钟内完成目标、记忆范围、配方和安全默认能力配置。</div>';
+  byId('projects').innerHTML=weeklyDelegationCard()+(state.projects.map(projectCard).join('')||'<div class="empty">还没有项目。点击“接入项目”，10 分钟内完成目标、记忆范围、配方和安全默认能力配置。</div>');
   if(proposed.length)byId('projects').insertAdjacentHTML('afterbegin','<article class="card"><h2>待确认的时间返还</h2>'+proposed.map(item=>'<p><strong>'+item.returnedMinutes+' 分钟</strong> · '+escapeHtml(item.recipeId)+' <button class="btn" data-time="'+escapeHtml(item.id)+'" data-decision="confirmed">确认</button> <button class="btn" data-time="'+escapeHtml(item.id)+'" data-decision="rejected">不计入</button></p>').join('')+'<p class="hint">只有完整回读证据与本人确认都成立，才计入总数。</p></article>');
 }
 async function load(){
   const result=await Promise.all([api('/api/projects'),api('/api/recipes'),api('/api/time-returns'),api('/api/triggers')]);
-  state={projects:result[0].items,recipes:result[1].items,timeReturns:result[2].items,triggers:result[3].items};
+  state={projects:result[0].items,weeklyDelegation:result[0].weeklyDelegation,recipes:result[1].items,timeReturns:result[2].items,triggers:result[3].items};
   render();
 }
 byId('enter').onclick=async()=>{

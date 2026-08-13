@@ -143,9 +143,13 @@ test("V2.3 个人工作闭环和社区扩展在中英文文档统一", async () 
   for (const value of ["Project onboarding", "Recipe library", "Project cockpit", "Time-return dashboard", "Proactive mode"]) {
     assert.match(readme, new RegExp(value, "u"));
   }
+  assert.match(readme, /weekly delegation queue/u);
   for (const value of ["项目接入向导", "工作配方库", "项目驾驶舱", "时间返还仪表盘", "主动工作模式"]) {
     assert.match(chinese, new RegExp(value, "u"));
   }
+  assert.match(chinese, /本周工作返还队列/u);
+  assert.match(requirements, /未验证配方只标记为验证候选，不计入覆盖量/u);
+  assert.match(overview, /evidence-ranked weekly delegation queue/u);
   for (const value of ["## 6.10", "## 6.11", "## 6.12", "## 6.13", "## 6.14", "## 6.15"]) {
     assert.ok(requirements.includes(value));
   }
