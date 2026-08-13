@@ -136,7 +136,7 @@ With Node.js 22 or 24 installed, launch the reviewed v0.5 Web flow directly
 from its immutable GitHub commit:
 
 ```bash
-npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#3577615d906f54689c38f565b7c8b62d92a27f43" foursday start --pilot-sha 3577615d906f54689c38f565b7c8b62d92a27f43
+npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#581bac466d4d9288079b52a180be2310974caf88" foursday start --pilot-sha 581bac466d4d9288079b52a180be2310974caf88
 ```
 
 Open the printed loopback URL. The command downloads and runs that exact public
@@ -231,9 +231,9 @@ The equivalent manual fallback is:
 ```bash
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
-git fetch upstream codex/v0.5-candidate
-git merge-base --is-ancestor 3577615d906f54689c38f565b7c8b62d92a27f43 FETCH_HEAD
-git switch --create pilot-v0.5-3577615 3577615d906f54689c38f565b7c8b62d92a27f43
+git fetch upstream main
+git merge-base --is-ancestor 581bac466d4d9288079b52a180be2310974caf88 FETCH_HEAD
+git switch --create pilot-v0.5-581bac4 581bac466d4d9288079b52a180be2310974caf88
 npm ci --ignore-scripts
 npm start
 ```
@@ -243,7 +243,7 @@ only for optional intent and final feedback. You do not need to wait for a
 maintainer assignment. After readiness, **Create your unique pilot task**
 generates a random local pseudonym; you may keep it or choose another safe
 `tester-` alias. Foursday prepares a bounded GitHub Issue composer and fills the change request, base branch
-`codex/v0.5-candidate`, registered test `check`, and Draft PR title locally. It
+`main`, registered test `check`, and Draft PR title locally. It
 does not create the Issue: review and submit it yourself, then paste that new,
 unique Issue URL into the form. Before approval, verify that the Web page names
 your fork as the push source and `ruiwang20010702/foursday` as the Issue and

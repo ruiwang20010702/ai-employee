@@ -665,7 +665,7 @@ test("外部体验入口使用 fork 推送并把来源与上游目标纳入审�
   for (const value of [readme, pilot]) {
     assert.match(value, /gh repo fork ruiwang20010702\/foursday|fork as the push source/u);
     assert.match(value, /upstream/u);
-    assert.match(value, /codex\/v0\.5-candidate/u);
+    assert.match(value, /git fetch upstream main|base branch `main`/u);
     assert.match(value, /Issue #49/u);
     assert.match(value, /do not need to wait for a\s+maintainer|No maintainer assignment is\s+required/u);
   }

@@ -53,7 +53,7 @@ An external tester must not need upstream write access. The supported path is:
    synthetic task, then paste that new Issue URL into Foursday. Issue #49 is
    optional intake and final feedback only; it must not be reused as the work
    Issue.
-4. Verify the generated defaults: base branch `codex/v0.5-candidate`, registered
+4. Verify the generated defaults: base branch `main`, registered
    test `check`, the alias-bound change request, and Draft PR title.
 5. Before approval, verify that Foursday shows the fork as the push source and
    `ruiwang20010702/foursday` as the Issue and Draft PR target.

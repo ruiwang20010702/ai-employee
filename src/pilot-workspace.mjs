@@ -19,7 +19,7 @@ import { inspectActivationRepository } from "./activation-execution.mjs";
 const execFileAsync = promisify(execFile);
 const upstreamRepository = "ruiwang20010702/foursday";
 const upstreamUrl = `https://github.com/${upstreamRepository}.git`;
-const candidateBranch = "codex/v0.5-candidate";
+const candidateBranch = "main";
 
 function exactSha(value) {
   const normalized = String(value ?? "").trim();
