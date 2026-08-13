@@ -1,13 +1,26 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
+import { validateProjectManifest } from "../src/capability-policy.mjs";
 import { memoryDeletionConfirmation } from "../src/memory-portability.mjs";
 import { migrate } from "../src/migrate.mjs";
 import { createPostgresPool } from "../src/postgres.mjs";
 import { PostgresStore } from "../src/postgres-store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
+import { workPlanMemoryEvidenceScope } from "../src/work-evidence.mjs";
 import { capabilityBudgetForPlan } from "../src/capability-budget.mjs";
 import { buildGraphProjection, createGraphEdge, createGraphNode } from "../src/governed-work-graph.mjs";
+import {
+  applyProjectMemorySync,
+  previewProjectMemorySync,
+} from "../src/project-memory-sync.mjs";
+
+const execFileAsync = promisify(execFile);
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const temporaryDatabase = process.env.TEST_DATABASE_TEMP === "true";
@@ -68,6 +81,70 @@ async function fixture(t) {
   });
   return store;
 }
+
+integration("PostgreSQL 项目记忆自动同步按固定来源授权并自动确认低风险事实", async (t) => {
+  const store = await fixture(t);
+  const temporary = await mkdtemp(join(tmpdir(), "foursday-pg-memory-sync-"));
+  const root = await realpath(temporary);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("/usr/bin/git", ["init", "--quiet", root], {
+    env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+  });
+  await mkdir(join(root, "docs"));
+  await writeFile(
+    join(root, "docs", "decisions.md"),
+    "Every release requires target-system read-back.\n",
+  );
+  const project = validateProjectManifest({
+    version: 1,
+    projectId: "pg_memory_sync",
+    name: "PG memory sync",
+    rootDirectory: root,
+    requesters: ["owner"],
+    profile: {
+      objective: "Keep project memory current",
+      successCriteria: [], milestones: [], collaborationObjects: [], selectedRecipeIds: [],
+      memoryScope: { allowedTypes: ["principle"], retentionDays: 90 },
+    },
+    capabilities: {
+      project_memory_proposal: {
+        mode: "automatic",
+        allowedFactKeyPrefixes: ["principle."],
+        maxRetentionDays: 90,
+        sourcePaths: ["docs/decisions.md"],
+        autoConfirm: true,
+      },
+    },
+  });
+  const runtime = {
+    async generateArtifact() {
+      return {
+        runtimeId: "test-runtime",
+        output: JSON.stringify({ memories: [{
+          type: "principle",
+          statement: "Every release requires target-system read-back.",
+          factKey: "principle.release_readback",
+          sourceId: "source_0",
+          sourceQuote: "Every release requires target-system read-back.",
+          sensitivity: "internal",
+          confidence: 1,
+          retentionDays: 90,
+        }] }),
+      };
+    },
+  };
+  const generated = await previewProjectMemorySync({ project, store, runtime });
+  const result = await applyProjectMemorySync({
+    generated,
+    project,
+    store,
+    capabilities: new Set(["project_memory_proposal"]),
+  });
+  assert.equal(result.memoriesConfirmed, 1);
+  const [memory] = await store.listMemories({ projectId: project.projectId });
+  assert.equal(memory.status, "confirmed");
+  assert.equal(memory.updated_by, "system:project-memory-sync");
+});
 
 function graphFixture(tenantId, projectId = "graph_project") {
   const observedAt = "2026-08-12T08:00:00.000Z";
@@ -1304,6 +1381,59 @@ integration("PostgreSQL 正式记忆包含确认、来源、过期和撤销门�
   assert.equal((await store.searchMemories({ query: "验证" })).length, 0);
 });
 
+integration("PostgreSQL 历史项目记忆批量导入并发幂等且冲突不自动转正", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-13T00:00:00.000Z");
+  const base = {
+    type: "project",
+    subject: "legacy_project",
+    projectId: "legacy_project",
+    statement: "发布前必须完成目标系统回读。",
+    sourceType: "historical_project_import",
+    sourceId: "a".repeat(64),
+    sourceVersion: "a".repeat(64),
+    scope: {
+      factKey: "delivery.readback_rule",
+      sourcePath: "docs/history.md",
+      sourceQuoteSha256: "b".repeat(64),
+      importDigest: "c".repeat(64),
+    },
+    confidence: 1,
+    sensitivity: "internal",
+    expiresAt: new Date(now.getTime() + 90 * 86_400_000),
+    createdBy: "owner",
+  };
+  const results = await Promise.all([
+    store.proposeHistoricalProjectMemories([base], now),
+    store.proposeHistoricalProjectMemories([base], now),
+  ]);
+  assert.equal(results.flat().filter((result) => result.created).length, 1);
+  assert.equal(
+    results.flat().filter((result) => result.reason === "duplicate").length,
+    1,
+  );
+  const [candidate] = await store.listMemories({
+    projectId: "legacy_project",
+    status: "proposed",
+  });
+  assert.equal(candidate.source_type, "historical_project_import");
+  await store.confirmMemory(candidate.id, "owner", new Date(now.getTime() + 1_000));
+  const [conflict] = await store.proposeHistoricalProjectMemories([{
+    ...base,
+    statement: "发布门禁调整为仅运行本地检查。",
+    sourceId: "d".repeat(64),
+    sourceVersion: "d".repeat(64),
+    scope: {
+      ...base.scope,
+      sourceQuoteSha256: "e".repeat(64),
+      importDigest: "f".repeat(64),
+    },
+  }], new Date(now.getTime() + 2_000));
+  assert.equal(conflict.created, true);
+  assert.equal(conflict.conflictCount, 1);
+  assert.equal((await store.getMemory(conflict.id)).status, "proposed");
+});
+
 integration("PostgreSQL gbrain 记忆来源访问租约控制确认和检索", async (t) => {
   const store = await fixture(t);
   const now = new Date("2026-08-05T08:00:00.000Z");
@@ -2299,10 +2429,22 @@ integration("PostgreSQL 项目记忆候选绑定计划来源并保持幂等", as
       steps: [{ id: "research", capability: "research", description: "核对", expectedEvidence: "事实" }],
     },
   }));
+  const evidence = {
+    kind: "research_markdown",
+    sha256: "a".repeat(64),
+    verification: "source_checked",
+  };
+  await store.updateWorkPlanStep(plan.id, "research", {
+    status: "completed",
+    evidence,
+  });
   const input = {
     type: "project", subject: manifest.projectId, projectId: manifest.projectId,
     statement: "发布前必须完成安全检查。", sourceId: plan.plan_hash,
-    sourceVersion: "meeting-follow-up@1", scope: { factKey: "decision.release_gate" },
+    sourceVersion: "meeting-follow-up@1",
+    scope: workPlanMemoryEvidenceScope({
+      factKey: "decision.release_gate", stepId: "research", evidence,
+    }),
     confidence: 1, sensitivity: "internal",
     expiresAt: "2026-11-10T00:00:00.000Z", createdBy: "owner",
   };
@@ -2310,6 +2452,13 @@ integration("PostgreSQL 项目记忆候选绑定计划来源并保持幂等", as
   const second = await store.proposeWorkPlanMemory(input, new Date("2026-08-12T00:01:00.000Z"));
   assert.equal(first.created, true);
   assert.equal(second.created, false);
+  await assert.rejects(
+    store.proposeWorkPlanMemory({
+      ...input,
+      scope: { ...input.scope, evidenceSha256: "f".repeat(64) },
+    }),
+    /evidence is not verifiable/u,
+  );
   const personPreview = await store.previewPrivacyErasure({ personId: "owner" });
   assert.equal(personPreview.counts.memories, 1);
   assert.equal(await store.confirmMemory(first.id, "owner", new Date("2026-08-12T00:02:00.000Z")), "confirmed");

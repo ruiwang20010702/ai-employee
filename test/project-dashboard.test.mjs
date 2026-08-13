@@ -15,6 +15,15 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
         collaborationObjects: ["产品负责人"],
         selectedRecipeIds: ["daily-report"],
       },
+      capabilities: {
+        project_memory_proposal: {
+          mode: "automatic",
+          autoConfirm: true,
+          sourcePaths: ["README.md", "docs/decisions.md"],
+          allowedFactKeyPrefixes: ["decision.", "risk."],
+          maxRetentionDays: 90,
+        },
+      },
     },
     plans: [
       { id: "plan-1", objective: "交付方案", project_id: "project_1", status: "completed", updated_at: "2026-08-12T01:00:00Z", plan: { recipe: { id: "daily-report", baselineMinutes: 60 } } },
@@ -23,25 +32,51 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
     ],
     memories: [
       { id: "memory-1", project_id: "project_1", status: "confirmed", statement: "负责人已确认", updated_at: "2026-08-12T01:00:00Z", scope: { factKey: "project.decision.owner" } },
-      { project_id: "project_1", status: "proposed", scope: { factKey: "project.risk" } },
+      { id: "memory-2", project_id: "project_1", status: "proposed", source_type: "historical_project_import", statement: "负责人未确认", scope: { factKey: "project.decision.owner" } },
+      { id: "memory-3", project_id: "project_1", status: "proposed", source_type: "historical_project_import", statement: "供应商交付可能延期", scope: { factKey: "risk.vendor" } },
+      { id: "memory-4", project_id: "project_1", status: "confirmed", statement: "供应商交付可能延期", scope: { factKey: "risk.vendor" } },
     ],
-    timeReturns: [{ projectId: "project_1", returnedMinutes: 60, status: "confirmed" }],
+    timeReturns: [{
+      projectId: "project_1", baselineMinutes: 90, humanActiveMinutes: 30,
+      returnedMinutes: 60, status: "confirmed", updatedAt: "2026-08-12T02:30:00Z",
+    }],
     recipes: [{ id: "daily-report", name: "日报" }, { id: "code-delivery", name: "代码" }],
     planSteps: new Map([["plan-1", [{
       step_id: "draft", capability: "document_draft", status: "completed",
       evidence: { kind: "document_markdown", sha256: "a".repeat(64), verification: "nonempty" },
     }]]]),
+    memorySyncState: {
+      state: "review_required",
+      lastCheckedAt: "2026-08-13T01:00:00.000Z",
+      lastSuccessAt: "2026-08-13T01:00:00.000Z",
+      sourceDigest: "a".repeat(64),
+      candidatesCreated: 1,
+      memoriesConfirmed: 0,
+      reviewRequired: 1,
+      errorCode: null,
+    },
+    now: new Date("2026-08-13T06:00:00.000Z"),
   });
   assert.equal(dashboard.plans.total, 2);
   assert.equal(dashboard.plans.active, 1);
-  assert.equal(dashboard.memory.confirmed, 1);
+  assert.equal(dashboard.memory.confirmed, 2);
+  assert.equal(dashboard.memory.proposed, 2);
+  assert.equal(dashboard.memory.conflictsPendingReview, 1);
   assert.equal(dashboard.memory.decisions, 1);
   assert.deepEqual(dashboard.recipes.map((recipe) => recipe.id), ["daily-report"]);
   assert.equal(dashboard.timeReturn.returnedHours, 1);
+  assert.equal(dashboard.timeReturn.automationCoverage, 0.6667);
+  assert.equal(dashboard.timeReturn.weeklyReturnedHours, 1);
+  assert.equal(dashboard.timeReturn.weeklyAutomationCoverage, 0.6667);
   assert.equal(dashboard.plans.items[0].id, "plan-2");
   assert.equal(dashboard.deliverables[0].reference, "a".repeat(64));
   assert.equal(dashboard.memory.items[0].statement, "负责人已确认");
   assert.equal(dashboard.governedGraph.available, false);
+  assert.equal(dashboard.memorySync.authorized, true);
+  assert.equal(dashboard.memorySync.autoConfirm, true);
+  assert.equal(dashboard.memorySync.state, "review_required");
+  assert.equal(dashboard.memorySync.sourceDigestPrefix, "aaaaaaaaaaaa");
+  assert.deepEqual(dashboard.memorySync.sourcePaths, ["README.md", "docs/decisions.md"]);
 });
 
 test("项目驾驶舱只读呈现受治理工作图的对齐和变化解释", () => {

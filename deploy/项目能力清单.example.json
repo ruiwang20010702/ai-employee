@@ -25,6 +25,8 @@
       "mode": "disabled",
       "allowedFactKeyPrefixes": ["decision.", "risk.", "milestone."],
       "maxRetentionDays": 90,
+      "sourcePaths": ["README.md", "docs/decisions.md"],
+      "autoConfirm": false,
       "maxRuns": 3
     },
     "shared_document_write": {

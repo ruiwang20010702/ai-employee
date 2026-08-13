@@ -70,6 +70,19 @@ function normalizedStringSet(value, name, { min = 0, max = 30 } = {}) {
   return normalized;
 }
 
+function normalizedProjectSourcePaths(value, name) {
+  const paths = normalizedStringSet(value, name, { min: 0, max: 20 });
+  if (paths.some((path) => (
+    path.length > 2_000 ||
+    isAbsolute(path) ||
+    path.includes("\\") ||
+    path.split("/").some((part) => !part || part === "." || part === "..")
+  ))) {
+    throw new Error(`${name} must contain normalized project-relative paths`);
+  }
+  return paths;
+}
+
 function boundedInteger(value, name, fallback, maximum) {
   const normalized = Number(value ?? fallback);
   if (!Number.isSafeInteger(normalized) || normalized <= 0 || normalized > maximum) {
@@ -330,7 +343,10 @@ export function validateProjectManifest(input) {
     }
     if (
       name === "project_memory_proposal" &&
-      (mode !== "disabled" || rule.allowedFactKeyPrefixes != null)
+      (mode !== "disabled" ||
+        rule.allowedFactKeyPrefixes != null ||
+        rule.sourcePaths != null ||
+        rule.autoConfirm != null)
     ) {
       const prefixes = normalizedStringSet(
         rule.allowedFactKeyPrefixes,
@@ -347,6 +363,26 @@ export function validateProjectManifest(input) {
         90,
         365,
       );
+      capabilities[name].sourcePaths = rule.sourcePaths == null
+        ? []
+        : normalizedProjectSourcePaths(
+            rule.sourcePaths,
+            "project_memory_proposal.sourcePaths",
+          );
+      if (rule.autoConfirm != null && typeof rule.autoConfirm !== "boolean") {
+        throw new Error("project_memory_proposal.autoConfirm must be boolean");
+      }
+      capabilities[name].autoConfirm = rule.autoConfirm === true;
+      if (capabilities[name].autoConfirm && mode !== "automatic") {
+        throw new Error(
+          "project_memory_proposal.autoConfirm requires automatic mode",
+        );
+      }
+      if (capabilities[name].autoConfirm && capabilities[name].sourcePaths.length === 0) {
+        throw new Error(
+          "project_memory_proposal.autoConfirm requires fixed sourcePaths",
+        );
+      }
     }
     if (
       name === "shared_document_write" &&

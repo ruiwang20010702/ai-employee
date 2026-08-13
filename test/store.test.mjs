@@ -7,6 +7,7 @@ import test from "node:test";
 import { memoryDeletionConfirmation } from "../src/memory-portability.mjs";
 import { Store } from "../src/store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
+import { workPlanMemoryEvidenceScope } from "../src/work-evidence.mjs";
 import { buildGraphProjection, createGraphEdge, createGraphNode } from "../src/governed-work-graph.mjs";
 
 async function fixture(t) {
@@ -2000,10 +2001,22 @@ test("项目记忆候选绑定计划哈希、保持幂等且必须人工确认",
       steps: [{ id: "research", capability: "research", description: "核对", expectedEvidence: "事实" }],
     },
   }));
+  const evidence = {
+    kind: "research_markdown",
+    sha256: "a".repeat(64),
+    verification: "source_checked",
+  };
+  store.updateWorkPlanStep(plan.id, "research", {
+    status: "completed",
+    evidence,
+  });
   const input = {
     type: "project", subject: manifest.projectId, projectId: manifest.projectId,
     statement: "发布前必须完成安全检查。", sourceId: plan.plan_hash,
-    sourceVersion: "meeting-follow-up@1", scope: { factKey: "decision.release_gate" },
+    sourceVersion: "meeting-follow-up@1",
+    scope: workPlanMemoryEvidenceScope({
+      factKey: "decision.release_gate", stepId: "research", evidence,
+    }),
     confidence: 1, sensitivity: "internal",
     expiresAt: "2026-11-10T00:00:00.000Z", createdBy: "owner",
   };
@@ -2013,6 +2026,13 @@ test("项目记忆候选绑定计划哈希、保持幂等且必须人工确认",
   assert.equal(second.created, false);
   assert.equal(first.id, second.id);
   assert.equal(store.getMemory(first.id).status, "proposed");
+  assert.throws(
+    () => store.proposeWorkPlanMemory({
+      ...input,
+      scope: { ...input.scope, evidenceSha256: "f".repeat(64) },
+    }),
+    /evidence is not verifiable/u,
+  );
   const personPreview = store.previewPrivacyErasure({ personId: "owner" });
   assert.equal(personPreview.counts.memories, 1);
   assert.equal(store.confirmMemory(first.id, "owner", new Date("2026-08-12T00:02:00.000Z")), "confirmed");

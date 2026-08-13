@@ -70,9 +70,11 @@ flowchart TD
     F --> G{"Duplicate or conflict?"}
     G -->|"Duplicate"| H["Reuse existing candidate"]
     G -->|"Conflict"| I["Show old and new facts"]
-    G -->|"Clear"| J["Human confirmation"]
+    G -->|"Clear"| J{"Fixed-source low-risk auto-confirm explicitly authorized?"}
+    J -->|"No"| M["Human confirmation"]
+    J -->|"Yes"| L["Confirmed memory"]
     I --> K["Human explicitly selects replacement"]
-    J --> L["Confirmed memory"]
+    M --> L
     K --> L
 ```
 
@@ -88,6 +90,90 @@ Only confirmed, unexpired, non-revoked memory with a valid source and matching p
 - Revocation removes a fact from retrieval immediately.
 - Privacy erasure previews and binds the exact current data snapshot before deletion.
 - Security counters such as capability-budget usage are not reset by time-based privacy erasure.
+
+### Historical project import
+
+Foursday can onboard an existing Git repository and import selected historical
+facts without copying its whole archive into the prompt. Start from
+[`examples/historical-project-import.json`](../../examples/historical-project-import.json).
+Each candidate must reference a regular text file inside the canonical project
+root and include a short quote that is actually present in that file. The
+preview binds the project manifest, source hashes, quote hashes, accepted
+candidates, duplicates, conflicts, and skipped reasons into one confirmation
+digest.
+
+```bash
+# Read-only preview. No manifest or memory is written.
+AI_EMPLOYEE_CONFIG_FILE=.runtime/production.json \
+  npm run projects:import -- --bundle /absolute/path/history-import.json
+
+# Re-run against current files and database state, then create only proposed memories.
+AI_EMPLOYEE_CONFIG_FILE=.runtime/production.json \
+  npm run projects:import -- --bundle /absolute/path/history-import.json \
+  --apply --confirmation IMPORT-XXXXXXXXXXXX
+```
+
+Import rejects path traversal, symlinks, missing quotes, credential-shaped
+material, and sensitive person data. It is idempotent across retries. A
+conflict remains `proposed` until the owner explicitly chooses which confirmed
+fact it replaces. Long documents may remain in gbrain and be referenced through
+the existing exact-slug project authorization instead of being copied into
+formal memory.
+
+### Automatic project-memory sync
+
+Manual import is the bootstrap path, not the steady-state workflow. A project
+can grant `project_memory_proposal` once and pin the exact source files, allowed
+fact-key prefixes, maximum retention, and whether low-risk facts may be
+confirmed automatically:
+
+```json
+{
+  "mode": "automatic",
+  "allowedFactKeyPrefixes": ["decision.", "principle.", "milestone."],
+  "maxRetentionDays": 90,
+  "sourcePaths": ["README.md", "docs/decisions.md"],
+  "autoConfirm": true
+}
+```
+
+Writes require two independent gates: the global
+`AI_EMPLOYEE_ALLOWED_CAPABILITIES` list must include
+`project_memory_proposal`, and the individual project manifest must carry the
+bounded rule above. The default global configuration does not include it.
+
+```bash
+# Invoke the selected agent read-only and show a source-bound preview.
+AI_EMPLOYEE_CONFIG_FILE=.runtime/production.json \
+  npm run projects:memory:sync -- --project my-project --runtime codex
+
+# Apply the already-authorized policy. This does not send messages or run plans.
+AI_EMPLOYEE_CONFIG_FILE=.runtime/production.json \
+  npm run projects:memory:sync -- --project my-project --runtime codex --apply
+```
+
+Only copies of the fixed project-relative files are staged in the agent's
+temporary working directory. Every output still passes exact-quote,
+file-digest, credential, PII, scope, prefix, retention,
+duplicate, and conflict checks. `autoConfirm` applies only to confidence-1,
+non-confidential, conflict-free facts. Conflicts, sensitive output, source
+changes, and policy violations fail closed or stay in the review queue. With
+`approval_required`, applying a sync still requires the current `SYNC-...`
+preview confirmation. Scheduling this command is optional and never enables
+message sending, work-plan execution, or proactive work by itself.
+
+For a continuous local loop, run the dedicated worker. It hashes authorized
+sources before invoking a model, skips unchanged projects, and advances its
+checkpoint only after a successful database update:
+
+```bash
+AI_EMPLOYEE_CONFIG_FILE=.runtime/production.json \
+  npm run projects:memory:watch -- --interval-minutes 60
+```
+
+The worker does not load project manifests or invoke a model while the global
+capability is disabled, and ignores projects whose project-level memory mode is
+not `automatic`.
 
 ## Human takeover
 

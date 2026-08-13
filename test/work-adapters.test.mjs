@@ -20,6 +20,74 @@ import {
   createControlledWorkAdapters,
   createReadOnlyWorkAdapters,
 } from "../src/work-adapters.mjs";
+import { workEvidenceSha256 } from "../src/work-evidence.mjs";
+
+test("项目记忆候选必须绑定已完成文档证据且只持久化摘要", async () => {
+  let proposed = null;
+  const adapter = createControlledWorkAdapters({
+    codexPath: "/bin/false",
+    store: {
+      proposeWorkPlanMemory(input) {
+        proposed = input;
+        return { id: "memory-1", status: "proposed", created: true };
+      },
+    },
+  }).project_memory_proposal;
+  const plan = {
+    projectId: "project-1",
+    requesterId: "owner",
+    planHash: "a".repeat(64),
+    recipe: { id: "meeting-follow-up", version: 1 },
+    steps: [
+      { id: "draft", capability: "document_draft" },
+      {
+        id: "remember",
+        capability: "project_memory_proposal",
+        inputs: {
+          documentStepId: "draft",
+          statement: "发布前必须完成安全检查。",
+          factKey: "decision.release_gate",
+          retentionDays: 90,
+        },
+      },
+    ],
+  };
+  const manifest = {
+    profile: { memoryScope: { allowedTypes: ["project"] } },
+  };
+  const evidence = {
+    kind: "document_markdown",
+    content: "# 发布决策\n\n发布前必须完成安全检查。",
+    sha256: "b".repeat(64),
+    verification: "nonempty_bounded_output",
+  };
+  await adapter.preflight({ plan, step: plan.steps[1], manifest });
+  await assert.rejects(
+    adapter.execute({ plan, step: plan.steps[1], priorEvidence: {} }),
+    /requires verified document draft evidence/u,
+  );
+  const result = await adapter.execute({
+    plan,
+    step: plan.steps[1],
+    priorEvidence: { draft: evidence },
+  });
+  assert.equal(result.evidence.sourceStepId, "draft");
+  assert.equal(result.evidence.sourceEvidenceSha256, workEvidenceSha256(evidence));
+  assert.equal(proposed.scope.evidenceKind, "document_markdown");
+  assert.equal(proposed.scope.evidenceSha256, workEvidenceSha256(evidence));
+  assert.equal(JSON.stringify(proposed).includes(evidence.content), false);
+  await assert.rejects(
+    adapter.execute({
+      plan,
+      step: {
+        ...plan.steps[1],
+        inputs: { ...plan.steps[1].inputs, factKey: "invalid" },
+      },
+      priorEvidence: { draft: evidence },
+    }),
+    /valid fact key/u,
+  );
+});
 
 const execFileAsync = promisify(execFile);
 

@@ -14,7 +14,12 @@ import {
   splitMessageBursts,
 } from "./message-bundling.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "./memory-policy.mjs";
+import { assertWorkPlanMemoryEvidence } from "./work-evidence.mjs";
 import { validateAutomaticMemoryProposal } from "./memory-candidate.mjs";
+import {
+  historicalMemoryId,
+  validateHistoricalMemoryProposals,
+} from "./historical-memory.mjs";
 import { memoryDeletionConfirmation } from "./memory-portability.mjs";
 import { validateSourceAccessChange } from "./memory-source-access.mjs";
 import { analyzeMemoryConflicts, memoryFactKey } from "./memory-conflicts.mjs";
@@ -1907,6 +1912,19 @@ export class Store {
       ).get(memory.sourceId, memory.projectId);
       if (!plan) throw new Error("Work plan memory source is not verifiable");
       const factKey = String(memory.scope.factKey ?? "").trim();
+      const evidenceStepId = String(memory.scope.evidenceStepId ?? "").trim();
+      const evidenceRow = this.db.prepare(
+        `SELECT status, evidence_ciphertext FROM work_plan_steps
+         WHERE work_plan_id = ? AND step_id = ?`,
+      ).get(plan.id, evidenceStepId);
+      if (!evidenceRow?.evidence_ciphertext) {
+        throw new Error("Work plan memory evidence is not verifiable");
+      }
+      assertWorkPlanMemoryEvidence(memory.scope, {
+        stepId: evidenceStepId,
+        status: evidenceRow.status,
+        evidence: JSON.parse(this.cipher.decrypt(evidenceRow.evidence_ciphertext)),
+      });
       const id = `memory_plan_${createHash("sha256").update(`${memory.sourceId}\n${factKey}`).digest("hex").slice(0, 32)}`;
       const existing = this.getMemory(id);
       if (existing) return { created: false, id, status: existing.status };
@@ -2022,6 +2040,93 @@ export class Store {
           (item) => item.status === "confirmed" && item.statement.trim() !== statement,
         ).length,
       };
+    });
+  }
+
+  proposeHistoricalProjectMemories(inputs, now = new Date()) {
+    const memories = validateHistoricalMemoryProposals(inputs, now);
+    return this.transaction(() => {
+      const results = [];
+      for (const memory of memories) {
+        const subjectKey = this.cipher.fingerprint(memory.subject);
+        const factKey = memory.scope.factKey;
+        const comparable = this.db.prepare(
+          `SELECT * FROM memory_items
+           WHERE deleted_at IS NULL
+             AND status IN ('proposed', 'confirmed')
+             AND type = ? AND subject_key = ? AND project_id IS ?
+             AND (expires_at IS NULL OR expires_at > ?)
+           ORDER BY updated_at DESC`,
+        ).all(
+          memory.type,
+          subjectKey,
+          memory.projectId,
+          nowIso(now),
+        ).map((row) => memoryFromRow(row, this.cipher))
+          .filter((item) => memoryFactKey(item) === factKey);
+        const duplicate = comparable.find(
+          (item) => item.statement.trim() === memory.statement.trim(),
+        );
+        if (duplicate) {
+          results.push({
+            created: false,
+            id: duplicate.id,
+            reason: "duplicate",
+            conflictCount: 0,
+          });
+          continue;
+        }
+        const id = historicalMemoryId(memory);
+        const existing = this.getMemory(id);
+        if (existing) {
+          results.push({
+            created: false,
+            id,
+            reason: "existing_import_record",
+            conflictCount: 0,
+          });
+          continue;
+        }
+        const timestamp = nowIso(now);
+        this.db.prepare(
+          `INSERT INTO memory_items(
+            id, type, subject_key, subject_ciphertext, project_id,
+            statement_ciphertext, source_type, source_id_ciphertext,
+            source_version, source_access_status, source_access_reason,
+            scope_ciphertext, confidence, status,
+            sensitivity, expires_at, created_by, updated_by, supersedes_id,
+            created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,'not_required',NULL,?,?, 'proposed',?,?,?,?,NULL,?,?)`,
+        ).run(
+          id,
+          memory.type,
+          subjectKey,
+          this.cipher.encrypt(memory.subject),
+          memory.projectId,
+          this.cipher.encrypt(memory.statement),
+          memory.sourceType,
+          this.cipher.encrypt(memory.sourceId),
+          memory.sourceVersion,
+          this.cipher.encrypt(JSON.stringify(memory.scope)),
+          memory.confidence,
+          memory.sensitivity,
+          memory.expiresAt.toISOString(),
+          memory.createdBy,
+          memory.createdBy,
+          timestamp,
+          timestamp,
+        );
+        results.push({
+          created: true,
+          id,
+          status: "proposed",
+          conflictCount: comparable.filter(
+            (item) => item.status === "confirmed" &&
+              item.statement.trim() !== memory.statement.trim(),
+          ).length,
+        });
+      }
+      return results;
     });
   }
 

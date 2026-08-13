@@ -10,6 +10,7 @@ import { buildActivationPreview } from "./activation.mjs";
 import { Store } from "./store.mjs";
 import { createControlledWorkAdapters } from "./work-adapters.mjs";
 import { executeWorkPlan } from "./work-executor.mjs";
+import { workPlanMemoryEvidenceScope } from "./work-evidence.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
 import { safeCommandEnvironment } from "./controlled-command-runner.mjs";
 import { createStructuredArtifactRuntime } from "./artifact-runtime.mjs";
@@ -417,8 +418,11 @@ export class ActivationExecutionCoordinator {
       let timeReturn = null;
       if (execution.status === "completed") {
         session.timeline.deliveryCompletedAtMs = this.readMonotonicTime();
-        const pr = steps.find((step) => step.evidence?.kind === "verified_github_pr_draft")?.evidence;
-        if (!pr) throw new Error("Completed activation is missing Draft PR read-back evidence");
+        const prStep = steps.find((step) => step.evidence?.kind === "verified_github_pr_draft");
+        const pr = prStep?.evidence;
+        if (!pr || prStep.status !== "completed") {
+          throw new Error("Completed activation is missing Draft PR read-back evidence");
+        }
         memory = await session.store.proposeWorkPlanMemory({
           type: "project",
           subject: session.candidate.preview.project.projectId,
@@ -426,7 +430,11 @@ export class ActivationExecutionCoordinator {
           statement: `Draft PR #${pr.number} (${pr.url}) completed the approved GitHub Issue delivery at commit ${pr.commit}.`,
           sourceId: plan.plan_hash,
           sourceVersion: `${plan.plan.recipe.id}@${plan.plan.recipe.version}`,
-          scope: { factKey: "delivery.latest_draft_pr" },
+          scope: workPlanMemoryEvidenceScope({
+            factKey: "delivery.latest_draft_pr",
+            stepId: prStep.step_id,
+            evidence: pr,
+          }),
           confidence: 1,
           sensitivity: "internal",
           expiresAt: new Date(Date.now() + 90 * 86_400_000),

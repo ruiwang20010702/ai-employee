@@ -41,21 +41,119 @@ export function buildTimeReturnProposal({
   };
 }
 
-export function summarizeTimeReturns(entries, { weeklyTargetMinutes = 480 } = {}) {
+function weeklyWindow(now, timeZoneOffsetMinutes) {
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) {
+    throw new Error("Time return summary now must be a valid date");
+  }
+  if (timeZoneOffsetMinutes == null) {
+    const start = new Date(now);
+    const daysSinceMonday = (start.getDay() + 6) % 7;
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - daysSinceMonday);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    return { start, end };
+  }
+  if (
+    !Number.isSafeInteger(timeZoneOffsetMinutes) ||
+    timeZoneOffsetMinutes < -14 * 60 ||
+    timeZoneOffsetMinutes > 14 * 60
+  ) {
+    throw new Error("Time return timezone offset must be between -840 and 840 minutes");
+  }
+  const shifted = new Date(now.getTime() + timeZoneOffsetMinutes * 60_000);
+  const daysSinceMonday = (shifted.getUTCDay() + 6) % 7;
+  const localStartMs = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() - daysSinceMonday,
+  );
+  const start = new Date(localStartMs - timeZoneOffsetMinutes * 60_000);
+  const end = new Date(start.getTime() + 7 * 86_400_000);
+  return { start, end };
+}
+
+function confirmedAt(entry) {
+  const value = entry.confirmedAt ?? entry.updatedAt;
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) {
+    throw new Error("Confirmed time return requires a valid confirmation timestamp");
+  }
+  return date;
+}
+
+export function summarizeTimeReturns(entries, {
+  weeklyTargetMinutes = 480,
+  now = new Date(),
+  timeZoneOffsetMinutes = null,
+} = {}) {
+  const window = weeklyWindow(now, timeZoneOffsetMinutes);
+  const targetMinutes = minutes(
+    weeklyTargetMinutes,
+    "weeklyTargetMinutes",
+    { allowZero: true },
+  );
   const confirmed = entries.filter((entry) => entry.status === "confirmed");
-  const returnedMinutes = confirmed.reduce(
-    (sum, entry) => sum + minutes(entry.returnedMinutes, "returnedMinutes", { allowZero: true }),
+  const weeklyConfirmed = confirmed.filter((entry) => {
+    const confirmedTime = confirmedAt(entry);
+    return confirmedTime >= window.start && confirmedTime < window.end;
+  });
+  let confirmedBaselineMinutes = 0;
+  let confirmedHumanActiveMinutes = 0;
+  let returnedMinutes = 0;
+  for (const entry of confirmed) {
+    const baseline = minutes(entry.baselineMinutes, "baselineMinutes");
+    const human = minutes(entry.humanActiveMinutes, "humanActiveMinutes", { allowZero: true });
+    const returned = minutes(entry.returnedMinutes, "returnedMinutes", { allowZero: true });
+    if (human > baseline || returned !== baseline - human) {
+      throw new Error("Confirmed time return does not match its verified baseline");
+    }
+    confirmedBaselineMinutes += baseline;
+    confirmedHumanActiveMinutes += human;
+    returnedMinutes += returned;
+  }
+  const weeklyBaselineMinutes = weeklyConfirmed.reduce(
+    (total, entry) => total + minutes(entry.baselineMinutes, "baselineMinutes"),
+    0,
+  );
+  const weeklyHumanActiveMinutes = weeklyConfirmed.reduce(
+    (total, entry) => total + minutes(
+      entry.humanActiveMinutes,
+      "humanActiveMinutes",
+      { allowZero: true },
+    ),
+    0,
+  );
+  const weeklyReturnedMinutes = weeklyConfirmed.reduce(
+    (total, entry) => total + minutes(entry.returnedMinutes, "returnedMinutes", { allowZero: true }),
     0,
   );
   return {
     confirmedEntries: confirmed.length,
     proposedEntries: entries.filter((entry) => entry.status === "proposed").length,
+    confirmedBaselineMinutes,
+    confirmedHumanActiveMinutes,
     returnedMinutes,
     returnedHours: Math.round((returnedMinutes / 60) * 10) / 10,
-    weeklyTargetMinutes,
-    targetProgress: weeklyTargetMinutes === 0
+    automationCoverage: confirmedBaselineMinutes === 0
       ? null
-      : Math.min(1, returnedMinutes / weeklyTargetMinutes),
+      : Math.round((returnedMinutes / confirmedBaselineMinutes) * 10_000) / 10_000,
+    weekStart: window.start.toISOString(),
+    weekEnd: window.end.toISOString(),
+    weeklyConfirmedEntries: weeklyConfirmed.length,
+    weeklyBaselineMinutes,
+    weeklyHumanActiveMinutes,
+    weeklyReturnedMinutes,
+    weeklyReturnedHours: Math.round((weeklyReturnedMinutes / 60) * 10) / 10,
+    weeklyAutomationCoverage: weeklyBaselineMinutes === 0
+      ? null
+      : Math.round((weeklyReturnedMinutes / weeklyBaselineMinutes) * 10_000) / 10_000,
+    weeklyTargetMinutes: targetMinutes,
+    targetProgress: targetMinutes === 0
+      ? null
+      : Math.min(1, weeklyReturnedMinutes / targetMinutes),
     evidenceBoundary: "confirmed_verified_outcomes_only",
+    coverageBoundary: "confirmed_recipe_baseline_only",
+    targetBoundary: "confirmed_in_current_local_week_only",
   };
 }

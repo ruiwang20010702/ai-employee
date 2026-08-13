@@ -68,6 +68,17 @@ function timeReturnCandidates(project){
   if(!candidates.length)return '';
   return '<h3>可核销的已完成工作</h3>'+candidates.map(item=>'<p>'+escapeHtml(item.objective)+' · 基线 '+item.baselineMinutes+' 分钟 <button class="btn" data-propose-time="'+escapeHtml(item.workPlanId)+'" data-baseline="'+item.baselineMinutes+'">填写本人投入</button></p>').join('');
 }
+function memorySyncBlock(project){
+  const sync=project.memorySync||{};
+  if(!sync.authorized)return '<div class="wide"><h3>项目记忆自动同步</h3><p class="hint">尚未授权。需要先在项目清单固定来源文件、事实前缀和保留期；工作台不会替你扩大权限。</p></div>';
+  const labels={not_started:'尚未运行',synchronized:'已同步',unchanged:'来源未变化',review_required:'需要审阅',failed:'同步失败',unknown:'状态未知'};
+  const sources=(sync.sourcePaths||[]).map(path=>'<code>'+escapeHtml(path)+'</code>').join('、')||'未配置';
+  const policy=sync.mode==='automatic'?(sync.autoConfirm?'低风险事实可自动确认':'只自动形成候选'):'每次应用需摘要确认';
+  const timing=sync.lastCheckedAt?'最近检查 '+escapeHtml(sync.lastCheckedAt):'尚无同步记录';
+  const evidence=sync.sourceDigestPrefix?' · 来源摘要 '+escapeHtml(sync.sourceDigestPrefix)+'…':'';
+  const error=sync.errorCode?' · 错误 '+escapeHtml(sync.errorCode):'';
+  return '<div class="wide"><h3>项目记忆自动同步 <span class="pill">'+escapeHtml(labels[sync.state]||sync.state)+'</span></h3><p>授权来源：'+sources+'</p><p class="hint">策略：'+escapeHtml(policy)+' · 待审 '+escapeHtml(sync.reviewRequired||0)+' · 本轮确认 '+escapeHtml(sync.memoriesConfirmed||0)+'</p><p class="hint">'+timing+evidence+error+'</p><p class="hint">冲突和敏感内容只进入例外审查；此处只读，不会启动同步、发送消息或执行计划。</p></div>';
+}
 function projectDetails(project){
   const work=(project.plans.items||[]).slice(0,5).map(item=>'<li><span class="pill">'+escapeHtml(item.status)+'</span> '+escapeHtml(item.objective)+' · '+item.steps.completed+'/'+item.steps.total+' 步</li>').join('');
   const memory=(project.memory.items||[]).slice(0,5).map(item=>'<li>'+escapeHtml(item.factKey||'project.fact')+'：'+escapeHtml(item.statement)+'</li>').join('');
@@ -75,16 +86,19 @@ function projectDetails(project){
   const graph=project.governedGraph||{};
   const graphRows=(graph.explanations||[]).slice(0,5).map(item=>'<li>'+escapeHtml(item.planId)+' · 执行对齐：<span class="pill">'+escapeHtml(item.drift.status)+'</span> · 项目变化：'+escapeHtml(item.changes.status)+'</li>').join('');
   const graphBlock=graph.available?'<div class="wide"><h3>受治理工作图</h3><p class="hint">'+graph.nodeCount+' 个节点 · '+graph.edgeCount+' 条关系 · 对齐 '+graph.alignedPlans+' · 偏离 '+graph.driftedPlans+' · 证据不完整 '+graph.incompletePlans+'</p>'+(graphRows?'<ul>'+graphRows+'</ul>':'<p class="hint">尚无可解释的计划投影。</p>')+'<p class="hint">这里仅解释已有证据；授权、预算和审批仍以领域账本为准。</p></div>':'';
-  return '<div class="form"><div><h3>近期工作</h3>'+(work?'<ul>'+work+'</ul>':'<p class="hint">暂无工作计划</p>')+'</div><div><h3>项目记忆</h3>'+(memory?'<ul>'+memory+'</ul>':'<p class="hint">暂无经确认记忆</p>')+'</div><div class="wide"><h3>交付物证据</h3>'+(deliverables?'<ul>'+deliverables+'</ul>':'<p class="hint">暂无已验收交付物</p>')+'</div>'+graphBlock+'</div>';
+  return '<div class="form"><div><h3>近期工作</h3>'+(work?'<ul>'+work+'</ul>':'<p class="hint">暂无工作计划</p>')+'</div><div><h3>项目记忆</h3>'+(memory?'<ul>'+memory+'</ul>':'<p class="hint">暂无经确认记忆</p>')+'<p class="hint">待审候选 '+escapeHtml(project.memory.proposed||0)+' · 冲突 '+escapeHtml(project.memory.conflictsPendingReview||0)+'</p></div>'+memorySyncBlock(project)+'<div class="wide"><h3>交付物证据</h3>'+(deliverables?'<ul>'+deliverables+'</ul>':'<p class="hint">暂无已验收交付物</p>')+'</div>'+graphBlock+'</div>';
 }
 function projectCard(project){
-  return '<article class="card"><div class="row"><div><h2>'+escapeHtml(project.name)+'</h2><p>'+escapeHtml(project.objective||'尚未设置目标')+'</p></div><span class="pill">'+project.plans.active+' 个进行中</span></div><div class="grid"><div class="metric">里程碑<strong>'+project.milestones.length+'</strong></div><div class="metric">正式记忆<strong>'+project.memory.confirmed+'</strong></div><div class="metric">决策 / 风险<strong>'+project.memory.decisions+' / '+project.memory.risks+'</strong></div><div class="metric">返还时间<strong>'+project.timeReturn.returnedHours+'h</strong></div></div>'+projectDetails(project)+'<h3>可用配方</h3>'+recipeCards(project)+'<h3>主动工作</h3>'+triggerRows(project)+timeReturnCandidates(project)+'<p class="hint">成功标准：'+escapeHtml(project.successCriteria.join('；')||'尚未设置')+'</p></article>';
+  const coverage=project.timeReturn.weeklyAutomationCoverage==null?'—':Math.round(project.timeReturn.weeklyAutomationCoverage*1000)/10+'%';
+  return '<article class="card"><div class="row"><div><h2>'+escapeHtml(project.name)+'</h2><p>'+escapeHtml(project.objective||'尚未设置目标')+'</p></div><span class="pill">'+project.plans.active+' 个进行中</span></div><div class="grid"><div class="metric">里程碑<strong>'+project.milestones.length+'</strong></div><div class="metric">正式记忆<strong>'+project.memory.confirmed+'</strong></div><div class="metric">决策 / 风险<strong>'+project.memory.decisions+' / '+project.memory.risks+'</strong></div><div class="metric">本周返还<strong>'+project.timeReturn.weeklyReturnedHours+'h</strong></div><div class="metric">本周已验证自动化率<strong>'+coverage+'</strong></div></div>'+projectDetails(project)+'<h3>可用配方</h3>'+recipeCards(project)+'<h3>主动工作</h3>'+triggerRows(project)+timeReturnCandidates(project)+'<p class="hint">本周从周一开始；自动化率只统计本周有完整证据并经本人确认的配方基线，不代表全部工作。</p><p class="hint">成功标准：'+escapeHtml(project.successCriteria.join('；')||'尚未设置')+'</p></article>';
 }
 function render(){
-  const confirmed=state.timeReturns.filter(item=>item.status==='confirmed');
   const proposed=state.timeReturns.filter(item=>item.status==='proposed');
-  const returnedMinutes=confirmed.reduce((sum,item)=>sum+item.returnedMinutes,0);
-  byId('summary').innerHTML=[['项目',state.projects.length],['已完成计划',state.projects.reduce((sum,item)=>sum+item.plans.completed,0)],['待确认返还',proposed.length],['已返还小时',Math.round(returnedMinutes/6)/10]].map(item=>'<div class="metric">'+item[0]+'<strong>'+item[1]+'</strong></div>').join('');
+  const returnedMinutes=state.projects.reduce((sum,item)=>sum+item.timeReturn.weeklyReturnedMinutes,0);
+  const baselineMinutes=state.projects.reduce((sum,item)=>sum+item.timeReturn.weeklyBaselineMinutes,0);
+  const coverage=baselineMinutes===0?'—':Math.round(returnedMinutes/baselineMinutes*1000)/10+'%';
+  const targetProgress=Math.min(100,Math.round(returnedMinutes/480*1000)/10)+'%';
+  byId('summary').innerHTML=[['项目',state.projects.length],['已完成计划',state.projects.reduce((sum,item)=>sum+item.plans.completed,0)],['待确认返还',proposed.length],['本周返还小时',Math.round(returnedMinutes/6)/10],['周目标进度',targetProgress],['本周已验证自动化率',coverage]].map(item=>'<div class="metric">'+item[0]+'<strong>'+item[1]+'</strong></div>').join('');
   byId('projects').innerHTML=state.projects.map(projectCard).join('')||'<div class="empty">还没有项目。点击“接入项目”，10 分钟内完成目标、记忆范围、配方和安全默认能力配置。</div>';
   if(proposed.length)byId('projects').insertAdjacentHTML('afterbegin','<article class="card"><h2>待确认的时间返还</h2>'+proposed.map(item=>'<p><strong>'+item.returnedMinutes+' 分钟</strong> · '+escapeHtml(item.recipeId)+' <button class="btn" data-time="'+escapeHtml(item.id)+'" data-decision="confirmed">确认</button> <button class="btn" data-time="'+escapeHtml(item.id)+'" data-decision="rejected">不计入</button></p>').join('')+'<p class="hint">只有完整回读证据与本人确认都成立，才计入总数。</p></article>');
 }

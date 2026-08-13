@@ -20,6 +20,8 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.match(script, /memoryRows\(\)\)\+'<\/section>'/u);
   assert.match(script, /conflictIds\.length===0/u);
   assert.match(script, /candidate\?\.conflict\?\.conflicts\?\.find/u);
+  assert.match(script, /historical_project_import:'历史项目导入'/u);
+  assert.match(script, /sourceQuoteSha256/u);
   assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
 });
 
@@ -31,12 +33,88 @@ test("个人工作台脚本可解析并展示四项个人闭环", () => {
   assert.doesNotThrow(() => new Function(script));
   assert.match(personalDashboardHtml, /项目接入向导/u);
   assert.match(personalDashboardHtml, /可用配方/u);
-  assert.match(personalDashboardHtml, /返还时间/u);
+  assert.match(personalDashboardHtml, /本周返还/u);
+  assert.match(personalDashboardHtml, /周目标进度/u);
+  assert.match(personalDashboardHtml, /本周已验证自动化率/u);
   assert.match(script, /\/api\/projects\/onboarding/u);
   assert.match(script, /\/api\/time-returns/u);
   assert.match(script, /完整回读证据与本人确认/u);
   assert.match(script, /设为定时工作/u);
   assert.match(script, /\/api\/triggers/u);
+  assert.match(personalDashboardHtml, /项目记忆自动同步/u);
+  assert.match(personalDashboardHtml, /工作台不会替你扩大权限/u);
+  assert.match(script, /sync\.sourcePaths/u);
+  assert.match(script, /conflictsPendingReview/u);
+});
+
+test("项目接口只读展示自动记忆授权、同步状态和待审例外", async () => {
+  const { store, config } = fixture();
+  const manifest = {
+    version: 1,
+    projectId: "project_1",
+    name: "项目",
+    rootDirectory: "/tmp/project",
+    requesters: ["owner"],
+    profile: {
+      objective: "持续更新项目记忆",
+      successCriteria: [], milestones: [], collaborationObjects: [], selectedRecipeIds: [],
+      memoryScope: { allowedTypes: ["project", "principle"], retentionDays: 90 },
+    },
+    capabilities: {
+      project_memory_proposal: {
+        mode: "automatic",
+        expiresAt: null,
+        maxRuns: null,
+        timeoutMs: 120_000,
+        allowedFactKeyPrefixes: ["decision."],
+        maxRetentionDays: 90,
+        sourcePaths: ["docs/decisions.md"],
+        autoConfirm: true,
+      },
+    },
+  };
+  store.listWorkPlans = async () => [];
+  store.listMemories = async () => [{
+    id: "memory-1", project_id: "project_1", status: "proposed",
+    source_type: "historical_project_import", statement: "待审决策",
+    scope: { factKey: "decision.release" },
+  }];
+  store.listTimeReturns = async () => [];
+  store.getCheckpoint = async (key) => key.endsWith(":status")
+    ? JSON.stringify({
+        state: "review_required",
+        lastCheckedAt: "2026-08-13T01:00:00.000Z",
+        lastSuccessAt: "2026-08-13T01:00:00.000Z",
+        sourceDigest: "b".repeat(64),
+        candidatesCreated: 1,
+        memoriesConfirmed: 0,
+        reviewRequired: 1,
+        errorCode: null,
+      })
+    : null;
+  const service = await startAdminServer({
+    store,
+    config,
+    manifestLoader: async () => new Map([[manifest.projectId, manifest]]),
+    recipeLoader: async () => new Map(),
+  });
+  const base = `http://127.0.0.1:${service.server.address().port}`;
+  try {
+    const response = await fetch(`${base}/api/projects`, {
+      headers: { authorization: "Bearer read-secret" },
+    });
+    assert.equal(response.status, 200);
+    const [project] = (await response.json()).items;
+    assert.equal(project.memory.proposed, 1);
+    assert.equal(project.memorySync.mode, "automatic");
+    assert.equal(project.memorySync.autoConfirm, true);
+    assert.deepEqual(project.memorySync.sourcePaths, ["docs/decisions.md"]);
+    assert.equal(project.memorySync.state, "review_required");
+    assert.equal(project.memorySync.sourceDigestPrefix, "bbbbbbbbbbbb");
+    assert.equal(project.memorySync.reviewRequired, 1);
+  } finally {
+    await service.stop("test");
+  }
 });
 
 test("主动触发器默认停用、列表脱敏且启用受全局能力门禁", async () => {
@@ -331,7 +409,16 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     assert.equal(capabilityBody.global.find((item) => item.name === "work_plan_execution").enabled, false);
     const recipes = await fetch(`${base}/api/recipes`, { headers: read });
     assert.equal(recipes.status, 200);
-    assert.equal((await recipes.json()).items.length, 4);
+    assert.deepEqual(
+      (await recipes.json()).items.map((item) => item.id).sort(),
+      [
+        "code-delivery",
+        "daily-report",
+        "meeting-follow-up",
+        "project-follow-up",
+        "project-memory-update",
+      ],
+    );
     task.payload.messages = [{
       id: "source-message-1",
       senderName: "测试人",
