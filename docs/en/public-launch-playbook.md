@@ -16,6 +16,7 @@ Snapshot: **2026-08-13**. Re-check every number before publishing it.
 | Successful installation identities | 1 | CI, package downloads, and repeated maintainer retries do not create extra users |
 | GitHub Stars | 1 | A dated repository-counter snapshot, not a product-quality claim |
 | Forks | 2 | Public repository counter only; neither fork is counted as a completed external pilot |
+| Immutable pre-release | `v0.5.0-rc.1` | Git tag and GitHub pre-release both resolve to validated candidate `e272f92`; source archives, demo, and digest manifest are public |
 
 [Issue #49](https://github.com/ruiwang20010702/foursday/issues/49) and
 [Issue #50](https://github.com/ruiwang20010702/foursday/issues/50) are pinned so
@@ -77,7 +78,7 @@ two-sided evidence it remains `null`.
 |---|---|---|---|
 | Private pilot | Ten people the maintainer can support directly | Immutable one-command launch, bounded readiness, explicit approvals, Draft PR read-back | Try one synthetic task and report the real blocker |
 | Public candidate | GitHub visitors and contributors | 10/10 distinct external loops, reproducible package, open safety model, current demo | Reproduce the loop, open a Draft PR, or pick a good-first issue |
-| Broad launch | Developer communities | v0.5 visible from the default branch or an immutable release, current external evidence, support capacity | Run it, critique it, and contribute—never solicit coordinated votes |
+| Broad launch | Developer communities | Promote the existing immutable pre-release only after current external evidence and support capacity are proven | Run it, critique it, and contribute—never solicit coordinated votes |
 
 Do not skip directly from maintainer evidence to a broad launch. The next honest
 milestone is ten distinct external loops, not a larger claims page.
@@ -155,7 +156,7 @@ not stars.
 3. Fix repeated blockers only after distinguishing product defects from missing prerequisites.
 4. Independently read back every counted public Issue and Draft PR.
 5. Publish aggregate progress in Issue #49; never expose identities or private evidence.
-6. When 10/10 external loops are verified, update the scorecard and decide whether the candidate is ready for default-branch or immutable-release publication.
+6. When 10/10 external loops are verified, update the scorecard and decide whether `v0.5.0-rc.1` is ready to be promoted to a stable v0.5 release.
 7. Only then prepare a broad community launch in the maintainer's own voice.
 
 This document is a reviewable launch asset. Foursday never posts it, sends an

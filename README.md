@@ -15,15 +15,16 @@ sending and plan execution are disabled by default, and chat content can never
 grant new permissions. Foursday should work like another you without silently
 impersonating you.
 
-**English** · [简体中文](./README_ZH.md) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+**English** · [简体中文](./README_ZH.md) · [Quick Start](#quick-start) · [v0.5.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [Architecture](#architecture) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 [![Checks](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![Security](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
+[![Release: v0.5.0-rc.1](https://img.shields.io/badge/release-v0.5.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[Start in 10 minutes](#quick-start) · [Report a successful install](https://github.com/ruiwang20010702/foursday/issues/50) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Join the v0.5 pilot](https://github.com/ruiwang20010702/foursday/issues/49) · [Track the 90-day launch](./docs/en/growth-scorecard.md) · [Review the public launch playbook](./docs/en/public-launch-playbook.md) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
+[Start in 10 minutes](#quick-start) · [Open the v0.5.0-rc.1 pre-release](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [Report a successful install](https://github.com/ruiwang20010702/foursday/issues/50) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Join the v0.5 pilot](https://github.com/ruiwang20010702/foursday/issues/49) · [Track the 90-day launch](./docs/en/growth-scorecard.md) · [Review the public launch playbook](./docs/en/public-launch-playbook.md) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
 
 <a href="./assets/foursday-v0.5-demo.mp4">
   <img src="./assets/foursday-v0.5-demo-poster.png" alt="Watch Foursday turn a synthetic GitHub Issue into a verified Draft PR" width="960">
@@ -132,8 +133,10 @@ proves that a dedicated graph database is necessary.
 
 ### Start the Web onboarding and pilot with one command
 
-With Node.js 22 or 24 installed, launch the reviewed v0.5 Web flow directly
-from its immutable GitHub commit:
+With Node.js 22 or 24 installed, launch the reviewed `v0.5.0-rc.1` Web flow
+directly from its immutable GitHub commit. The [pre-release page](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
+is tagged at the same SHA and provides the source archives, 75-second demo, and
+digest manifest; the command keeps the stronger full-SHA binding:
 
 ```bash
 npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#e272f92dcebd10abbc599f32fed3e7db4428f9b7" foursday start --pilot-sha e272f92dcebd10abbc599f32fed3e7db4428f9b7
