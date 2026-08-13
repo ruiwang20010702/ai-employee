@@ -84,11 +84,29 @@ test("完成度矩阵明确区分目标能力、当前授权和已部署闭环",
     projectText("docs/完成度矩阵.md"),
   ]);
   assert.match(requirements, /产品能力目标，不代表当前生产已经开放相应权限/u);
-  assert.match(matrix, /当前生产授权项目为 0/u);
+  assert.match(matrix, /当前生产已有 1 个 Foursday 项目/u);
   assert.match(matrix, /已随第 017 号迁移部署生产/u);
   assert.match(matrix, /时间与次数门禁已部署生产/u);
   assert.match(matrix, /费用估算和实际费用核销尚未闭环/u);
   assert.doesNotMatch(matrix, /第 01[78] 号迁移尚未应用生产/u);
+});
+
+test("项目配方影子入口在中英文文档中保持默认零写与显式运行边界", async () => {
+  const [readme, readmeZh, capabilities, capabilitiesZh] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/capabilities.md"),
+    projectText("docs/能力清单与正式记忆.md"),
+  ]);
+  for (const text of [readme, readmeZh, capabilities, capabilitiesZh]) {
+    assert.match(text, /npm run projects:shadow/u);
+    assert.match(text, /--run/u);
+    assert.match(text, /--review/u);
+  }
+  assert.match(readme, /zero-write preview/iu);
+  assert.match(readme, /model service/u);
+  assert.match(readmeZh, /默认零写/u);
+  assert.match(readmeZh, /模型服务/u);
 });
 
 test("权威文档区分当前技术部署与业务放量状态", async () => {

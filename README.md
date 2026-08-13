@@ -93,13 +93,38 @@ and sees whether time was actually returned.
 |---|---|---|
 | Project onboarding | Project goal, milestones, people, memory scope, recipes, and risk budgets in one safe draft | Implemented; external effects start disabled and local preparation requires approval |
 | Historical project import | Bind existing project files to deduplicated, reviewable memory candidates | Preview first; exact confirmation creates candidates only, never confirmed facts |
+| Project recipe shadow | Run a selected research/document recipe against a clean, exact Git snapshot before production execution | Preview is zero-write; explicit local run creates only a protected isolated ledger, review pack, and unconfirmed time-return question |
 | Project memory sync | Re-scan authorized files with Codex or Claude Code and keep durable facts current | Global capability plus bounded project authorization; only source-bound, conflict-free facts may auto-confirm |
 | Recipe library | Repeatable workflows instead of planning the same work from every message | Five versioned built-in recipes; durable project-memory updates use a separate evidence-bound recipe |
-| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, triggers, and the next best work to delegate | Unreleased 0.6 candidate: the local console and read-only Codex tool rank a weekly delegation queue by confirmed outcomes; they plan only and never treat an unverified recipe baseline as time returned |
+| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, triggers, and the next best work to delegate | Deployed in 0.6: the local console and read-only Codex tool rank a weekly delegation queue by confirmed outcomes; they plan only and never treat an unverified recipe baseline as time returned |
 | Time-return dashboard | Evidence-backed minutes saved and automation coverage, confirmed by the user | The cockpit shows bounded delivery content before asking for actual post-AI review/edit time; north-star progress counts only confirmed recipe outcomes in the current local week |
 | Proactive mode | Scheduled or event-triggered work with daily limits, cooldowns, and idempotency | Implemented; every trigger is created disabled |
 | Meeting to execution | Notes → document → proposed decision memory → task → follow-up calendar | Implemented as an approval-bound recipe |
 | GitHub delivery | Change request → patch → branch → tests → push → draft PR → report | Implemented for approved repositories and commands |
+
+Validate an imported project's first recipe before production execution:
+
+```bash
+# Zero-write preview: validates sources, recipe inputs, policy, and exact Git snapshot.
+npm run projects:shadow -- --bundle /absolute/import.json \
+  --recipe project-follow-up --values /absolute/values.json
+
+# Explicit local model run: writes only a new protected evidence directory.
+npm run projects:shadow -- --bundle /absolute/import.json \
+  --recipe project-follow-up --values /absolute/values.json \
+  --output /absolute/new-evidence-directory --runtime codex --run
+
+# After reviewing the delivery, use the SHA and REVIEW code printed by the run.
+npm run projects:shadow -- --review /absolute/new-evidence-directory \
+  --evidence-sha256 64_HEX --human-minutes 10 --confirm REVIEW-FIRST12
+```
+
+Only research and document-draft steps are accepted. The model runtime may use
+its configured model service, but production data, business systems, messages,
+Git writes, memory, and production time-return records remain untouched. Review
+confirmation updates only the isolated ledger and creates a protected local
+confirmation record bound to the evidence SHA. See the
+[capability and memory guide](./docs/en/capabilities.md#project-recipe-shadow-validation).
 
 The adapter SDK also defines verifiable contracts and safe example manifests
 for Slack, Teams, Gmail, and Google Workspace. These are extension boundaries,
@@ -121,7 +146,7 @@ control plane that connects three bounded graphs:
 | Knowledge graph | Project ↔ message, document, decision, deliverable, and formal memory | What does this work know, and which source supports it? |
 | Governance graph | Person ↔ project, capability, policy, budget, approval, and audit record | Who authorized this transition, within which scope and version? |
 
-Production release `4453246d68ae13a4f4f046a8babe6c5edf69b021` implements stable
+Production release `ca43e02d8e6790404cdccfb9d007c02f890e29b7` implements stable
 node identities, versioned edge contracts, encrypted SQLite/PostgreSQL
 projections, intended-versus-runtime capture, and four bounded explanations in
 the personal project cockpit. This does not add a graph database or grant
@@ -418,7 +443,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [x] Feishu Open Platform adapter without a DWS dependency
 - [x] Claude Code and direct model-provider runtime contracts
 - [x] Personal project onboarding, recipes, cockpit, and verified time-return ledger
-- [x] Unreleased 0.6 candidate: evidence-ranked weekly delegation queue toward the eight-hour goal, without silently executing work or counting unverified estimates
+- [x] Deployed 0.6 weekly delegation queue toward the eight-hour goal, ranked by confirmed evidence without silently executing work or counting unverified estimates
 - [x] Proactive triggers, meeting-to-execution, and GitHub draft-PR delivery loops
 - [x] Versioned workspace/event adapter contracts and community examples
 - [x] Governed Work Graph v1 production implementation: typed nodes, allowlisted edges, recipe content binding, public Schema, and deterministic SQLite/PostgreSQL projections

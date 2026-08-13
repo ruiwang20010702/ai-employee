@@ -8,16 +8,26 @@ Notable changes to this project are documented here. The format follows [Keep a 
 
 ### Added
 
+- A zero-write project-recipe shadow preview, explicit local run, and evidence-SHA-bound human review confirmation that keep a selected research/document recipe inside one clean Git snapshot and isolated evidence ledger.
+
+### Security
+
+- Project-recipe shadow runs reject code, memory, office, messaging, Git, and deployment capabilities; recheck the source digest and commit after model execution; and keep local review confirmation idempotent without creating production memory or time-return records.
+
+### Planned
+
+- Easier desktop distribution and production community connectors.
+
+## [0.6.0] - 2026-08-13
+
+### Added
+
 - An evidence-ranked weekly delegation queue in the personal cockpit and a read-only Codex tool that reports the remaining eight-hour goal without creating or executing plans.
 - Bounded research and document previews before a completed recipe can become a time-return proposal; the entered human time is the user's actual review, verification, correction, and editing after the AI delivery.
 
 ### Security
 
 - Weekly recommendations count only user-confirmed outcomes, fail closed on unknown capability modes or an older service without the weekly API, exclude active duplicates, and use a dedicated bounded endpoint so project objectives, memory statements, graph data, plan payloads, and blocked-capability details never enter the Codex plugin.
-
-### Planned
-
-- Easier desktop distribution and production community connectors.
 
 ## [0.5.0] - 2026-08-12
 

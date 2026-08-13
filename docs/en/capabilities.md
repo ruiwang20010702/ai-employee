@@ -120,6 +120,59 @@ fact it replaces. Long documents may remain in gbrain and be referenced through
 the existing exact-slug project authorization instead of being copied into
 formal memory.
 
+### Project recipe shadow validation
+
+After previewing an historical import, a user can rehearse one of the project's
+selected recipes without opening production execution. The default command
+validates the source snapshot, clean Git commit, recipe inputs, capability
+policy, and plan hash. It does not invoke a model or create files:
+
+```bash
+npm run projects:shadow -- \
+  --bundle /absolute/path/history-import.json \
+  --recipe project-follow-up \
+  --values /absolute/path/recipe-values.json
+```
+
+An explicit `--run` invokes the chosen Codex or Claude Code read-only runtime
+and requires a new canonical output directory:
+
+```bash
+npm run projects:shadow -- \
+  --bundle /absolute/path/history-import.json \
+  --recipe project-follow-up \
+  --values /absolute/path/recipe-values.json \
+  --output /absolute/path/new-shadow-evidence \
+  --runtime codex --run
+```
+
+The shadow boundary permits only `research` and `document_draft`. Code, memory,
+messaging, office, Git, and deployment capabilities fail closed. It rechecks
+the exact clean Git commit and historical-source digest after execution. The
+mode-`600` isolated ledger, full evidence JSON, failure record, and review note
+never connect to the production database or write to a business system. The
+agent runtime may still access its configured model service; zero business
+side effects does not mean offline execution. No memory or time-return row is
+created. The baseline remains `awaiting_user_review_time` until the user reports
+their actual post-AI review, verification, correction, and editing time.
+
+The run prints the evidence SHA-256 and a derived `REVIEW-...` confirmation
+code. After reading the delivery, the user can record their actual active
+minutes in the isolated ledger:
+
+```bash
+npm run projects:shadow -- \
+  --review /absolute/path/new-shadow-evidence \
+  --evidence-sha256 64_HEX \
+  --human-minutes 10 \
+  --confirm REVIEW-FIRST12
+```
+
+This verifies the immutable evidence JSON against the encrypted local ledger,
+reuses the same time-return calculation as production, and writes a mode-`600`
+local confirmation record. It remains idempotent and never connects to or
+updates the production time-return ledger.
+
 ### Automatic project-memory sync
 
 Manual import is the bootstrap path, not the steady-state workflow. A project
