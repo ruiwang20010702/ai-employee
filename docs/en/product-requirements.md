@@ -14,6 +14,7 @@ count, team surveillance, or silent impersonation.
 |---|---|---|
 | P0 | Project onboarding | Safe project draft in ten minutes; side effects disabled |
 | P0 | Recipe library | Five versioned, schema-validated recipes |
+| P0 | Project recipe shadow | Preview is zero-write; explicit local run permits only research/document drafts on one clean Git snapshot; post-delivery review can record actual minutes only in the SHA-bound isolated ledger and creates no production memory or time record |
 | P0 | Project cockpit | Goals, milestones, plans, evidence, deliverables, memory, triggers |
 | P0 | Weekly delegation queue | Close the remaining eight-hour goal with project-selected recipes ranked only by user-confirmed outcomes; the local cockpit and read-only Codex tool never bypass execution policy |
 | P0 | Time returned | Show bounded delivery content first; record the user's actual post-AI review/edit time, then require separate confirmation |
@@ -22,8 +23,9 @@ count, team surveillance, or silent impersonation.
 | P1 | GitHub delivery | Patch, branch, tests, push, Draft PR; never auto-merge |
 | P2 | Community boundaries | Slack, Teams, Gmail, Workspace contracts and examples only |
 
-The weekly delegation queue and its Codex tool are an unreleased `0.6.0`
-candidate. The immutable `v0.5.0-rc.1` quick-start path does not claim them.
+The weekly delegation queue and its Codex tool are deployed in `0.6.0`. The
+project-recipe shadow CLI remains an unreleased candidate until its own release
+gates pass.
 
 ## End-to-end acceptance
 
@@ -38,6 +40,8 @@ flowchart LR
     G --> H["Human-confirmed memory and time return"]
 ```
 
-Implemented capability does not mean enabled capability. The V2.3 code is
-deployed at exact production SHA `4453246d68ae13a4f4f046a8babe6c5edf69b021`;
-project authorization and production enablement remain separate decisions.
+Implemented capability does not mean enabled capability. Version `0.6.0` is
+deployed at exact production SHA `ca43e02d8e6790404cdccfb9d007c02f890e29b7`;
+one source-bound Foursday project exists, while plan execution, proactive work,
+message sending, memory auto-sync, and memory confirmation remain separate
+decisions.

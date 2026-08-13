@@ -84,11 +84,29 @@ test("完成度矩阵明确区分目标能力、当前授权和已部署闭环",
     projectText("docs/完成度矩阵.md"),
   ]);
   assert.match(requirements, /产品能力目标，不代表当前生产已经开放相应权限/u);
-  assert.match(matrix, /当前生产授权项目为 0/u);
+  assert.match(matrix, /当前生产已有 1 个 Foursday 项目/u);
   assert.match(matrix, /已随第 017 号迁移部署生产/u);
   assert.match(matrix, /时间与次数门禁已部署生产/u);
   assert.match(matrix, /费用估算和实际费用核销尚未闭环/u);
   assert.doesNotMatch(matrix, /第 01[78] 号迁移尚未应用生产/u);
+});
+
+test("项目配方影子入口在中英文文档中保持默认零写与显式运行边界", async () => {
+  const [readme, readmeZh, capabilities, capabilitiesZh] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/en/capabilities.md"),
+    projectText("docs/能力清单与正式记忆.md"),
+  ]);
+  for (const text of [readme, readmeZh, capabilities, capabilitiesZh]) {
+    assert.match(text, /npm run projects:shadow/u);
+    assert.match(text, /--run/u);
+    assert.match(text, /--review/u);
+  }
+  assert.match(readme, /zero-write preview/iu);
+  assert.match(readme, /model service/u);
+  assert.match(readmeZh, /默认零写/u);
+  assert.match(readmeZh, /模型服务/u);
 });
 
 test("权威文档区分当前技术部署与业务放量状态", async () => {
@@ -500,6 +518,31 @@ test("中英文项目首页提供产品定位、快速开始和双语开源治�
   assert.match(changelog, /\[0\.3\.0\] - 2026-08-11/u);
   assert.match(changelogChinese, /\[0\.3\.0\] - 2026-08-11/u);
   assert.match(license, /MIT License/u);
+});
+
+test("版本口径区分公开预览版与尚未发布的开发版本", async () => {
+  const [english, chinese, changelog, changelogChinese, packageText] =
+    await Promise.all([
+      projectText("README.md"),
+      projectText("README_ZH.md"),
+      projectText("CHANGELOG.md"),
+      projectText("CHANGELOG_ZH.md"),
+      projectText("package.json"),
+    ]);
+  const packageJson = JSON.parse(packageText);
+  assert.equal(packageJson.version, "0.6.0");
+  assert.equal(packageJson.private, true);
+  assert.match(english, /latest tagged public preview.+v0\.5\.0-rc\.1/su);
+  assert.match(english, /v0\.6\.0, unreleased/u);
+  assert.match(chinese, /最新带标签的公开预览版/u);
+  assert.match(chinese, /尚未公开发布的 v0\.6\.0 开发版本/u);
+  assert.match(changelog, /Target package version: `0\.6\.0`/u);
+  assert.match(changelogChinese, /目标包版本为 `0\.6\.0`/u);
+  for (const value of [changelog, changelogChinese]) {
+    assert.doesNotMatch(value, /^## \[0\.6\.0\] - /mu);
+    assert.match(value, /compare\/v0\.5\.0-rc\.1\.\.\.HEAD/u);
+    assert.match(value, /releases\/tag\/v0\.5\.0-rc\.1/u);
+  }
 });
 
 test("中英文首页、治理文件和英文核心文档的本地链接全部存在", async () => {

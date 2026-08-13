@@ -6,20 +6,25 @@ Notable changes to this project are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+Target package version: `0.6.0`. This section has not been published as a
+GitHub release; the latest tagged public preview remains `v0.5.0-rc.1`.
+
 ### Added
 
+- A zero-write project-recipe shadow preview, explicit local run, and evidence-SHA-bound human review confirmation that keep a selected research/document recipe inside one clean Git snapshot and isolated evidence ledger.
 - An evidence-ranked weekly delegation queue in the personal cockpit and a read-only Codex tool that reports the remaining eight-hour goal without creating or executing plans.
 - Bounded research and document previews before a completed recipe can become a time-return proposal; the entered human time is the user's actual review, verification, correction, and editing after the AI delivery.
 
 ### Security
 
+- Project-recipe shadow runs reject code, memory, office, messaging, Git, and deployment capabilities; recheck the source digest and commit after model execution; and keep local review confirmation idempotent without creating production memory or time-return records.
 - Weekly recommendations count only user-confirmed outcomes, fail closed on unknown capability modes or an older service without the weekly API, exclude active duplicates, and use a dedicated bounded endpoint so project objectives, memory statements, graph data, plan payloads, and blocked-capability details never enter the Codex plugin.
 
 ### Planned
 
 - Easier desktop distribution and production community connectors.
 
-## [0.5.0] - 2026-08-12
+## [0.5.0-rc.1] - 2026-08-13
 
 ### Added
 
@@ -84,8 +89,8 @@ Notable changes to this project are documented here. The format follows [Keep a 
 - A local admin console, read-only Codex plugin, and macOS background services.
 - SQLite development storage and the initial production diagnostic workflow.
 
-[Unreleased]: https://github.com/ruiwang20010702/foursday/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/ruiwang20010702/foursday/compare/v0.4.0...v0.5.0
+[Unreleased]: https://github.com/ruiwang20010702/foursday/compare/v0.5.0-rc.1...HEAD
+[0.5.0-rc.1]: https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1
 [0.4.0]: https://github.com/ruiwang20010702/foursday/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ruiwang20010702/foursday/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ruiwang20010702/foursday/releases/tag/v0.2.0

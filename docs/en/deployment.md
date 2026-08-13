@@ -136,7 +136,7 @@ A deployed release may be service-available while business readiness is false. D
 
 The personal cockpit, recipes, proactive worker, meeting loop, GitHub Draft PR
 adapter, migrations 019/020/021, governed graph projection, and community contracts were deployed in
-production commit `4453246d68ae13a4f4f046a8babe6c5edf69b021` after both cloud gates and
+production commit `ca43e02d8e6790404cdccfb9d007c02f890e29b7` after both cloud gates and
 running-service read-back passed. Deployment never
 enables `proactive_work`, sending, or work-plan execution. Triggers remain
 disabled unless a separate business rollout explicitly enables them.
