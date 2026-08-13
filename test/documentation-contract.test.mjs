@@ -565,6 +565,16 @@ test("公开发布手册区分定向体验、公开候选和大范围发布", as
   assert.match(chinese, /10 位不同外部体验者/u);
   assert.match(english, /Foursday never posts it/u);
   assert.match(chinese, /Foursday 不会自动发帖/u);
+  const preReleaseUrl =
+    "https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1";
+  for (const value of [readme, chineseReadme]) {
+    assert.ok(value.includes(preReleaseUrl));
+    assert.match(value, /e272f92dcebd10abbc599f32fed3e7db4428f9b7/u);
+  }
+  assert.match(english, /Immutable pre-release \| `v0\.5\.0-rc\.1`/u);
+  assert.match(english, /10\/10 external loops.+promoted to a stable v0\.5 release/su);
+  assert.match(chinese, /不可变预发布版 \| `v0\.5\.0-rc\.1`/u);
+  assert.match(chinese, /外部 10\/10.+晋升为稳定 v0\.5 Release/su);
   for (const value of [english, chinese]) {
     assert.match(value, /npm run growth:report -- --sha/u);
     assert.match(value, /--pilot-manifest/u);

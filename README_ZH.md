@@ -10,15 +10,16 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 
 钉钉使用 DWS，飞书直接使用开放平台事件与消息 API。默认不自动发送，也不会从聊天内容中获得新权限。它在能力上成为你的分身，但不会在身份上偷偷冒充你。
 
-[English](./README.md) · **简体中文** · [快速开始](#快速开始) · [设计总览](./docs/设计总览.md) · [产品需求](./docs/产品需求文档.md) · [安全说明](./安全说明.md)
+[English](./README.md) · **简体中文** · [快速开始](#快速开始) · [v0.5.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [设计总览](./docs/设计总览.md) · [产品需求](./docs/产品需求文档.md) · [安全说明](./安全说明.md)
 
 [![检查](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![安全扫描](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
+[![预发布版：v0.5.0-rc.1](https://img.shields.io/badge/%E9%A2%84%E5%8F%91%E5%B8%83%E7%89%88-v0.5.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[10 分钟开始](#快速开始) · [报告一次成功安装](https://github.com/ruiwang20010702/foursday/issues/50) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入 v0.5 外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [查看 90 天增长记分卡](./docs/公开增长记分卡.md) · [审阅公开发布手册](./docs/公开发布手册.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+[10 分钟开始](#快速开始) · [打开 v0.5.0-rc.1 预发布版](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [报告一次成功安装](https://github.com/ruiwang20010702/foursday/issues/50) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入 v0.5 外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [查看 90 天增长记分卡](./docs/公开增长记分卡.md) · [审阅公开发布手册](./docs/公开发布手册.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
 
 <a href="./assets/foursday-v0.5-demo.mp4">
   <img src="./assets/foursday-v0.5-demo-poster.png" alt="观看 Foursday 将合成 GitHub Issue 转化为经过验证的 Draft PR" width="960">
@@ -142,7 +143,7 @@ Loop Engineering 继续负责“一个任务如何反复做到有证据地完成
 
 ### 1. 用一条命令启动 Web 接入与真实体验
 
-安装 Node.js 22 或 24 后，可以直接从经过审核的不可变 GitHub 提交启动 v0.5 Web 体验：
+安装 Node.js 22 或 24 后，可以直接启动经过审核的 `v0.5.0-rc.1` Web 体验。[预发布页面](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)与下方完整提交指向同一个候选，并提供源码归档、75 秒演示和摘要清单；启动命令继续使用约束更强的完整 SHA：
 
 ```bash
 npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#e272f92dcebd10abbc599f32fed3e7db4428f9b7" foursday start --pilot-sha e272f92dcebd10abbc599f32fed3e7db4428f9b7
