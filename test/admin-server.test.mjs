@@ -40,6 +40,9 @@ test("个人工作台脚本可解析并展示四项个人闭环", () => {
   assert.match(script, /\/api\/projects\/onboarding/u);
   assert.match(script, /\/api\/time-returns/u);
   assert.match(script, /完整回读证据与本人确认/u);
+  assert.match(script, /AI 交付后实际用于阅读、核对、补充和修改/u);
+  assert.match(script, /不是假设你从头亲自完成/u);
+  assert.match(script, /evidencePreviews/u);
   assert.match(script, /设为定时工作/u);
   assert.match(script, /\/api\/triggers/u);
   assert.match(personalDashboardHtml, /项目记忆自动同步/u);

@@ -96,7 +96,7 @@ and sees whether time was actually returned.
 | Project memory sync | Re-scan authorized files with Codex or Claude Code and keep durable facts current | Global capability plus bounded project authorization; only source-bound, conflict-free facts may auto-confirm |
 | Recipe library | Repeatable workflows instead of planning the same work from every message | Five versioned built-in recipes; durable project-memory updates use a separate evidence-bound recipe |
 | Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, triggers, and the next best work to delegate | Unreleased 0.6 candidate: the local console and read-only Codex tool rank a weekly delegation queue by confirmed outcomes; they plan only and never treat an unverified recipe baseline as time returned |
-| Time-return dashboard | Evidence-backed minutes saved and automation coverage, confirmed by the user | Current local week starts Monday; all-time audit remains available, while the north-star progress counts only this week's confirmed recipe outcomes |
+| Time-return dashboard | Evidence-backed minutes saved and automation coverage, confirmed by the user | The cockpit shows bounded delivery content before asking for actual post-AI review/edit time; north-star progress counts only confirmed recipe outcomes in the current local week |
 | Proactive mode | Scheduled or event-triggered work with daily limits, cooldowns, and idempotency | Implemented; every trigger is created disabled |
 | Meeting to execution | Notes → document → proposed decision memory → task → follow-up calendar | Implemented as an approval-bound recipe |
 | GitHub delivery | Change request → patch → branch → tests → push → draft PR → report | Implemented for approved repositories and commands |

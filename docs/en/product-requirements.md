@@ -16,7 +16,7 @@ count, team surveillance, or silent impersonation.
 | P0 | Recipe library | Five versioned, schema-validated recipes |
 | P0 | Project cockpit | Goals, milestones, plans, evidence, deliverables, memory, triggers |
 | P0 | Weekly delegation queue | Close the remaining eight-hour goal with project-selected recipes ranked only by user-confirmed outcomes; the local cockpit and read-only Codex tool never bypass execution policy |
-| P0 | Time returned | Complete evidence plus separate user confirmation |
+| P0 | Time returned | Show bounded delivery content first; record the user's actual post-AI review/edit time, then require separate confirmation |
 | P1 | Proactive mode | Disabled by default, idempotent, daily/cooldown limits |
 | P1 | Meeting to execution | Notes to document, proposed memory, task, and calendar |
 | P1 | GitHub delivery | Patch, branch, tests, push, Draft PR; never auto-merge |

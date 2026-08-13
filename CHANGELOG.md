@@ -9,6 +9,7 @@ Notable changes to this project are documented here. The format follows [Keep a 
 ### Added
 
 - An evidence-ranked weekly delegation queue in the personal cockpit and a read-only Codex tool that reports the remaining eight-hour goal without creating or executing plans.
+- Bounded research and document previews before a completed recipe can become a time-return proposal; the entered human time is the user's actual review, verification, correction, and editing after the AI delivery.
 
 ### Security
 

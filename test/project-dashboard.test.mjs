@@ -43,7 +43,10 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
     recipes: [{ id: "daily-report", name: "日报" }, { id: "code-delivery", name: "代码" }],
     planSteps: new Map([["plan-1", [{
       step_id: "draft", capability: "document_draft", status: "completed",
-      evidence: { kind: "document_markdown", sha256: "a".repeat(64), verification: "nonempty" },
+      evidence: {
+        kind: "document_markdown", content: "# 已完成的交付草稿", bytes: 28,
+        sha256: "a".repeat(64), verification: "nonempty",
+      },
     }]]]),
     memorySyncState: {
       state: "review_required",
@@ -70,6 +73,8 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
   assert.equal(dashboard.timeReturn.weeklyAutomationCoverage, 0.6667);
   assert.equal(dashboard.plans.items[0].id, "plan-2");
   assert.equal(dashboard.deliverables[0].reference, "a".repeat(64));
+  assert.equal(dashboard.timeReturnCandidates[0].evidencePreviews[0].content, "# 已完成的交付草稿");
+  assert.equal(dashboard.timeReturnCandidates[0].evidencePreviews[0].truncated, false);
   assert.equal(dashboard.memory.items[0].statement, "负责人已确认");
   assert.equal(dashboard.governedGraph.available, false);
   assert.equal(dashboard.memorySync.authorized, true);
@@ -77,6 +82,54 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
   assert.equal(dashboard.memorySync.state, "review_required");
   assert.equal(dashboard.memorySync.sourceDigestPrefix, "aaaaaaaaaaaa");
   assert.deepEqual(dashboard.memorySync.sourcePaths, ["README.md", "docs/decisions.md"]);
+});
+
+test("项目驾驶舱只给待核销工作返回有界可审阅交付物正文", () => {
+  const content = "x".repeat(5_000);
+  const dashboard = buildProjectDashboard({
+    manifest: {
+      projectId: "project_1", name: "项目一",
+      profile: { selectedRecipeIds: ["project-follow-up"] },
+    },
+    plans: [{
+      id: "plan-1", project_id: "project_1", objective: "完成跟进", status: "completed",
+      updated_at: "2026-08-13T01:00:00.000Z",
+      plan: { recipe: { id: "project-follow-up", baselineMinutes: 45 } },
+    }],
+    planSteps: new Map([["plan-1", [
+      { step_id: "research", capability: "research", status: "completed", evidence: { kind: "research_markdown", content, bytes: 5_000, sha256: "a".repeat(64), verification: "bounded" } },
+      { step_id: "secret", capability: "local_test", status: "completed", evidence: { kind: "controlled_command", content: "不得展示", verification: "exit_zero" } },
+    ]]]),
+  });
+  const previews = dashboard.timeReturnCandidates[0].evidencePreviews;
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0].content.length, 4_000);
+  assert.equal(previews[0].truncated, true);
+  assert.doesNotMatch(JSON.stringify(previews), /不得展示/u);
+});
+
+test("项目驾驶舱限制待核销计划和每项正文预览数量", () => {
+  const plans = Array.from({ length: 25 }, (_value, index) => ({
+    id: `plan-${index}`, project_id: "project_1", objective: `完成跟进 ${index}`,
+    status: "completed", updated_at: new Date(2026, 7, 13, 0, index).toISOString(),
+    plan: { recipe: { id: "project-follow-up", baselineMinutes: 45 } },
+  }));
+  const steps = new Map(plans.map((plan) => [plan.id, Array.from(
+    { length: 5 },
+    (_value, index) => ({
+      step_id: `draft-${index}`, capability: "document_draft", status: "completed",
+      evidence: { kind: "document_markdown", content: `交付物 ${index}` },
+    }),
+  )]));
+  const dashboard = buildProjectDashboard({
+    manifest: { projectId: "project_1", name: "项目一", profile: {} },
+    plans,
+    planSteps: steps,
+  });
+  assert.equal(dashboard.timeReturnCandidates.length, 20);
+  assert.ok(dashboard.timeReturnCandidates.every(
+    (candidate) => candidate.evidencePreviews.length === 3,
+  ));
 });
 
 test("项目驾驶舱只读呈现受治理工作图的对齐和变化解释", () => {

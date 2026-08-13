@@ -148,6 +148,7 @@ test("V2.3 个人工作闭环和社区扩展在中英文文档统一", async () 
     assert.match(chinese, new RegExp(value, "u"));
   }
   assert.match(chinese, /本周工作返还队列/u);
+  assert.match(chinese, /AI 交付后的真实审阅\/修改耗时/u);
   assert.match(requirements, /未验证配方只标记为验证候选，不计入覆盖量/u);
   assert.match(overview, /evidence-ranked weekly delegation queue/u);
   for (const value of ["## 6.10", "## 6.11", "## 6.12", "## 6.13", "## 6.14", "## 6.15"]) {
