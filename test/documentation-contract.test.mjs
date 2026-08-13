@@ -552,9 +552,11 @@ test("公开发布手册区分定向体验、公开候选和大范围发布", as
     assert.match(value, /Draft PR/u);
   }
   assert.match(english, /Current-candidate maintainer loops \| 10\/10/u);
-  assert.match(english, /Issues #54–#63/u);
+  assert.match(english, /Issues #54–#58, #60–#63, and #75/u);
+  assert.match(english, /P95 and maximum 584\.7 seconds/u);
   assert.match(chinese, /当前候选维护者闭环 \| 10\/10/u);
-  assert.match(chinese, /Issue #54–#63/u);
+  assert.match(chinese, /Issue #54–#58、#60–#63、#75/u);
+  assert.match(chinese, /P95 与最大值 584\.7 秒/u);
   assert.match(english, /do not paste AI-generated or AI-edited copy/u);
   assert.match(english, /never request votes/u);
   assert.match(english, /ten distinct external loops/u);
