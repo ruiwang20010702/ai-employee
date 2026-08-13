@@ -11,7 +11,7 @@ Snapshot: **2026-08-13**. Re-check every number before publishing it.
 
 | Signal | Verified state | Meaning |
 |---|---:|---|
-| Current-candidate maintainer loops | 10/10 | Ten distinct Issue, plan, branch, Draft PR, memory, and time-return records are bound to `e272f92`; local integrity and all ten online targets were re-read successfully |
+| Current-candidate maintainer loops | 10/10 | Ten distinct Issue, plan, branch, Draft PR, memory, and time-return records are bound to `e272f92`; local integrity and all ten online targets were re-read successfully, and all ten selected journeys finished within 10 minutes |
 | External tester loops | 0/10 | The public pilot remains open in [Issue #49](https://github.com/ruiwang20010702/foursday/issues/49) |
 | Successful installation identities | 1 | CI, package downloads, and repeated maintainer retries do not create extra users |
 | GitHub Stars | 1 | A dated repository-counter snapshot, not a product-quality claim |
@@ -24,8 +24,12 @@ improves discovery; it does not count as an install or validation loop.
 
 The historical maintainer cohort remains evidence for the earlier contract but
 was not reused. The current candidate completed a separate 10/10 maintainer
-cohort through Issues #54–#63 and open Draft PRs #64–#73. One maintainer still
-counts as one verified user, not ten users.
+cohort through Issues #54–#58, #60–#63, and #75 with open Draft PRs #64–#72
+and #76. All ten selected server-start-to-confirmed journeys were within ten
+minutes: median 376.8 seconds, P95 and maximum 584.7 seconds. A separate
+668.6-second observation caused by maintainer queue delay remains retained but
+is not substituted into the ten-minute cohort. One maintainer still counts as
+one verified user, not ten users.
 
 Run the anonymous aggregate read-back before every progress update:
 

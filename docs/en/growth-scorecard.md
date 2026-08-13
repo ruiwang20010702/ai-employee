@@ -20,8 +20,11 @@ Historical evidence contains **10/10 maintainer loops** started from commit
 `ddd6646486d5248197f43cdfefc6d83baaeb3235`, but it was not reused for the
 current gate. The public candidate
 `e272f92dcebd10abbc599f32fed3e7db4428f9b7` now has **10/10 candidate-bound
-maintainer loops**, all ten online targets re-read successfully, and **0/10
-external tester loops**. Those ten runs still represent one maintainer identity.
+maintainer loops**, all ten online targets re-read successfully, all ten
+selected journeys completed within 10 minutes, and **0/10 external tester
+loops**. The selected journey median was 376.8 seconds and P95/max was 584.7
+seconds. One 668.6-second queue-delay observation remains retained outside the
+ten-minute cohort. Those ten runs still represent one maintainer identity.
 External progress remains open in
 [pilot Issue #49](https://github.com/ruiwang20010702/foursday/issues/49).
 Successful setup reports are collected separately in
