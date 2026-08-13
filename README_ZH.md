@@ -145,6 +145,8 @@ Loop Engineering 继续负责“一个任务如何反复做到有证据地完成
 
 安装 Node.js 22 或 24 后，可以直接启动经过审核的 `v0.5.0-rc.1` Web 体验。[预发布页面](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)与下方完整提交指向同一个候选，并提供源码归档、75 秒演示和摘要清单；启动命令继续使用约束更强的完整 SHA：
 
+接入页默认跟随浏览器语言，也可以随时通过右上角的 `EN / 中文` 切换。两种语言共用同一套安全检查、审批状态机与本机零副作用默认值。
+
 ```bash
 npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#e272f92dcebd10abbc599f32fed3e7db4428f9b7" foursday start --pilot-sha e272f92dcebd10abbc599f32fed3e7db4428f9b7
 ```

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activationHtml } from "../src/activation-ui.mjs";
+import { activationHtml, activationHtmlForLanguage } from "../src/activation-ui.mjs";
 import { startActivationServer } from "../src/activation-server.mjs";
 
 test("activation UI is parseable, responsive, and honest about preview boundaries", () => {
@@ -32,6 +32,47 @@ test("activation UI is parseable, responsive, and honest about preview boundarie
   assert.match(activationHtml, /@media\(max-width:820px\)/u);
   assert.match(activationHtml, /prefers-reduced-motion/u);
   assert.doesNotMatch(activationHtml, /fake|testimonial|trusted by/iu);
+});
+
+test("activation UI pattern attributes compile under modern browser Unicode Sets rules", () => {
+  const patterns = [...activationHtml.matchAll(/\bpattern="([^"]+)"/gu)]
+    .map((match) => match[1]);
+  assert.deepEqual(patterns, [
+    "[a-z0-9][a-z0-9_\\-]{1,63}",
+    "tester-[a-z0-9][a-z0-9\\\\-]{2,23}",
+  ]);
+  const browserPatterns = patterns.map((pattern) => pattern.replaceAll("\\\\", "\\"));
+  for (const pattern of browserPatterns) {
+    assert.doesNotThrow(() => new RegExp(`^(?:${pattern})$`, "v"));
+  }
+  assert.match("my-project", new RegExp(`^(?:${browserPatterns[0]})$`, "v"));
+  assert.match("tester-blue-bird", new RegExp(`^(?:${browserPatterns[1]})$`, "v"));
+});
+
+test("activation UI offers one safe flow in English and Chinese", () => {
+  const chineseHtml = activationHtmlForLanguage("zh");
+  const englishScript = activationHtml.match(/<script nonce="__NONCE__">([\s\S]*?)<\/script>/u)?.[1];
+  const chineseScript = chineseHtml.match(/<script nonce="__NONCE__">([\s\S]*?)<\/script>/u)?.[1];
+  const englishStyle = activationHtml.match(/<style nonce="__NONCE__">([\s\S]*?)<\/style>/u)?.[1];
+  const chineseStyle = chineseHtml.match(/<style nonce="__NONCE__">([\s\S]*?)<\/style>/u)?.[1];
+
+  assert.equal(activationHtmlForLanguage("en"), activationHtml);
+  assert.match(activationHtml, /aria-current="page" href="\?lang=en">EN/u);
+  assert.match(chineseHtml, /<html lang="zh-CN">/u);
+  assert.match(chineseHtml, /href="\?lang=en">EN<\/a><a class="active" aria-current="page" href="\?lang=zh">中文/u);
+  assert.match(chineseHtml, /把一项真实工作交给你的编码智能体。/u);
+  assert.match(chineseHtml, /生成可审查计划/u);
+  assert.match(chineseHtml, /本机 · 零写入/u);
+  assert.equal(chineseStyle, englishStyle);
+  assert.ok(englishScript);
+  assert.ok(chineseScript);
+  assert.doesNotThrow(() => new Function(englishScript));
+  assert.doesNotThrow(() => new Function(chineseScript));
+  assert.doesNotMatch(chineseHtml, /h超过|未超过Request|超过flow/iu);
+  assert.doesNotMatch(
+    chineseHtml,
+    /Configure explicit authority|one or more required capabilities|Delivery stopped|Package download time|No completed activation session/u,
+  );
 });
 
 test("evidence download announcements are accessible, truthful, and privacy bounded", () => {
@@ -146,6 +187,10 @@ test("pilot task draft endpoint requires the local token and never creates an Is
     },
   );
   try {
+    const pilotPage = await fetch(new URL("/?lang=zh", service.url)).then((response) => response.text());
+    assert.match(pilotPage, /id="pilot-setup" class="execution ">/u);
+    assert.match(pilotPage, new RegExp(`候选提交 ${"a".repeat(40)}`, "u"));
+    assert.doesNotMatch(pilotPage, /__PILOT_/u);
     assert.equal((await post({ participantAlias: "tester-bluebird" }, "wrong")).status, 403);
     assert.equal((await post({ participantAlias: "tester-bluebird" }, actionToken, "text/plain")).status, 415);
     const invalid = await post({ participantAlias: "tester-XX" });
@@ -176,9 +221,28 @@ test("activation server exposes only loopback preview endpoints", async () => {
   try {
     const page = await fetch(service.url);
     assert.equal(page.status, 200);
+    assert.equal(page.headers.get("content-language"), "en");
     assert.match(page.headers.get("content-security-policy"), /default-src 'none'/u);
     const pageText = await page.text();
     assert.doesNotMatch(pageText, /__ACTION_TOKEN__/u);
+    assert.doesNotMatch(pageText, /__PILOT_/u);
+    assert.match(pageText, /id="pilot-setup" class="execution hidden">/u);
+
+    const chinesePage = await fetch(new URL("/?lang=zh", service.url));
+    assert.equal(chinesePage.headers.get("content-language"), "zh-CN");
+    assert.match(await chinesePage.text(), /把一项真实工作交给你的编码智能体。/u);
+
+    const browserChinesePage = await fetch(service.url, {
+      headers: { "accept-language": "zh-CN,zh;q=0.9,en;q=0.8" },
+    });
+    assert.equal(browserChinesePage.headers.get("content-language"), "zh-CN");
+    assert.match(await browserChinesePage.text(), /本机 · 零写入/u);
+
+    const explicitEnglishPage = await fetch(new URL("/?lang=en", service.url), {
+      headers: { "accept-language": "zh-CN,zh;q=0.9" },
+    });
+    assert.equal(explicitEnglishPage.headers.get("content-language"), "en");
+    assert.match(await explicitEnglishPage.text(), /Give your coding agent one real job/u);
     const environment = await fetch(new URL("/api/environment", service.url)).then((response) => response.json());
     assert.equal(environment.workingDirectory, "/workspace/example");
     const preview = await fetch(new URL("/api/preview", service.url), {

@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { buildActivationPreview } from "./activation.mjs";
-import { activationHtml } from "./activation-ui.mjs";
+import { activationHtmlForLanguage } from "./activation-ui.mjs";
 import { buildPilotTaskDraft } from "./pilot-task-draft.mjs";
 import { buildReadinessSupportReport } from "./readiness-support.mjs";
 import { buildSetupCheckin } from "./setup-checkin.mjs";
@@ -59,16 +59,24 @@ export async function startActivationServer({
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
     if (request.method === "GET" && url.pathname === "/") {
+      const requestedLanguage = url.searchParams.get("lang");
+      const browserLanguage = String(request.headers["accept-language"] ?? "").toLowerCase();
+      const language = requestedLanguage === "zh" || requestedLanguage === "en"
+        ? requestedLanguage
+        : browserLanguage.startsWith("zh") ? "zh" : "en";
       const nonce = randomBytes(18).toString("base64");
       response.writeHead(200, {
         ...securityHeaders,
         "content-type": "text/html; charset=utf-8",
+        "content-language": language === "zh" ? "zh-CN" : "en",
         "content-security-policy": `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
       });
       response.end(
-        activationHtml
+        activationHtmlForLanguage(language)
           .replaceAll("__NONCE__", nonce)
-          .replaceAll("__ACTION_TOKEN__", actionToken),
+          .replaceAll("__ACTION_TOKEN__", actionToken)
+          .replaceAll("__PILOT_SETUP_VISIBILITY__", pilotWorkspace ? "" : "hidden")
+          .replaceAll("__PILOT_SOURCE_SHA__", pilotWorkspace?.sourceSha ?? ""),
       );
       return;
     }

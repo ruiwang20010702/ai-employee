@@ -138,6 +138,10 @@ directly from its immutable GitHub commit. The [pre-release page](https://github
 is tagged at the same SHA and provides the source archives, 75-second demo, and
 digest manifest; the command keeps the stronger full-SHA binding:
 
+The onboarding page follows the browser language by default. Use the `EN / 中文`
+switch in the upper-right corner at any time; both languages use the same safety
+checks, approval state machine, and local-only defaults.
+
 ```bash
 npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#e272f92dcebd10abbc599f32fed3e7db4428f9b7" foursday start --pilot-sha e272f92dcebd10abbc599f32fed3e7db4428f9b7
 ```
