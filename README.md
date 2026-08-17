@@ -101,11 +101,12 @@ atoms/  conversations/  people/  preferences/
 projects/  concepts/  prospective/
 ```
 
-Low-risk facts become usable only after Markdown write, exact gbrain read-back,
-and PostgreSQL projection. Revocation, replacement, deletion, and privacy
-erasure atomically enqueue cleanup; the worker temporarily moves managed
-Markdown out of the gbrain source, syncs, verifies that the original slug is
-unreadable, and removes the temporary file. Failures restore the file and retry. Conflicts stay quarantined. Credentials,
+Low-risk facts become usable only after Markdown write, a path-scoped Git
+commit, exact gbrain read-back, and PostgreSQL projection. Revocation,
+replacement, deletion, and privacy erasure atomically enqueue cleanup; the
+worker commits the managed Markdown deletion, syncs, verifies that the original
+slug is unreadable, and removes the temporary file outside the source. Failures
+commit a restoration and retry. Conflicts stay quarantined. Credentials,
 PII, sensitive person material, and confidential candidates are rejected.
 
 ## Quick Start

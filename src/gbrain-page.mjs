@@ -157,6 +157,7 @@ export async function writeGbrainMarkdownAuthority(
     sourceId = "foursday",
     timeoutMs = 120_000,
     run = execFileAsync,
+    gitRun = execFileAsync,
   } = {},
 ) {
   if (!isAbsolute(String(root ?? ""))) {
@@ -217,6 +218,12 @@ export async function writeGbrainMarkdownAuthority(
   const executable = run === execFileAsync
     ? await resolveGbrainPath(gbrainPath)
     : gbrainPath;
+  await commitAuthorityPath(
+    canonicalRoot,
+    difference,
+    `memory: write ${createHash("sha256").update(content).digest("hex").slice(0, 12)}`,
+    { gitRun },
+  );
   await run(executable, ["sync", "--source", sourceId], {
     timeout: timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
@@ -243,6 +250,63 @@ async function assertRealDirectory(path, label) {
   return realpath(path);
 }
 
+async function commitAuthorityPath(
+  canonicalRoot,
+  relativePath,
+  subject,
+  { gitRun = execFileAsync } = {},
+) {
+  const options = {
+    cwd: canonicalRoot,
+    timeout: 30_000,
+    maxBuffer: 2 * 1024 * 1024,
+    env: safeCommandEnvironment("/usr/bin/git"),
+  };
+  const repository = await gitRun(
+    "/usr/bin/git",
+    ["-c", "core.fsmonitor=false", "rev-parse", "--show-toplevel"],
+    options,
+  );
+  if (await realpath(String(repository.stdout).trim()) !== canonicalRoot) {
+    throw new Error("Memory authority root is not the Git repository root");
+  }
+  await gitRun(
+    "/usr/bin/git",
+    ["-c", "core.fsmonitor=false", "add", "--", relativePath],
+    options,
+  );
+  const staged = await gitRun(
+    "/usr/bin/git",
+    ["-c", "core.fsmonitor=false", "diff", "--cached", "--name-only", "--", relativePath],
+    options,
+  );
+  const paths = String(staged.stdout).trim().split("\n").filter(Boolean);
+  if (paths.length === 0) return false;
+  if (paths.length !== 1 || paths[0] !== relativePath) {
+    throw new Error("Memory authority Git staging escaped the managed page");
+  }
+  await gitRun(
+    "/usr/bin/git",
+    [
+      "-c", "core.fsmonitor=false",
+      "-c", "core.hooksPath=/dev/null",
+      "-c", "user.name=Foursday",
+      "-c", "user.email=foursday@localhost",
+      "commit", "--no-gpg-sign", "-m", subject, "--", relativePath,
+    ],
+    options,
+  );
+  const remaining = await gitRun(
+    "/usr/bin/git",
+    ["-c", "core.fsmonitor=false", "status", "--porcelain=v1", "--", relativePath],
+    options,
+  );
+  if (String(remaining.stdout).trim()) {
+    throw new Error("Memory authority Git path remained dirty after commit");
+  }
+  return true;
+}
+
 export async function retireGbrainMarkdownAuthority(
   gbrainPath,
   { slug, contentSha256, cleanupId },
@@ -251,6 +315,7 @@ export async function retireGbrainMarkdownAuthority(
     sourceId = "foursday",
     timeoutMs = 120_000,
     run = execFileAsync,
+    gitRun = execFileAsync,
   } = {},
 ) {
   if (!/^[a-z0-9-]{1,32}$/u.test(String(sourceId ?? ""))) {
@@ -322,6 +387,12 @@ export async function retireGbrainMarkdownAuthority(
     ? await resolveGbrainPath(gbrainPath)
     : gbrainPath;
   try {
+    await commitAuthorityPath(
+      canonicalRoot,
+      difference,
+      `memory: retire ${contentSha256.slice(0, 12)}`,
+      { gitRun },
+    );
     await run(executable, ["sync", "--source", sourceId], {
       timeout: timeoutMs,
       maxBuffer: 8 * 1024 * 1024,
@@ -356,6 +427,12 @@ export async function retireGbrainMarkdownAuthority(
     const quarantined = await lstat(quarantine).catch(() => null);
     if (!active && quarantined?.isFile() && !quarantined.isSymbolicLink()) {
       await rename(quarantine, destination);
+      await commitAuthorityPath(
+        canonicalRoot,
+        difference,
+        `memory: restore ${contentSha256.slice(0, 12)}`,
+        { gitRun },
+      ).catch(() => {});
       await run(executable, ["sync", "--source", sourceId], {
         timeout: timeoutMs,
         maxBuffer: 8 * 1024 * 1024,

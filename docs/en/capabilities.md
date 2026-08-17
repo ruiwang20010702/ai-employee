@@ -173,10 +173,10 @@ candidates never enter the authority page.
 Migration 023 adds a transactional cleanup outbox. Revocation, explicit
 replacement, permanent deletion, and privacy erasure enqueue the encrypted
 managed slug, source, and digest. The five-minute memory service temporarily
-moves the digest-matched Markdown file outside the gbrain source, syncs the
-exact source, requires the original slug to be unreadable, and then removes the
-temporary file. A failed sync or read-back restores the file and leaves a
-retryable job.
+moves the digest-matched Markdown file outside the gbrain source, commits that
+single-path deletion, syncs the exact source, requires the original slug to be
+unreadable, and then removes the temporary file. A failed sync or read-back
+commits a restoration and leaves a retryable job.
 
 ### Project recipe shadow validation
 

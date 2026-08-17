@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import {
   authorityMarkdownForMemory,
   authoritySlugForMemory,
@@ -21,6 +23,13 @@ import {
 import { reconcileMemoryAuthorityCleanup } from "../src/memory-authority-cleanup.mjs";
 
 const now = new Date("2026-08-17T08:00:00.000Z");
+const execFileAsync = promisify(execFile);
+
+async function initializeGit(root) {
+  await execFileAsync("/usr/bin/git", ["init", "--quiet", root], {
+    env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+  });
+}
 
 function memory(overrides = {}) {
   return {
@@ -210,6 +219,7 @@ test("gbrain 写适配器使用参数数组和最小环境并校验回执身份"
 test("Markdown 权威写入先原子落盘再同步 gbrain，且拒绝覆盖人工修改", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "foursday-authority-"));
   t.after(() => rm(root, { recursive: true, force: true }));
+  await initializeGit(root);
   const slug = "atoms/foursday/principles/core/abc";
   const calls = [];
   await writeGbrainMarkdownAuthority("/trusted/gbrain", {
@@ -237,6 +247,7 @@ test("受管理 Markdown 撤销后隔离原文件、同步并精确确认 gbrain
   const temporary = await mkdtemp(join(tmpdir(), "foursday-authority-cleanup-"));
   const root = join(temporary, "brain");
   await mkdir(root);
+  await initializeGit(root);
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const slug = "atoms/foursday/principles/core/cleanup";
   const content = "# governed\n";
@@ -300,6 +311,7 @@ test("gbrain 删除同步失败时恢复原 Markdown 文件", async (t) => {
   const temporary = await mkdtemp(join(tmpdir(), "foursday-authority-restore-"));
   const root = join(temporary, "brain");
   await mkdir(root);
+  await initializeGit(root);
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const slug = "atoms/foursday/principles/core/restore";
   const content = "# restore me\n";
