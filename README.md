@@ -102,7 +102,9 @@ projects/  concepts/  prospective/
 ```
 
 Low-risk facts become usable only after Markdown write, a path-scoped Git
-commit, exact gbrain read-back, and PostgreSQL projection. Revocation,
+commit, exact gbrain read-back, and PostgreSQL projection. Each project keeps
+at most 12 core authority facts by default; detailed rules
+stay in project knowledge pages and are read only when needed. Revocation,
 replacement, deletion, and privacy erasure atomically enqueue cleanup; the
 worker commits the managed Markdown deletion, syncs, verifies that the original
 slug is unreadable, and removes the temporary file outside the source. Failures

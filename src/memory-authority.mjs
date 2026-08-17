@@ -42,6 +42,21 @@ function normalizedFactKey(memory) {
   return value;
 }
 
+function projectMemoryPriority(memory) {
+  const factKey = String(memory?.scope?.factKey ?? "");
+  const exact = [
+    "goal.verified_hours_returned_weekly",
+    "principle.authorized_execution_and_verification",
+    "decision.memory_storage_roles",
+    "decision.memory_source_isolation",
+  ];
+  const exactIndex = exact.indexOf(factKey);
+  if (exactIndex >= 0) return exactIndex;
+  const prefix = ["goal.", "principle.", "decision.", "risk.", "constraint.", "interface.", "delivery."]
+    .findIndex((value) => factKey.startsWith(value));
+  return 100 + (prefix >= 0 ? prefix : 99);
+}
+
 export function isManagedMemoryAuthority(memory) {
   return memory?.source_type === "gbrain" &&
     memory?.scope?.authority?.schema === memoryAuthoritySchema &&
@@ -286,6 +301,7 @@ export async function synchronizeMemoryAuthority({
   autoConfirmMinimumConfidence = 0.95,
   now = new Date(),
   limit = 100,
+  maxProjectFacts = 12,
   writePage = writeGbrainMarkdownAuthority,
   writeBatchPage = writeGbrainMarkdownAuthorityBatch,
   readPage = readGbrainPage,
@@ -295,6 +311,9 @@ export async function synchronizeMemoryAuthority({
 } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
     throw new Error("Memory authority sync limit must be 1-500");
+  }
+  if (!Number.isSafeInteger(maxProjectFacts) || maxProjectFacts < 1 || maxProjectFacts > 100) {
+    throw new Error("Memory authority project fact limit must be 1-100");
   }
   const byId = new Map();
   for (const sourceType of promotableSourceTypes) {
@@ -320,12 +339,42 @@ export async function synchronizeMemoryAuthority({
       .map((memory) => String(memory.scope?.authority?.origin?.memoryId ?? ""))
       .filter(Boolean),
   );
-  const eligible = memories.filter((memory) =>
+  const candidates = memories.filter((memory) =>
     promotableSourceTypes.has(memory.source_type) &&
     memory.sensitivity !== "confidential" &&
     memory.scope?.factKey &&
     !projectedSourceIds.has(memory.id)
   );
+  const activeProjectCounts = new Map();
+  for (const memory of existingAuthority) {
+    if (
+      isManagedMemoryAuthority(memory) &&
+      ["proposed", "confirmed"].includes(memory.status) &&
+      memory.project_id
+    ) {
+      activeProjectCounts.set(
+        memory.project_id,
+        (activeProjectCounts.get(memory.project_id) ?? 0) + 1,
+      );
+    }
+  }
+  const eligible = [];
+  let deferred = 0;
+  for (const memory of [...candidates].sort((left, right) =>
+    projectMemoryPriority(left) - projectMemoryPriority(right) ||
+      String(left.scope?.factKey ?? "").localeCompare(String(right.scope?.factKey ?? "")))) {
+    if (!memory.project_id || !["project", "principle"].includes(memory.type)) {
+      eligible.push(memory);
+      continue;
+    }
+    const count = activeProjectCounts.get(memory.project_id) ?? 0;
+    if (count >= maxProjectFacts) {
+      deferred += 1;
+      continue;
+    }
+    activeProjectCounts.set(memory.project_id, count + 1);
+    eligible.push(memory);
+  }
   if (eligible.length > limit) {
     throw new Error("Memory authority sync limit reached");
   }
@@ -333,6 +382,7 @@ export async function synchronizeMemoryAuthority({
     inspected: memories.length,
     eligible: eligible.length,
     alreadyProjected: projectedSourceIds.size,
+    deferred,
     promoted: 0,
     confirmed: 0,
     failed: 0,

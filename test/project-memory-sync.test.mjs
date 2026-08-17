@@ -284,6 +284,26 @@ test("模型夹带未支持类型时逐条拒绝而不让整批固定来源同�
   assert.equal(result.reviewRequired, 1);
 });
 
+test("固定来源单轮最多接受十二条核心项目记忆", async (t) => {
+  const { project, store, runtime } = await fixture(t);
+  runtime.generateArtifact = async () => ({
+    runtimeId: "test-runtime",
+    output: JSON.stringify({ memories: Array.from({ length: 13 }, (_, index) => ({
+      type: "project",
+      statement: `Stable decision ${index}.`,
+      factKey: `decision.stable_${String(index).padStart(2, "0")}`,
+      sourceId: "source_0",
+      sourceQuote: "The project must verify every external side effect by reading the target system.",
+      sensitivity: "internal",
+      confidence: 1,
+      retentionDays: 180,
+    })) }),
+  });
+  const generated = await previewProjectMemorySync({ project, store, runtime, now });
+  assert.equal(generated.preview.candidates.length, 12);
+  assert.equal(generated.preview.rejectedByAuthorization, 1);
+});
+
 test("后台同步仅在授权来源变化时调用模型并在成功后推进检查点", async (t) => {
   const { root, project, store, runtime } = await fixture(t);
   let runtimeCalls = 0;

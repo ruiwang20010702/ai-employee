@@ -263,6 +263,44 @@ test("默认权威同步批量写入一次并对每页执行精确回读", async
   assert.equal(report.failed, 0);
 });
 
+test("项目权威记忆达到硬上限后其余事实保持数据库候选而不写 gbrain", async () => {
+  const sources = Array.from({ length: 3 }, (_, index) => memory({
+    id: `project-source-${index}`,
+    statement: `Project fact ${index}.`,
+    scope: { factKey: `decision.fact_${index}` },
+  }));
+  const written = [];
+  const documents = new Map();
+  const report = await synchronizeMemoryAuthority({
+    store: {
+      async listMemories({ sourceType }) {
+        if (sourceType === "gbrain") return [];
+        return sourceType === "dingtalk_message" ? sources : [];
+      },
+      async upsertAuthorityMemoryProjection(input) {
+        return { id: `authority-${input.sourceMemoryId}`, status: "proposed", created: true };
+      },
+      async confirmMemory() {},
+    },
+    maxProjectFacts: 2,
+    writeBatchPage: async (_path, batch) => {
+      for (const document of batch) {
+        written.push(document.slug);
+        documents.set(document.slug, document);
+      }
+      return { pages: batch.length, written: batch.length, synchronized: true };
+    },
+    readPage: async (_path, slug) => ({
+      slug,
+      content: documents.get(slug).content,
+      updatedAt: now.toISOString(),
+    }),
+  });
+  assert.equal(written.length, 2);
+  assert.equal(report.promoted, 2);
+  assert.equal(report.deferred, 1);
+});
+
 test("受管理 gbrain 记忆可覆盖人物和原则命名空间", () => {
   assert.equal(isManagedMemoryAuthority({
     source_type: "gbrain",

@@ -166,6 +166,13 @@ export function loadConfig({
   if (memorySourceLimit > 5_000) {
     throw new Error("AI_EMPLOYEE_MEMORY_SOURCE_LIMIT must be <= 5000");
   }
+  const memoryAuthorityMaxProjectFacts = positiveInteger(
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_MAX_PROJECT_FACTS",
+    12,
+  );
+  if (memoryAuthorityMaxProjectFacts > 100) {
+    throw new Error("AI_EMPLOYEE_MEMORY_AUTHORITY_MAX_PROJECT_FACTS must be <= 100");
+  }
   const memoryAuthorityMode = choice(
     "AI_EMPLOYEE_MEMORY_AUTHORITY_MODE",
     production ? "gbrain" : "disabled",
@@ -408,6 +415,7 @@ export function loadConfig({
     ),
     memorySourceLeaseMs,
     memorySourceLimit,
+    memoryAuthorityMaxProjectFacts,
     memoryAuthorityMode,
     memoryAuthorityWrite,
     memoryAuthorityAutoConfirm,

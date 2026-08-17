@@ -11,7 +11,8 @@ import {
 } from "./historical-project-import.mjs";
 
 const maximumGeneratedBytes = 256 * 1024;
-const maximumMemories = 100;
+const maximumGeneratedMemories = 100;
+const maximumAcceptedMemories = 12;
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -44,7 +45,7 @@ function generatorPrompt(project, rule, sources) {
     `Allowed fact-key prefixes: ${rule.allowedFactKeyPrefixes.join(", ")}`,
     `Maximum retention days: ${rule.maxRetentionDays}`,
     "Return JSON with exactly one top-level key named memories.",
-    `memories must be an array with at most ${maximumMemories} items.`,
+    `memories must be an array with at most ${maximumAcceptedMemories} items.`,
     "Each item must contain type, statement, factKey, sourceId, sourceQuote, sensitivity, confidence, and retentionDays.",
     "type must be project or principle. sourceId must match the declared source_N identifier.",
     "sourceQuote must be a short exact quotation from that source file and must directly support statement.",
@@ -69,11 +70,26 @@ function parseGeneratedMemories(output) {
     Object.keys(parsed).length !== 1 ||
     !Object.hasOwn(parsed, "memories") ||
     !Array.isArray(parsed.memories) ||
-    parsed.memories.length > maximumMemories
+    parsed.memories.length > maximumGeneratedMemories
   ) {
     throw new Error("Project memory generator returned an invalid memory envelope");
   }
   return parsed.memories;
+}
+
+function generatedMemoryPriority(memory) {
+  const factKey = String(memory?.factKey ?? "");
+  const exact = [
+    "goal.verified_hours_returned_weekly",
+    "principle.authorized_execution_and_verification",
+    "decision.memory_storage_roles",
+    "decision.memory_source_isolation",
+  ];
+  const exactIndex = exact.indexOf(factKey);
+  if (exactIndex >= 0) return exactIndex;
+  const prefix = ["goal.", "principle.", "decision.", "risk.", "constraint.", "interface.", "delivery."]
+    .findIndex((value) => factKey.startsWith(value));
+  return 100 + (prefix >= 0 ? prefix : 99);
 }
 
 function generatedMemoryAllowed(memory, rule, sourceIds) {
@@ -198,12 +214,13 @@ export async function previewProjectMemorySync({
   }
   const rawMemories = parseGeneratedMemories(generated.output);
   const sourceIds = new Set(sources.map((source) => source.id));
-  const rejectedByAuthorization = rawMemories.filter(
-    (memory) => !generatedMemoryAllowed(memory, rule, sourceIds),
-  ).length;
-  const memories = rawMemories.filter((memory) =>
+  const allowedMemories = rawMemories.filter((memory) =>
     generatedMemoryAllowed(memory, rule, sourceIds),
-  );
+  ).sort((left, right) =>
+    generatedMemoryPriority(left) - generatedMemoryPriority(right) ||
+      String(left.factKey).localeCompare(String(right.factKey)));
+  const memories = allowedMemories.slice(0, maximumAcceptedMemories);
+  const rejectedByAuthorization = rawMemories.length - memories.length;
   const bundle = {
     schema: historicalProjectImportSchema,
     project: {

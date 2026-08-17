@@ -82,7 +82,7 @@ atoms/  conversations/  people/  preferences/
 projects/  concepts/  prospective/
 ```
 
-低风险事实只有完成 Markdown 写入、单文件 Git 提交、gbrain 精确回读和 PostgreSQL 投影后才可使用。撤销、替代、永久删除或隐私擦除会先在 PostgreSQL 事务内登记回收作业，再提交受管理 Markdown 的删除、同步并验证原 slug 已不可读，最后删除 source 外临时文件；失败会提交恢复并重试。冲突保持隔离；凭据、PII、敏感人物材料和机密候选直接拒绝。
+低风险事实只有完成 Markdown 写入、单文件 Git 提交、gbrain 精确回读和 PostgreSQL 投影后才可使用。每个项目默认最多保留 12 条核心权威事实，其余细节留在知识文档中按需读取。撤销、替代、永久删除或隐私擦除会先在 PostgreSQL 事务内登记回收作业，再提交受管理 Markdown 的删除、同步并验证原 slug 已不可读，最后删除 source 外临时文件；失败会提交恢复并重试。冲突保持隔离；凭据、PII、敏感人物材料和机密候选直接拒绝。
 
 ## 与普通机器人的区别
 

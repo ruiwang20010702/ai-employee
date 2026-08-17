@@ -33,6 +33,7 @@ try {
           config.memoryAuthorityAutoConfirmMinimumConfidence,
         leaseMs: config.memorySourceLeaseMs,
         limit: Math.min(config.memorySourceLimit, 500),
+        maxProjectFacts: config.memoryAuthorityMaxProjectFacts,
         authorityRoot: config.memoryAuthorityRoot,
         authoritySourceId: config.memoryAuthoritySourceId,
       })
