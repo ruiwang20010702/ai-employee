@@ -422,6 +422,18 @@ export async function proposeDraftMemoryCandidates({
   return { ...summary, candidates: review.candidates };
 }
 
+export function autoApprovalEligible({ draft, isGroup, config, completion }) {
+  return config.autoApproveLowRiskReplies === true &&
+    config.capabilities.has("send_message") &&
+    completion?.status === "awaiting_approval" &&
+    isGroup === false &&
+    draft.shouldReply === true &&
+    draft.needsInformation === false &&
+    draft.workRequest?.requested !== true &&
+    draft.riskLevel === "low" &&
+    Number(draft.confidence) >= Number(config.autoApproveMinimumConfidence ?? 0.95);
+}
+
 export async function processDraftTask({
   store,
   dws,
@@ -647,6 +659,19 @@ export async function processDraftTask({
           ...memoryReview.rejectedReasons,
           ...memorySummary.rejectedReasons,
         ])],
+      });
+    }
+    if (autoApprovalEligible({ draft, isGroup, config, completion })) {
+      await store.decideTask(task.id, {
+        decision: "approved",
+        actor: "system:auto-approve-low-risk-reply",
+        reason: "bounded_low_risk_direct_reply",
+      });
+      log("worker.draft_auto_approved", {
+        taskId: task.id,
+        riskLevel: draft.riskLevel,
+        confidence: draft.confidence,
+        chatType: "direct",
       });
     }
     if (

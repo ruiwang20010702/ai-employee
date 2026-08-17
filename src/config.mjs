@@ -256,6 +256,19 @@ export function loadConfig({
   const capabilities = new Set(
     commaSeparated("AI_EMPLOYEE_ALLOWED_CAPABILITIES", "draft_reply"),
   );
+  const autoApproveLowRiskReplies = boolean(
+    "AI_EMPLOYEE_AUTO_APPROVE_LOW_RISK_REPLIES",
+    false,
+  );
+  const autoApproveMinimumConfidence = fraction(
+    "AI_EMPLOYEE_AUTO_APPROVE_MIN_CONFIDENCE",
+    0.95,
+  );
+  if (autoApproveLowRiskReplies && !capabilities.has("send_message")) {
+    throw new Error(
+      "AI_EMPLOYEE_AUTO_APPROVE_LOW_RISK_REPLIES requires send_message",
+    );
+  }
   if (
     capabilities.has("work_plan_execution") &&
     !requiredComponents.includes("executor")
@@ -438,6 +451,8 @@ export function loadConfig({
       0.9,
     ),
     capabilities,
+    autoApproveLowRiskReplies,
+    autoApproveMinimumConfidence,
     debugContent: process.env.AI_EMPLOYEE_DEBUG_CONTENT === "true",
   };
 }

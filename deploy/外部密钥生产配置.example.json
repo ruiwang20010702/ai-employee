@@ -30,5 +30,7 @@
   "AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT": "/absolute/path/to/gbrain-vault/brain",
   "AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID": "foursday",
   "AI_EMPLOYEE_REQUIRED_OPERATIONAL_CHECKS": "listener:last-full-success,worker:manual-reply:last-success,memory-source:last-success",
-  "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply"
+  "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply",
+  "AI_EMPLOYEE_AUTO_APPROVE_LOW_RISK_REPLIES": false,
+  "AI_EMPLOYEE_AUTO_APPROVE_MIN_CONFIDENCE": 0.95
 }

@@ -7,12 +7,48 @@ import { Store } from "../src/store.mjs";
 import { FeishuAdapter } from "../src/feishu.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 import {
+  autoApprovalEligible,
   classifyDirectConversationRoles,
   processApprovedTask,
   processDraftTask,
   reconcileManualReplies,
   runWorker,
 } from "../src/worker.mjs";
+
+test("无人值守只自动批准高置信低风险私聊普通回复", () => {
+  const config = {
+    autoApproveLowRiskReplies: true,
+    autoApproveMinimumConfidence: 0.95,
+    capabilities: new Set(["draft_reply", "send_message"]),
+  };
+  const draft = {
+    shouldReply: true,
+    needsInformation: false,
+    riskLevel: "low",
+    confidence: 0.98,
+    workRequest: { requested: false },
+  };
+  assert.equal(autoApprovalEligible({
+    draft, isGroup: false, config,
+    completion: { status: "awaiting_approval" },
+  }), true);
+  for (const change of [
+    { isGroup: true },
+    { draft: { ...draft, riskLevel: "medium" } },
+    { draft: { ...draft, confidence: 0.94 } },
+    { draft: { ...draft, needsInformation: true } },
+    { draft: { ...draft, workRequest: { requested: true } } },
+    { completion: { status: "expired" } },
+  ]) {
+    assert.equal(autoApprovalEligible({
+      draft,
+      isGroup: false,
+      config,
+      completion: { status: "awaiting_approval" },
+      ...change,
+    }), false);
+  }
+});
 
 test("私聊上下文用当前源消息识别对方并正确标记双方角色", () => {
   const task = {
@@ -226,6 +262,33 @@ test("Worker 只生成草稿并进入待审批", async (t) => {
     },
   });
   assert.equal(store.getTask(taskId).status, "awaiting_approval");
+});
+
+test("无人值守模式自动批准高置信低风险私聊草稿", async (t) => {
+  const store = await fixture(t);
+  const taskId = enqueue(store);
+  await processDraftTask({
+    store,
+    dws: { async fetchDirect() { return [{ content: "上下文" }]; } },
+    config: {
+      ...baseConfig,
+      capabilities: new Set(["draft_reply", "send_message"]),
+      autoApproveLowRiskReplies: true,
+      autoApproveMinimumConfidence: 0.95,
+    },
+    async generator() {
+      return {
+        shouldReply: true,
+        reply: "我先处理。",
+        confidence: 0.98,
+        riskLevel: "low",
+        reason: "普通低风险回复",
+        needsInformation: false,
+        workRequest: { requested: false },
+      };
+    },
+  });
+  assert.equal(store.getTask(taskId).status, "approved");
 });
 
 test("Worker 读取源消息之前二十四小时的私聊并向草稿传递双方角色", async (t) => {

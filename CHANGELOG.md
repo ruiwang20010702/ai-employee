@@ -11,6 +11,7 @@ preview or production until a later exact-commit release.
 
 ### Added
 
+- An optional, default-off unattended-send policy may auto-approve only high-confidence, low-risk direct-chat replies with no clarification or work request. Group chat, plans, medium/high risk, human-takeover checks, idempotency, and receipt verification remain unchanged.
 - `foursday init --apply` now creates a protected seven-directory Markdown memory skeleton, an independent Git repository, and a unique non-federated `foursday-<suffix>` gbrain source when gbrain is available. Missing gbrain is reported as pending instead of being presented as success; memory writes and auto-confirm stay disabled.
 - The English and Chinese GitHub homepages are now concise navigation surfaces instead of duplicated product, pilot, growth, and operations manuals; canonical detail remains in the existing topic documents.
 - Direct-message drafts now rebuild a bounded 24-hour conversation window, identify self versus the other participant from the exact source message, and treat messages up to two minutes apart as one review episode. Confirmed project-identity aliases route only the matching project memories and preserve that association for later shorthand in the same conversation. A later unsent draft expires the older draft and approval, including reverse completion races; unverifiable history retries instead of silently falling back to one-message drafting.

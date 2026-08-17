@@ -455,3 +455,30 @@ test("生产默认使用 gbrain 记忆权威且自动确认必须先开放写入
     }
   }
 });
+
+test("无人值守低风险回复必须同时开放真实私聊发送", () => {
+  const names = [
+    "AI_EMPLOYEE_ALLOWED_CAPABILITIES",
+    "AI_EMPLOYEE_AUTO_APPROVE_LOW_RISK_REPLIES",
+    "AI_EMPLOYEE_AUTO_APPROVE_MIN_CONFIDENCE",
+  ];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.AI_EMPLOYEE_ALLOWED_CAPABILITIES = "draft_reply";
+    process.env.AI_EMPLOYEE_AUTO_APPROVE_LOW_RISK_REPLIES = "true";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /requires send_message/u,
+    );
+    process.env.AI_EMPLOYEE_ALLOWED_CAPABILITIES = "draft_reply,send_message";
+    process.env.AI_EMPLOYEE_AUTO_APPROVE_MIN_CONFIDENCE = "0.97";
+    const config = loadConfig({ requireTargets: false });
+    assert.equal(config.autoApproveLowRiskReplies, true);
+    assert.equal(config.autoApproveMinimumConfidence, 0.97);
+  } finally {
+    for (const name of names) {
+      if (previous[name] == null) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});

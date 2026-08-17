@@ -64,6 +64,11 @@ flowchart LR
 | Proactive mode | Scheduled or event-triggered follow-up | Triggers start disabled |
 | GitHub delivery | Issue → patch → branch → tests → push → Draft PR | Approved repositories and commands only |
 
+Optional unattended sending is deliberately narrow: only direct-chat replies
+with `riskLevel=low`, confidence at least 0.95, no clarification, and no work
+request may be auto-approved. Group replies, commitments, plans, and medium/high
+risk content still require review; takeover and receipt checks still run.
+
 Historical import is two-stage: preview first, then the exact typed `IMPORT-...`
 digest plus the write token creates proposed facts only. Project-memory settings
 use a dual-token, zero-write preview bound to `MEMORY-AUTH-...`; it never opens
