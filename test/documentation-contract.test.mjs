@@ -69,8 +69,8 @@ test("技术部署与业务自动化放量的状态口径不互相冒充", async
     projectText("docs/验收报告.md"),
     projectText("docs/统一审查报告.md"),
   ]);
-  assert.match(matrix, /V2\.4 技术版本[^\n]*已部署/u);
-  assert.match(matrix, /业务自动化尚未放量/u);
+  assert.match(matrix, /具体生产提交、迁移数量、服务健康和开关必须以[^\n]*回读为准/u);
+  assert.match(matrix, /有界群聊自动回复/u);
   assert.match(acceptance, /技术发布完成不等于业务自动化放量/u);
   assert.match(review, /V2\.4 发布后补充[^\n]*仍未放量/u);
   for (const text of [matrix, acceptance, review]) {
@@ -85,7 +85,7 @@ test("完成度矩阵明确区分目标能力、当前授权和已部署闭环",
   ]);
   assert.match(requirements, /产品能力目标，不代表当前生产已经开放相应权限/u);
   assert.match(matrix, /当前生产已有 1 个 Foursday 项目/u);
-  assert.match(matrix, /已随第 017 号迁移部署生产/u);
+  assert.match(matrix, /独立等待状态/u);
   assert.match(matrix, /时间与次数门禁已部署生产/u);
   assert.match(matrix, /费用估算和实际费用核销尚未闭环/u);
   assert.doesNotMatch(matrix, /第 01[78] 号迁移尚未应用生产/u);
@@ -138,7 +138,7 @@ test("项目记忆同步工作台口径绑定模型调用、服务端快照和�
   assert.match(readmeZh, /显式使用写入令牌才调用模型/u);
   assert.match(requirements, /生成包只在服务端保存十分钟/u);
   assert.match(capabilities, /generated bundle stays only in server memory for ten minutes/u);
-  assert.match(matrix, /统一记忆.*技术候选已实现并通过 PostgreSQL 回归/u);
+  assert.match(matrix, /统一记忆.*第 023 号候选/u);
   for (const text of [readme, readmeZh, requirements, capabilities]) {
     assert.match(text, /(?:already authorized|既有授权|不能超出既有授权|already-authorized)/u);
   }
@@ -222,9 +222,8 @@ test("权威文档区分当前技术部署与业务放量状态", async () => {
   assert.ok(version);
   assert.ok(productionSha);
   assert.equal(version, "V2.5");
-  assert.match(matrix, /V2\.4 技术版本[^\n]*已部署/u);
-  assert.doesNotMatch(matrix, /V2\.4[^\n|]*(?:尚未提交|尚未推送|尚未部署)/u);
-  assert.match(matrix, /业务自动化尚未放量/u);
+  assert.match(matrix, /具体生产提交、迁移数量、服务健康和开关必须以[^\n]*回读为准/u);
+  assert.match(matrix, /代码通过不等于生产放量/u);
   assert.match(review, /V2\.4 发布后补充/u);
   assert.ok(technical.includes(`当前生产提交为 \`${productionSha}\``));
   for (const text of [readme, matrix, acceptance, review, technical, overview, operations]) {

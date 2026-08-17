@@ -179,6 +179,10 @@ export function loadConfig({
     "AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM",
     false,
   );
+  const memoryAuthorityAutoConfirmMinimumConfidence = fraction(
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM_MIN_CONFIDENCE",
+    0.95,
+  );
   const memoryAuthorityRoot = process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT?.trim() || null;
   const memoryAuthoritySourceId = String(
     process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID ?? "foursday",
@@ -264,9 +268,32 @@ export function loadConfig({
     "AI_EMPLOYEE_AUTO_APPROVE_MIN_CONFIDENCE",
     0.95,
   );
+  const autoApproveGroupReplies = boolean(
+    "AI_EMPLOYEE_AUTO_APPROVE_GROUP_REPLIES",
+    false,
+  );
+  const autoApproveClarifications = boolean(
+    "AI_EMPLOYEE_AUTO_APPROVE_CLARIFICATIONS",
+    false,
+  );
   if (autoApproveLowRiskReplies && !capabilities.has("send_message")) {
     throw new Error(
       "AI_EMPLOYEE_AUTO_APPROVE_LOW_RISK_REPLIES requires send_message",
+    );
+  }
+  if (autoApproveGroupReplies && !autoApproveLowRiskReplies) {
+    throw new Error(
+      "AI_EMPLOYEE_AUTO_APPROVE_GROUP_REPLIES requires low-risk auto approval",
+    );
+  }
+  if (autoApproveGroupReplies && !capabilities.has("send_group_message")) {
+    throw new Error(
+      "AI_EMPLOYEE_AUTO_APPROVE_GROUP_REPLIES requires send_group_message",
+    );
+  }
+  if (autoApproveClarifications && !autoApproveLowRiskReplies) {
+    throw new Error(
+      "AI_EMPLOYEE_AUTO_APPROVE_CLARIFICATIONS requires low-risk auto approval",
     );
   }
   if (
@@ -384,6 +411,7 @@ export function loadConfig({
     memoryAuthorityMode,
     memoryAuthorityWrite,
     memoryAuthorityAutoConfirm,
+    memoryAuthorityAutoConfirmMinimumConfidence,
     memoryAuthorityRoot,
     memoryAuthoritySourceId,
     requireMessageReconciliation: boolean(
@@ -453,6 +481,8 @@ export function loadConfig({
     capabilities,
     autoApproveLowRiskReplies,
     autoApproveMinimumConfidence,
+    autoApproveGroupReplies,
+    autoApproveClarifications,
     debugContent: process.env.AI_EMPLOYEE_DEBUG_CONTENT === "true",
   };
 }

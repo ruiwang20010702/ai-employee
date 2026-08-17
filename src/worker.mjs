@@ -423,15 +423,132 @@ export async function proposeDraftMemoryCandidates({
 }
 
 export function autoApprovalEligible({ draft, isGroup, config, completion }) {
-  return config.autoApproveLowRiskReplies === true &&
+  const baseEligible = config.autoApproveLowRiskReplies === true &&
     config.capabilities.has("send_message") &&
     completion?.status === "awaiting_approval" &&
-    isGroup === false &&
     draft.shouldReply === true &&
-    draft.needsInformation === false &&
     draft.workRequest?.requested !== true &&
     draft.riskLevel === "low" &&
     Number(draft.confidence) >= Number(config.autoApproveMinimumConfidence ?? 0.95);
+  if (!baseEligible) return false;
+  if (draft.needsInformation === true) {
+    return isGroup === false && config.autoApproveClarifications === true;
+  }
+  if (isGroup) return config.autoApproveGroupReplies === true;
+  return true;
+}
+
+const requestedCapabilityPatterns = Object.freeze([
+  ["production_deploy", /(?:部署|上线|发布生产|production\s+deploy)/iu],
+  ["git_push", /(?:git\s+push|推送(?:代码|分支|提交))/iu],
+  ["github_pr_draft", /(?:创建|提交|开)(?:一个)?\s*(?:draft\s*)?(?:pr|pull request)/iu],
+  ["local_test", /(?:运行|执行|跑)(?:一下)?(?:测试|test|check)/iu],
+  ["code_patch", /(?:修改|修复|实现|改)(?:一下|下)?(?:代码|功能|bug|缺陷)/iu],
+  ["dingtalk_todo_create", /(?:创建|新建|添加)(?:钉钉)?待办/iu],
+  ["dingtalk_calendar_create", /(?:创建|新建|安排)(?:钉钉)?(?:日程|会议)/iu],
+  ["dingtalk_report_submit", /(?:提交|发送|填写)(?:钉钉)?(?:日报|周报|日志)/iu],
+  ["document_draft", /(?:撰写|起草|写)(?:一份|一个)?(?:文档|方案|prd|报告)/iu],
+  ["research", /(?:研究|调研|分析)(?:一下|下)?/iu],
+]);
+
+const prohibitedWorkPattern = /(?:转账|付款|支付|签署合同|代签|录用|辞退|调薪|绩效决定|审批通过|绕过(?:审批|权限))|(?:(?:泄露|提供|发送)[^。！？\n]{0,12}(?:密码|令牌|密钥|私钥|cookie|凭据))/iu;
+
+export async function applyExecutionBoundary({ draft, task, config }) {
+  if (draft.workRequest?.requested !== true) return draft;
+  const objective = String(draft.workRequest.objective ?? "").trim();
+  if (prohibitedWorkPattern.test(objective)) {
+    return {
+      ...draft,
+      reply: "这项请求涉及我明确不能代办的高风险或越权操作，我暂时无法执行。请由负责人在正式业务系统中处理；我可以在不接触秘密、不替人作决定的前提下协助整理材料。",
+      confidence: 1,
+      riskLevel: "low",
+      reason: "请求命中禁止执行边界，返回确定性能力不足说明。",
+      needsInformation: false,
+      workRequest: null,
+      decisionSource: "authorization_boundary",
+      decisionKind: "prohibited_request",
+    };
+  }
+  if (!config.projectsDirectory) return draft;
+  let projects;
+  try {
+    projects = config.projectsDirectory
+      ? await loadProjectManifests(config.projectsDirectory)
+      : new Map();
+  } catch {
+    return {
+      ...draft,
+      reply: "项目授权状态暂时无法核对，我现在不能安全执行这项工作。请稍后重试或由负责人在 Foursday 管理台检查项目授权。",
+      confidence: 1,
+      riskLevel: "low",
+      reason: "项目授权不可用时按失败关闭处理。",
+      needsInformation: false,
+      workRequest: null,
+      decisionSource: "authorization_boundary",
+      decisionKind: "authorization_unavailable",
+    };
+  }
+  const eligible = [...projects.values()].filter((project) =>
+    project.requesters.includes(task.sender_user_id),
+  );
+  const hint = String(draft.workRequest.projectHint ?? "").trim().toLowerCase();
+  const exact = hint
+    ? eligible.filter((project) =>
+        project.projectId.toLowerCase() === hint || project.name.toLowerCase() === hint)
+    : [];
+  const project = exact.length === 1
+    ? exact[0]
+    : eligible.length === 1 && !hint
+      ? eligible[0]
+      : null;
+  if (!project) {
+    if (eligible.length > 1) {
+      return {
+        ...draft,
+        reply: `我目前能访问多个已授权项目，请先告诉我这项工作属于哪个项目：${eligible.slice(0, 5).map((item) => item.name).join("、")}。`,
+        confidence: 1,
+        riskLevel: "low",
+        reason: "执行请求缺少唯一项目，需要一次最小澄清。",
+        needsInformation: true,
+        workRequest: null,
+        decisionSource: "authorization_boundary",
+        decisionKind: "project_ambiguous",
+      };
+    }
+    return {
+      ...draft,
+      reply: "这项工作目前不在我被授予的项目范围内，我暂时无法代你执行。请由负责人先在 Foursday 中授权对应项目和能力。",
+      confidence: 1,
+      riskLevel: "low",
+      reason: "请求人没有唯一匹配的项目授权。",
+      needsInformation: false,
+      workRequest: null,
+      decisionSource: "authorization_boundary",
+      decisionKind: "project_not_authorized",
+    };
+  }
+  const required = requestedCapabilityPatterns
+    .filter(([, pattern]) => pattern.test(objective))
+    .map(([capability]) => capability);
+  const unavailable = required.filter((capability) => {
+    const rule = project.capabilities?.[capability];
+    return !rule || rule.mode === "disabled" ||
+      (rule.expiresAt && new Date(rule.expiresAt) <= new Date());
+  });
+  if (unavailable.length > 0) {
+    return {
+      ...draft,
+      reply: `当前项目尚未授权这项操作（${unavailable.join("、")}），我暂时无法代执行。我可以先整理方案，或请负责人在 Foursday 中补充对应能力授权。`,
+      confidence: 1,
+      riskLevel: "low",
+      reason: "请求所需能力未在当前项目开放。",
+      needsInformation: false,
+      workRequest: null,
+      decisionSource: "authorization_boundary",
+      decisionKind: "capability_not_authorized",
+    };
+  }
+  return draft;
 }
 
 export async function processDraftTask({
@@ -625,8 +742,13 @@ export async function processDraftTask({
     const memoryReview = sanitizeDraftMemoryCandidates(
       generatedDraft.memoryCandidates,
     );
+    const boundedDraft = await applyExecutionBoundary({
+      draft: generatedDraft,
+      task,
+      config,
+    });
     const draft = {
-      ...generatedDraft,
+      ...boundedDraft,
       memoryCandidates: memoryReview.candidates,
     };
     const completion = await completeDraft(draft);
@@ -671,7 +793,8 @@ export async function processDraftTask({
         taskId: task.id,
         riskLevel: draft.riskLevel,
         confidence: draft.confidence,
-        chatType: "direct",
+        chatType: isGroup ? "group" : "direct",
+        clarification: draft.needsInformation === true,
       });
     }
     if (

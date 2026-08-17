@@ -195,6 +195,7 @@ export async function runPlanExecutor({
     codexPath: config.codexPath,
     dwsPath: config.dwsPath,
     gbrainPath: config.gbrainPath,
+    gbrainSourceId: config.memoryAuthoritySourceId,
     ghPath: config.ghPath,
     store,
   });

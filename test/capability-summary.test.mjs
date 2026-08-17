@@ -116,7 +116,7 @@ test("能力自述准确说明发送与计划执行开关", async () => {
     manifestLoader: async () => manifests,
   });
   assert.match(draft.reply, /计划提案/u);
-  assert.match(draft.reply, /私聊或群聊回复可在逐条人工审批后发送/u);
+  assert.match(draft.reply, /私聊或群聊回复已开放；每条回复都需人工审批/u);
   assert.match(draft.reply, /计划执行已开启/u);
   assert.doesNotMatch(draft.reply, /真实发送关闭|计划自动执行关闭/u);
 });

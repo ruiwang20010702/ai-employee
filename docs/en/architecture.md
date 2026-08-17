@@ -57,6 +57,12 @@ flowchart LR
 
 Managed low-risk semantic facts use deterministic `atoms/foursday/` pages. The source and subject identities are fingerprinted in Markdown while the original provenance stays encrypted in PostgreSQL. A write is not usable memory until exact gbrain read-back and PostgreSQL projection both succeed. Conflicts remain proposed; credentials, PII, sensitive person material, and confidential candidates are rejected.
 
+Revocation is also cross-system: PostgreSQL commits a cleanup outbox entry in
+the same transaction as revocation, replacement, deletion, or privacy erasure.
+The memory service temporarily moves the digest-matched Markdown file outside
+the source, syncs, verifies that the original slug is absent, and removes the
+temporary file. Failure restores the file and keeps the job retryable.
+
 Production defaults to `AI_EMPLOYEE_MEMORY_AUTHORITY_MODE=gbrain`. Writes and safe auto-confirm are separate default-off gates. Enabling either does not enable message sending, plan execution, or proactive work. Production formal memory never loads the SQLite adapter.
 
 The personal brain keeps the `default` gbrain source. Automated work memory

@@ -281,9 +281,11 @@ test("知识页适配器只按精确 slug 调用 gbrain 并校验返回身份", 
   t.after(() => rm(directory, { recursive: true, force: true }));
   const executable = join(directory, "fake-gbrain");
   const argumentsRecord = join(directory, "gbrain-arguments.txt");
+  const sourceRecord = join(directory, "gbrain-source.txt");
   await writeFile(executable, [
     "#!/bin/sh",
     `printf '%s' "$*" > '${argumentsRecord}'`,
+    `printf '%s' "$GBRAIN_SOURCE" > '${sourceRecord}'`,
     "if [ \"$1\" = 'version' ]; then printf 'gbrain test\\n'; exit 0; fi",
     "printf '%s\\n' '{\"slug\":\"projects/test/spec\",\"title\":\"规范\",\"type\":\"document\",\"compiled_truth\":\"统一口径\",\"tags\":[\"正式\"]}'",
   ].join("\n"), { mode: 0o700 });
@@ -299,6 +301,7 @@ test("知识页适配器只按精确 slug 调用 gbrain 并校验返回身份", 
   const adapter = createReadOnlyWorkAdapters({
     codexPath: "/bin/false",
     gbrainPath: executable,
+    gbrainSourceId: "foursday",
   }).knowledge_read;
   await adapter.preflight(input);
   const result = await adapter.execute(input);
@@ -306,6 +309,7 @@ test("知识页适配器只按精确 slug 调用 gbrain 并校验返回身份", 
   assert.equal(result.evidence.verification, "exact_slug_and_project_prefix");
   assert.deepEqual(result.evidence.slugs, ["projects/test/spec"]);
   assert.match(await readFile(argumentsRecord, "utf8"), /^call get_page /u);
+  assert.equal(await readFile(sourceRecord, "utf8"), "foursday");
   assert.doesNotMatch(await readFile(argumentsRecord, "utf8"), /query|search|fuzzy/u);
   input.step.inputs = { slugs: ["projects/other/secret"] };
   await assert.rejects(

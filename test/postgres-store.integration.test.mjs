@@ -1549,6 +1549,27 @@ integration("PostgreSQL 将来源候选原子迁移为 gbrain 权威投影", asy
   }, now);
   assert.equal(repeated.created, false);
   assert.equal(repeated.id, projection.id);
+  await store.revokeMemory(projection.id, "owner", new Date(now.getTime() + 2_000));
+  const cleanup = await store.claimMemoryAuthorityCleanup(
+    "integration-cleanup",
+    new Date(now.getTime() + 3_000),
+  );
+  assert.equal(cleanup.memoryId, projection.id);
+  assert.equal(cleanup.slug, authority.source_id);
+  assert.equal(cleanup.authoritySourceId, "foursday");
+  assert.equal(cleanup.contentSha256, "b".repeat(64));
+  await store.completeMemoryAuthorityCleanup(
+    cleanup.id,
+    "integration-cleanup",
+    new Date(now.getTime() + 4_000),
+  );
+  const storedCleanup = await store.pool.query(
+    `SELECT status, completed_at FROM memory_authority_cleanup_jobs
+     WHERE tenant_id = $1 AND id = $2`,
+    [store.tenantId, cleanup.id],
+  );
+  assert.equal(storedCleanup.rows[0].status, "completed");
+  assert.ok(storedCleanup.rows[0].completed_at);
 });
 
 integration("PostgreSQL 冲突记忆必须显式替代且不产生双活事实", async (t) => {

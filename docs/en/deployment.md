@@ -145,7 +145,12 @@ Password login creates an in-memory session for up to eight hours using an `Http
 | `production:verify` | Strict business blockers are absent |
 | `shadow:verify` | Quality, long-window SLO, effect evidence, and memory gates allow rollout |
 
-A deployed release may be service-available while business readiness is false. Deployment never turns on real sending or plan execution automatically.
+A deployed release may be service-available while business readiness is false.
+Deployment never turns on real sending or plan execution automatically. An
+operator who opts into unattended replies must configure the low-risk master
+gate plus separate group and clarification gates. Group auto-approval still
+requires an allowlisted explicit mention, and group clarifications remain
+approval-bound.
 
 ## V2.3 deployed-code rollout boundary
 

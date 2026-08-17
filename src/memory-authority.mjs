@@ -160,6 +160,7 @@ export async function promoteMemoryToAuthority(memory, {
   store,
   gbrainPath = "gbrain",
   autoConfirm = false,
+  autoConfirmMinimumConfidence = 0.95,
   now = new Date(),
   writePage = writeGbrainMarkdownAuthority,
   readPage = readGbrainPage,
@@ -172,6 +173,13 @@ export async function promoteMemoryToAuthority(memory, {
   }
   if (!Number.isFinite(leaseMs) || leaseMs < 600_000 || leaseMs > 3_600_000) {
     throw new Error("Memory authority lease must be 10-60 minutes");
+  }
+  if (
+    !Number.isFinite(Number(autoConfirmMinimumConfidence)) ||
+    Number(autoConfirmMinimumConfidence) < 0 ||
+    Number(autoConfirmMinimumConfidence) > 1
+  ) {
+    throw new Error("Memory authority auto-confirm confidence must be 0-1");
   }
   const document = authorityMarkdownForMemory(memory, {
     generatedAt: memory.created_at ?? now,
@@ -201,7 +209,11 @@ export async function promoteMemoryToAuthority(memory, {
     actor: "system:memory-authority",
   }, now);
   let confirmed = false;
-  if (autoConfirm && projection.status === "proposed") {
+  if (
+    autoConfirm &&
+    projection.status === "proposed" &&
+    Number(memory.confidence) >= Number(autoConfirmMinimumConfidence)
+  ) {
     try {
       await store.confirmMemory(
         projection.id,
@@ -230,6 +242,7 @@ export async function synchronizeMemoryAuthority({
   store,
   gbrainPath = "gbrain",
   autoConfirm = false,
+  autoConfirmMinimumConfidence = 0.95,
   now = new Date(),
   limit = 100,
   writePage = writeGbrainMarkdownAuthority,
@@ -273,6 +286,7 @@ export async function synchronizeMemoryAuthority({
         store,
         gbrainPath,
         autoConfirm,
+        autoConfirmMinimumConfidence,
         now,
         writePage,
         readPage,

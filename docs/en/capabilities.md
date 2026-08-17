@@ -165,9 +165,18 @@ When `AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE=true`, eligible low-risk candidates
 are written to deterministic `atoms/foursday/` pages. The runtime then reads the
 exact page back and verifies its slug, statement block, digest, and version
 before creating a usable PostgreSQL projection. `AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM`
-is a separate gate and requires writes to be enabled. Conflicts remain
+is a separate gate, requires writes to be enabled, and also applies
+`AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM_MIN_CONFIDENCE`. Conflicts remain
 quarantined, while credentials, PII, sensitive person material, and confidential
 candidates never enter the authority page.
+
+Migration 023 adds a transactional cleanup outbox. Revocation, explicit
+replacement, permanent deletion, and privacy erasure enqueue the encrypted
+managed slug, source, and digest. The five-minute memory service temporarily
+moves the digest-matched Markdown file outside the gbrain source, syncs the
+exact source, requires the original slug to be unreadable, and then removes the
+temporary file. A failed sync or read-back restores the file and leaves a
+retryable job.
 
 ### Project recipe shadow validation
 
@@ -287,8 +296,10 @@ duplicate, and conflict checks. `autoConfirm` applies only to confidence-1,
 non-confidential, conflict-free facts. Conflicts, sensitive output, source
 changes, and policy violations fail closed or stay in the review queue. With
 `approval_required`, applying a sync still requires the current `SYNC-...`
-preview confirmation. Scheduling this command is optional and never enables
-message sending, work-plan execution, or proactive work by itself.
+preview confirmation. Production also runs the same unchanged-source gate
+inside the five-minute memory-source service when both project and global
+authorization are active. Scheduling the standalone command is optional and
+never enables message sending, work-plan execution, or proactive work by itself.
 
 The personal cockpit uses the same policy with an additional anti-tampering
 boundary. Before invoking a model, the owner can configure this policy without
@@ -327,6 +338,11 @@ capability is disabled, and ignores projects whose project-level memory mode is
 not `automatic`. An expired project authorization is skipped before source
 inspection or model invocation; the manual preview path enforces the same
 expiry boundary.
+
+Exact project knowledge reads are independently bounded by
+`knowledge_read.allowedSlugPrefixes`, page and byte limits, and the configured
+Foursday gbrain source. The executor never falls back to the personal `default`
+source, and downstream steps must cite the read through `knowledgeStepIds`.
 
 ## Human takeover
 

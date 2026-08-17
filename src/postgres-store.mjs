@@ -198,6 +198,31 @@ function graphLimit(value) {
   return limit;
 }
 
+function managedAuthorityCleanup(memory) {
+  const authority = memory?.scope?.authority;
+  if (
+    memory?.source_type !== "gbrain" ||
+    authority?.schema !== "foursday-memory-authority/v1" ||
+    authority?.managed !== true ||
+    !/^atoms\/foursday\/[a-z0-9/_-]+$/u.test(String(memory.source_id ?? "")) ||
+    !/^[a-f0-9]{64}$/u.test(String(authority.contentSha256 ?? "")) ||
+    !/^[a-z0-9-]{1,32}$/u.test(String(authority.sourceId ?? ""))
+  ) return null;
+  return {
+    memoryId: memory.id,
+    slug: memory.source_id,
+    contentSha256: authority.contentSha256,
+    authoritySourceId: authority.sourceId,
+  };
+}
+
+function authorityCleanupId(tenantId, memoryId) {
+  return `memory_cleanup_${createHash("sha256")
+    .update(`${tenantId}\n${memoryId}`)
+    .digest("hex")
+    .slice(0, 32)}`;
+}
+
 export class PostgresStore {
   constructor(config, { pool, readOnly = false } = {}) {
     this.config = config;
@@ -269,6 +294,98 @@ export class PostgresStore {
     } finally {
       client.release();
     }
+  }
+
+  async _enqueueMemoryAuthorityCleanup(
+    client,
+    row,
+    reason,
+    now = new Date(),
+  ) {
+    const cleanup = managedAuthorityCleanup(memoryFromRow(row, this.cipher));
+    if (!cleanup) return false;
+    const result = await client.query(
+      `INSERT INTO memory_authority_cleanup_jobs(
+         id, tenant_id, memory_id, slug_ciphertext, authority_source_id,
+         content_sha256, reason, status, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$8)
+       ON CONFLICT (tenant_id, memory_id) DO NOTHING`,
+      [
+        authorityCleanupId(this.tenantId, cleanup.memoryId),
+        this.tenantId,
+        cleanup.memoryId,
+        this.cipher.encrypt(cleanup.slug),
+        cleanup.authoritySourceId,
+        cleanup.contentSha256,
+        reason,
+        now,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async claimMemoryAuthorityCleanup(owner, now = new Date(), leaseMs = 120_000) {
+    if (!String(owner ?? "").trim()) throw new Error("Cleanup owner is required");
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 30_000 || leaseMs > 600_000) {
+      throw new Error("Cleanup lease must be between 30 seconds and 10 minutes");
+    }
+    return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT * FROM memory_authority_cleanup_jobs
+         WHERE tenant_id = $1 AND status IN ('pending','failed','processing')
+           AND attempts < 10
+           AND (status <> 'processing' OR lease_expires_at <= $2)
+         ORDER BY created_at ASC
+         LIMIT 1 FOR UPDATE SKIP LOCKED`,
+        [this.tenantId, now],
+      );
+      if (selected.rowCount === 0) return null;
+      const leaseExpiresAt = new Date(now.getTime() + leaseMs);
+      const updated = await client.query(
+        `UPDATE memory_authority_cleanup_jobs
+         SET status = 'processing', attempts = attempts + 1,
+             lease_owner = $3, lease_expires_at = $4, updated_at = $5
+         WHERE tenant_id = $1 AND id = $2 RETURNING *`,
+        [this.tenantId, selected.rows[0].id, owner, leaseExpiresAt, now],
+      );
+      const row = updated.rows[0];
+      return {
+        id: row.id,
+        memoryId: row.memory_id,
+        slug: this.cipher.decrypt(row.slug_ciphertext),
+        authoritySourceId: row.authority_source_id,
+        contentSha256: row.content_sha256,
+        reason: row.reason,
+        attempts: row.attempts,
+        leaseOwner: row.lease_owner,
+        leaseExpiresAt: row.lease_expires_at,
+      };
+    });
+  }
+
+  async completeMemoryAuthorityCleanup(id, owner, now = new Date()) {
+    const result = await this.pool.query(
+      `UPDATE memory_authority_cleanup_jobs
+       SET status = 'completed', completed_at = $4, updated_at = $4,
+           lease_owner = NULL, lease_expires_at = NULL, last_error_code = NULL
+       WHERE tenant_id = $1 AND id = $2 AND status = 'processing' AND lease_owner = $3`,
+      [this.tenantId, id, owner, now],
+    );
+    if (result.rowCount !== 1) throw new Error("Memory authority cleanup lease was lost");
+    return "completed";
+  }
+
+  async failMemoryAuthorityCleanup(id, owner, errorCode, now = new Date()) {
+    const code = String(errorCode ?? "cleanup_failed").replaceAll(/[^a-z0-9_]/gu, "_").slice(0, 100) || "cleanup_failed";
+    const result = await this.pool.query(
+      `UPDATE memory_authority_cleanup_jobs
+       SET status = 'failed', updated_at = $4, lease_owner = NULL,
+           lease_expires_at = NULL, last_error_code = $5
+       WHERE tenant_id = $1 AND id = $2 AND status = 'processing' AND lease_owner = $3`,
+      [this.tenantId, id, owner, now, code],
+    );
+    if (result.rowCount !== 1) throw new Error("Memory authority cleanup lease was lost");
+    return "failed";
   }
 
   async audit(client, {
@@ -2187,6 +2304,15 @@ export class PostgresStore {
         [this.tenantId, id, replacementId, now, actor],
       );
       if (replacementId) {
+        const replacement = activeResult.rows.find((item) => item.id === replacementId);
+        if (replacement) {
+          await this._enqueueMemoryAuthorityCleanup(
+            client,
+            replacement,
+            "superseded",
+            now,
+          );
+        }
         await client.query(
           `UPDATE memory_items SET status = 'revoked', updated_at = $3, updated_by = $4
            WHERE tenant_id = $1 AND id = $2 AND status = 'confirmed'`,
@@ -2204,6 +2330,20 @@ export class PostgresStore {
 
   async revokeMemory(id, actor, now = new Date()) {
     return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT * FROM memory_items
+         WHERE tenant_id = $1 AND id = $2
+           AND status IN ('proposed', 'confirmed') AND deleted_at IS NULL
+         FOR UPDATE`,
+        [this.tenantId, id],
+      );
+      if (selected.rowCount !== 1) throw new Error("Memory cannot be revoked");
+      await this._enqueueMemoryAuthorityCleanup(
+        client,
+        selected.rows[0],
+        "revoked",
+        now,
+      );
       const result = await client.query(
         `UPDATE memory_items SET status = 'revoked', updated_at = $3, updated_by = $4
          WHERE tenant_id = $1 AND id = $2
@@ -2427,12 +2567,18 @@ export class PostgresStore {
     }
     return this.transaction(async (client) => {
       const selected = await client.query(
-        `SELECT id FROM memory_items
+        `SELECT * FROM memory_items
          WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
          FOR UPDATE`,
         [this.tenantId, id],
       );
       if (selected.rowCount !== 1) throw new Error("Memory cannot be deleted");
+      await this._enqueueMemoryAuthorityCleanup(
+        client,
+        selected.rows[0],
+        "deleted",
+        now,
+      );
       const result = await client.query(
         `UPDATE memory_items SET
            subject_key = $3, subject_ciphertext = $4, project_id = NULL,
@@ -4867,7 +5013,7 @@ export class PostgresStore {
            work_plan_steps, capability_budget_usage, time_return_entries,
            shadow_time_return_entries,
            work_trigger_runs, work_triggers,
-           memory_items, checkpoints, audit_events,
+           memory_items, memory_authority_cleanup_jobs, checkpoints, audit_events,
            governed_graph_edges, governed_graph_nodes
          IN SHARE ROW EXCLUSIVE MODE`,
       );
@@ -5008,6 +5154,20 @@ export class PostgresStore {
         );
       }
       for (const id of candidates.ids.memories) {
+        const memoryForCleanup = await client.query(
+          `SELECT * FROM memory_items
+           WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+           FOR UPDATE`,
+          [this.tenantId, id],
+        );
+        if (memoryForCleanup.rowCount === 1) {
+          await this._enqueueMemoryAuthorityCleanup(
+            client,
+            memoryForCleanup.rows[0],
+            "privacy_erased",
+            now,
+          );
+        }
         await client.query(
           `UPDATE memory_items SET supersedes_id = NULL
            WHERE tenant_id = $1 AND supersedes_id = $2`,

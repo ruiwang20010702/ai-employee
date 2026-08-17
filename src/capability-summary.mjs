@@ -10,7 +10,7 @@ const capabilityLabels = Object.freeze({
   work_plan_proposal: "生成工作计划提案",
   reply_draft: "生成回复草稿",
   document_draft: "文档草稿",
-  project_memory_proposal: "形成待人工确认的项目记忆候选",
+  project_memory_proposal: "从固定来源形成受治理项目记忆",
   code_patch: "代码补丁",
   local_branch: "隔离分支和本地提交",
   local_test: "运行项目登记的测试",
@@ -115,7 +115,10 @@ export async function createCapabilityDraft({
     const scope = globalCapabilities.has("send_group_message")
       ? "私聊或群聊回复"
       : "私聊回复";
-    lines.push(`当前模式：${scope}可在逐条人工审批后发送；发送前还会复查你是否已经人工回复。`);
+    const automatic = config.autoApproveLowRiskReplies
+      ? `高置信低风险私聊${config.autoApproveGroupReplies ? "、明确 @ 我的低风险群聊" : ""}${config.autoApproveClarifications ? "和私聊最小追问" : ""}可自动批准`
+      : "每条回复都需人工审批";
+    lines.push(`当前模式：${scope}已开放；${automatic}。发送前仍会复查负责人是否已经人工回复。`);
   } else {
     lines.push(
       `当前模式：真实发送关闭，我只产出${canProposePlan ? "判断、草稿和计划提案" : "判断和草稿"}，不会替你发送消息。`,

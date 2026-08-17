@@ -11,6 +11,9 @@ preview or production until a later exact-commit release.
 
 ### Added
 
+- Migration 023 adds a durable memory-authority cleanup outbox. Revocation, replacement, deletion, and privacy erasure move managed Markdown out of the gbrain source, sync, and verify that the original slug is unreadable; failures restore the file and retry.
+- Separate opt-in switches now cover allowlisted, explicitly mentioned low-risk group replies and single-question low-risk direct clarifications. Group clarifications, work requests, and medium/high-risk content remain approval-bound.
+- Project knowledge reads are pinned to the dedicated Foursday gbrain source, fixed-source project-memory sync now runs in the five-minute memory service, and prohibited or unauthorized work receives a deterministic capability-limit reply.
 - An optional, default-off unattended-send policy may auto-approve only high-confidence, low-risk direct-chat replies with no clarification or work request. Group chat, plans, medium/high risk, human-takeover checks, idempotency, and receipt verification remain unchanged.
 - `foursday init --apply` now creates a protected seven-directory Markdown memory skeleton, an independent Git repository, and a unique non-federated `foursday-<suffix>` gbrain source when gbrain is available. Missing gbrain is reported as pending instead of being presented as success; memory writes and auto-confirm stay disabled.
 - The English and Chinese GitHub homepages are now concise navigation surfaces instead of duplicated product, pilot, growth, and operations manuals; canonical detail remains in the existing topic documents.

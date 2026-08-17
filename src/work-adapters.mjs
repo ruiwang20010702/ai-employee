@@ -966,6 +966,7 @@ async function resolveIsolatedWorkspace({
 export function createReadOnlyWorkAdapters({
   codexPath,
   gbrainPath = "gbrain",
+  gbrainSourceId = null,
   artifactRuntime = null,
   evidencePaths = [],
   store = null,
@@ -1156,6 +1157,7 @@ export function createReadOnlyWorkAdapters({
             timeoutMs: rule.timeoutMs ?? 30_000,
             maxBuffer: rule.maxContentBytes + 1024 * 1024,
             signal,
+            sourceId: gbrainSourceId,
           }));
         }
         const content = JSON.stringify(pages, null, 2);
@@ -1249,11 +1251,18 @@ export function createControlledWorkAdapters({
   artifactRuntime = null,
   dwsPath = null,
   gbrainPath = "gbrain",
+  gbrainSourceId = null,
   ghPath = null,
   store = null,
 }) {
   return {
-    ...createReadOnlyWorkAdapters({ codexPath, gbrainPath, artifactRuntime, store }),
+    ...createReadOnlyWorkAdapters({
+      codexPath,
+      gbrainPath,
+      gbrainSourceId,
+      artifactRuntime,
+      store,
+    }),
     project_memory_proposal: {
       async preflight({ plan, step, manifest }) {
         referencedEarlierStep(plan, step, "documentStepId", "document_draft");

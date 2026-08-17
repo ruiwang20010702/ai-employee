@@ -8,6 +8,7 @@ import { FeishuAdapter } from "../src/feishu.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 import {
   autoApprovalEligible,
+  applyExecutionBoundary,
   classifyDirectConversationRoles,
   processApprovedTask,
   processDraftTask,
@@ -48,6 +49,81 @@ test("无人值守只自动批准高置信低风险私聊普通回复", () => {
       ...change,
     }), false);
   }
+});
+
+test("群聊和追问只有各自开关满足时才自动批准", () => {
+  const base = {
+    autoApproveLowRiskReplies: true,
+    autoApproveMinimumConfidence: 0.95,
+    autoApproveGroupReplies: true,
+    autoApproveClarifications: true,
+    capabilities: new Set(["draft_reply", "send_message", "send_group_message"]),
+  };
+  const draft = {
+    shouldReply: true,
+    needsInformation: false,
+    riskLevel: "low",
+    confidence: 0.99,
+    workRequest: null,
+  };
+  assert.equal(autoApprovalEligible({
+    draft, isGroup: true, config: base,
+    completion: { status: "awaiting_approval" },
+  }), true);
+  assert.equal(autoApprovalEligible({
+    draft: { ...draft, needsInformation: true }, isGroup: false, config: base,
+    completion: { status: "awaiting_approval" },
+  }), true);
+  assert.equal(autoApprovalEligible({
+    draft: { ...draft, needsInformation: true }, isGroup: true, config: base,
+    completion: { status: "awaiting_approval" },
+  }), false);
+  assert.equal(autoApprovalEligible({
+    draft, isGroup: true, config: { ...base, autoApproveGroupReplies: false },
+    completion: { status: "awaiting_approval" },
+  }), false);
+});
+
+test("越权或未授权执行请求返回确定性能力不足说明", async () => {
+  const base = {
+    shouldReply: true,
+    reply: "我来处理。",
+    confidence: 0.9,
+    riskLevel: "medium",
+    reason: "请求执行",
+    needsInformation: false,
+    relatedToWaitingTask: false,
+    workRequest: {
+      requested: true,
+      objective: "请替我转账 100 元",
+      projectHint: "",
+    },
+  };
+  const prohibited = await applyExecutionBoundary({
+    draft: base,
+    task: { sender_user_id: "outside-user" },
+    config: {},
+  });
+  assert.equal(prohibited.workRequest, null);
+  assert.equal(prohibited.decisionKind, "prohibited_request");
+  assert.match(prohibited.reply, /暂时无法执行/u);
+  const unauthorized = await applyExecutionBoundary({
+    draft: {
+      ...base,
+      workRequest: {
+        requested: true,
+        objective: "请研究这份方案",
+        projectHint: "unknown-project",
+      },
+    },
+    task: { sender_user_id: "outside-user" },
+    config: {
+      projectsDirectory: "/does/not/exist",
+    },
+  });
+  assert.equal(unauthorized.workRequest, null);
+  assert.equal(unauthorized.decisionKind, "project_not_authorized");
+  assert.match(unauthorized.reply, /不在我被授予的项目范围/u);
 });
 
 test("私聊上下文用当前源消息识别对方并正确标记双方角色", () => {

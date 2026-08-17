@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   access,
   constants,
@@ -222,4 +223,145 @@ export async function writeGbrainMarkdownAuthority(
     env: safeCommandEnvironment(executable),
   });
   return { slug, written: !existing, markdownPathVerified: true };
+}
+
+function managedAuthorityDestination(root, slug) {
+  if (!isAbsolute(String(root ?? ""))) {
+    throw new Error("Memory authority Markdown root must be absolute");
+  }
+  if (!/^atoms\/foursday\/[a-z0-9/_-]+$/u.test(String(slug ?? ""))) {
+    throw new Error("Memory authority slug is outside the managed namespace");
+  }
+  return resolve(root, `${slug}.md`);
+}
+
+async function assertRealDirectory(path, label) {
+  const metadata = await lstat(path);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error(`${label} must be a real directory`);
+  }
+  return realpath(path);
+}
+
+export async function retireGbrainMarkdownAuthority(
+  gbrainPath,
+  { slug, contentSha256, cleanupId },
+  {
+    root,
+    sourceId = "foursday",
+    timeoutMs = 120_000,
+    run = execFileAsync,
+  } = {},
+) {
+  if (!/^[a-z0-9-]{1,32}$/u.test(String(sourceId ?? ""))) {
+    throw new Error("Memory authority source id is invalid");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(String(contentSha256 ?? ""))) {
+    throw new Error("Memory authority cleanup digest is invalid");
+  }
+  if (!/^[a-z0-9_-]{8,100}$/u.test(String(cleanupId ?? ""))) {
+    throw new Error("Memory authority cleanup id is invalid");
+  }
+  const canonicalRoot = await assertRealDirectory(root, "Memory authority Markdown root");
+  const destination = managedAuthorityDestination(canonicalRoot, slug);
+  const difference = relative(canonicalRoot, destination);
+  if (!difference || difference.startsWith("..") || isAbsolute(difference)) {
+    throw new Error("Memory authority cleanup escapes the Markdown root");
+  }
+  let current = canonicalRoot;
+  for (const part of dirname(difference).split("/")) {
+    current = resolve(current, part);
+    const metadata = await lstat(current);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error("Memory authority cleanup path contains an unsafe directory");
+    }
+  }
+  const authorityParent = await assertRealDirectory(
+    dirname(canonicalRoot),
+    "Memory authority parent directory",
+  );
+  const trashRoot = resolve(authorityParent, ".foursday-memory-trash");
+  await mkdir(trashRoot, { mode: 0o700 }).catch((error) => {
+    if (error.code !== "EEXIST") throw error;
+  });
+  if (await assertRealDirectory(trashRoot, "Memory authority trash directory") !== trashRoot) {
+    throw new Error("Memory authority trash directory changed identity");
+  }
+  const quarantine = resolve(trashRoot, `${cleanupId}.md`);
+  const destinationMetadata = await lstat(destination).catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  const quarantineMetadata = await lstat(quarantine).catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (destinationMetadata && quarantineMetadata) {
+    throw new Error("Memory authority cleanup has both active and quarantined files");
+  }
+  if (destinationMetadata) {
+    if (!destinationMetadata.isFile() || destinationMetadata.isSymbolicLink()) {
+      throw new Error("Memory authority cleanup target is not a regular file");
+    }
+    const content = await readFile(destination, "utf8");
+    const digest = createHash("sha256").update(content).digest("hex");
+    if (digest !== contentSha256) {
+      throw new Error("Memory authority cleanup target changed outside Foursday");
+    }
+    await rename(destination, quarantine);
+  } else if (!quarantineMetadata) {
+    throw new Error("Memory authority cleanup target and quarantine are both missing");
+  } else if (!quarantineMetadata.isFile() || quarantineMetadata.isSymbolicLink()) {
+    throw new Error("Memory authority quarantine is not a regular file");
+  }
+  const quarantinedContent = await readFile(quarantine, "utf8");
+  if (createHash("sha256").update(quarantinedContent).digest("hex") !== contentSha256) {
+    throw new Error("Memory authority quarantine digest changed");
+  }
+  const executable = run === execFileAsync
+    ? await resolveGbrainPath(gbrainPath)
+    : gbrainPath;
+  try {
+    await run(executable, ["sync", "--source", sourceId], {
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+      env: safeCommandEnvironment(executable),
+    });
+    try {
+      await run(
+        executable,
+        ["call", "get_page", JSON.stringify({ slug })],
+        {
+          timeout: 30_000,
+          maxBuffer: 2 * 1024 * 1024,
+          env: {
+            ...safeCommandEnvironment(executable),
+            GBRAIN_SOURCE: sourceId,
+          },
+        },
+      );
+      throw new Error("Memory authority page remained readable after cleanup");
+    } catch (error) {
+      if (!/Page not found:/u.test(String(error?.stderr ?? ""))) throw error;
+    }
+    await unlink(quarantine);
+    return {
+      slug,
+      cleanupId,
+      removed: true,
+      readback: "page_not_found",
+    };
+  } catch (error) {
+    const active = await lstat(destination).catch(() => null);
+    const quarantined = await lstat(quarantine).catch(() => null);
+    if (!active && quarantined?.isFile() && !quarantined.isSymbolicLink()) {
+      await rename(quarantine, destination);
+      await run(executable, ["sync", "--source", sourceId], {
+        timeout: timeoutMs,
+        maxBuffer: 8 * 1024 * 1024,
+        env: safeCommandEnvironment(executable),
+      }).catch(() => {});
+    }
+    throw error;
+  }
 }

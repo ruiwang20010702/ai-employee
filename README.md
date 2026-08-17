@@ -64,10 +64,14 @@ flowchart LR
 | Proactive mode | Scheduled or event-triggered follow-up | Triggers start disabled |
 | GitHub delivery | Issue → patch → branch → tests → push → Draft PR | Approved repositories and commands only |
 
-Optional unattended sending is deliberately narrow: only direct-chat replies
-with `riskLevel=low`, confidence at least 0.95, no clarification, and no work
-request may be auto-approved. Group replies, commitments, plans, and medium/high
-risk content still require review; takeover and receipt checks still run.
+Optional unattended sending is deliberately narrow. Ordinary direct replies,
+ordinary replies in allowlisted groups that explicitly mention the account, and
+single-question direct clarifications can be enabled independently; each still
+requires `riskLevel=low`, confidence at least 0.95, and no work request. Group
+clarifications, commitments, plans, and medium/high-risk content still require
+review. Takeover and receipt checks still run. Prohibited, unscoped, or
+unauthorized work gets a deterministic capability-limit reply instead of a
+fabricated completion claim.
 
 Historical import is two-stage: preview first, then the exact typed `IMPORT-...`
 digest plus the write token creates proposed facts only. Project-memory settings
@@ -98,8 +102,11 @@ projects/  concepts/  prospective/
 ```
 
 Low-risk facts become usable only after Markdown write, exact gbrain read-back,
-and PostgreSQL projection. Conflicts stay quarantined. Credentials, PII,
-sensitive person material, and confidential candidates are rejected.
+and PostgreSQL projection. Revocation, replacement, deletion, and privacy
+erasure atomically enqueue cleanup; the worker temporarily moves managed
+Markdown out of the gbrain source, syncs, verifies that the original slug is
+unreadable, and removes the temporary file. Failures restore the file and retry. Conflicts stay quarantined. Credentials,
+PII, sensitive person material, and confidential candidates are rejected.
 
 ## Quick Start
 
@@ -182,7 +189,8 @@ Implementation detail and the four bounded graph explanations live in the
 - [x] Four bounded graph explanations in the project cockpit
 - [x] Isolated gbrain Markdown authority and PostgreSQL runtime projection
 - [ ] Ten distinct external pilot loops
-- [ ] Production rollout after quality and long-window SLO gates
+- [ ] Keep tightening the bounded production rollout with real group,
+  clarification, and long-window SLO evidence
 - [ ] Slack, Teams, Gmail, and Google Workspace production connectors
 
 ## Contributing
