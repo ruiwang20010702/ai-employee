@@ -213,6 +213,9 @@ function managedAuthorityCleanup(memory) {
     slug: memory.source_id,
     contentSha256: authority.contentSha256,
     authoritySourceId: authority.sourceId,
+    originMemoryId: typeof authority.origin?.memoryId === "string"
+      ? authority.origin.memoryId
+      : null,
   };
 }
 
@@ -319,6 +322,51 @@ export class PostgresStore {
         cleanup.contentSha256,
         reason,
         now,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async _revokeMemoryAuthorityOrigin(client, row, actor, now = new Date()) {
+    const cleanup = managedAuthorityCleanup(memoryFromRow(row, this.cipher));
+    if (!cleanup?.originMemoryId || cleanup.originMemoryId === cleanup.memoryId) {
+      return false;
+    }
+    const result = await client.query(
+      `UPDATE memory_items SET status = 'revoked', updated_at = $4, updated_by = $3
+       WHERE tenant_id = $1 AND id = $2 AND source_type <> 'gbrain'
+         AND status IN ('proposed','confirmed') AND deleted_at IS NULL`,
+      [this.tenantId, cleanup.originMemoryId, actor, now],
+    );
+    return result.rowCount === 1;
+  }
+
+  async _eraseMemoryAuthorityOrigin(client, row, now = new Date()) {
+    const cleanup = managedAuthorityCleanup(memoryFromRow(row, this.cipher));
+    if (!cleanup?.originMemoryId || cleanup.originMemoryId === cleanup.memoryId) {
+      return false;
+    }
+    const encryptedEmpty = this.cipher.encrypt("");
+    const result = await client.query(
+      `UPDATE memory_items SET
+         subject_key = $3, subject_ciphertext = $4, project_id = NULL,
+         statement_ciphertext = $4, source_type = 'deleted',
+         source_id_ciphertext = $4, source_version = NULL,
+         source_access_status = 'revoked', source_access_reason = 'deleted',
+         source_access_checked_at = $5, source_access_expires_at = NULL,
+         scope_ciphertext = $6, confidence = 0, status = 'revoked',
+         sensitivity = 'internal', valid_from = NULL, expires_at = NULL,
+         created_by = 'deleted', updated_by = 'deleted', supersedes_id = NULL,
+         created_at = $5, updated_at = $5, deleted_at = $5
+       WHERE tenant_id = $1 AND id = $2 AND source_type <> 'gbrain'
+         AND deleted_at IS NULL`,
+      [
+        this.tenantId,
+        cleanup.originMemoryId,
+        this.cipher.fingerprint(`deleted:${cleanup.originMemoryId}:${randomUUID()}`),
+        encryptedEmpty,
+        now,
+        this.cipher.encrypt("{}"),
       ],
     );
     return result.rowCount === 1;
@@ -2344,6 +2392,12 @@ export class PostgresStore {
         "revoked",
         now,
       );
+      await this._revokeMemoryAuthorityOrigin(
+        client,
+        selected.rows[0],
+        actor,
+        now,
+      );
       const result = await client.query(
         `UPDATE memory_items SET status = 'revoked', updated_at = $3, updated_by = $4
          WHERE tenant_id = $1 AND id = $2
@@ -2579,6 +2633,7 @@ export class PostgresStore {
         "deleted",
         now,
       );
+      await this._eraseMemoryAuthorityOrigin(client, selected.rows[0], now);
       const result = await client.query(
         `UPDATE memory_items SET
            subject_key = $3, subject_ciphertext = $4, project_id = NULL,
@@ -5165,6 +5220,11 @@ export class PostgresStore {
             client,
             memoryForCleanup.rows[0],
             "privacy_erased",
+            now,
+          );
+          await this._eraseMemoryAuthorityOrigin(
+            client,
+            memoryForCleanup.rows[0],
             now,
           );
         }

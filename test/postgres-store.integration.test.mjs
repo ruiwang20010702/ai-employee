@@ -1572,6 +1572,48 @@ integration("PostgreSQL 将来源候选原子迁移为 gbrain 权威投影", asy
   assert.ok(storedCleanup.rows[0].completed_at);
 });
 
+integration("PostgreSQL 撤销或删除权威投影时同步关闭原始来源", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-17T09:00:00.000Z");
+  const createPair = async (suffix) => {
+    const sourceId = await store.proposeMemory({
+      type: "project",
+      subject: `project-${suffix}`,
+      projectId: `project-${suffix}`,
+      statement: `Memory ${suffix} is governed.`,
+      sourceType: "operator",
+      sourceId: `operator-${suffix}`,
+      scope: { factKey: `decision.${suffix}` },
+      confidence: 1,
+      sensitivity: "internal",
+      createdBy: "owner",
+    }, now);
+    await store.confirmMemory(sourceId, "owner", now);
+    const projection = await store.upsertAuthorityMemoryProjection({
+      sourceMemoryId: sourceId,
+      slug: `atoms/foursday/projects/${suffix}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`,
+      sourceVersion: "authority-v1",
+      authorityContentSha256: "c".repeat(64),
+      authoritySourceId: "foursday",
+      accessExpiresAt: new Date(now.getTime() + 900_000),
+      actor: "system:memory-authority",
+    }, now);
+    return { sourceId, projectionId: projection.id };
+  };
+  const revoked = await createPair("revoke");
+  await store.revokeMemory(revoked.projectionId, "owner", now);
+  assert.equal((await store.getMemory(revoked.sourceId)).status, "revoked");
+
+  const deleted = await createPair("delete");
+  await store.deleteMemory(
+    deleted.projectionId,
+    "owner",
+    memoryDeletionConfirmation(deleted.projectionId),
+    now,
+  );
+  assert.equal(await store.getMemory(deleted.sourceId), null);
+});
+
 integration("PostgreSQL 冲突记忆必须显式替代且不产生双活事实", async (t) => {
   const store = await fixture(t);
   const base = {

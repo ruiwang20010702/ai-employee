@@ -186,6 +186,39 @@ test("批量同步只处理可持久化的低风险来源，失败不会冒充�
   );
 });
 
+test("已有受管理投影时不重复写入或同步原始来源", async () => {
+  const source = memory();
+  let writes = 0;
+  const report = await synchronizeMemoryAuthority({
+    store: {
+      async listMemories({ sourceType }) {
+        if (sourceType === "gbrain") {
+          return [{
+            ...source,
+            id: "authority-existing",
+            source_type: "gbrain",
+            source_id: "atoms/foursday/projects/existing/fact",
+            scope: {
+              factKey: source.scope.factKey,
+              authority: {
+                schema: memoryAuthoritySchema,
+                managed: true,
+                origin: { memoryId: source.id },
+              },
+            },
+          }];
+        }
+        return sourceType === source.source_type ? [source] : [];
+      },
+    },
+    writePage: async () => { writes += 1; },
+    readPage: async () => { throw new Error("must not read"); },
+  });
+  assert.equal(report.alreadyProjected, 1);
+  assert.equal(report.eligible, 0);
+  assert.equal(writes, 0);
+});
+
 test("受管理 gbrain 记忆可覆盖人物和原则命名空间", () => {
   assert.equal(isManagedMemoryAuthority({
     source_type: "gbrain",

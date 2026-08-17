@@ -264,10 +264,25 @@ export async function synchronizeMemoryAuthority({
     for (const memory of rows) byId.set(memory.id, memory);
   }
   const memories = [...byId.values()];
+  const existingAuthority = await store.listMemories({
+    sourceType: "gbrain",
+    statuses: ["proposed", "confirmed", "revoked"],
+    limit: limit + 1,
+  });
+  if (existingAuthority.length > limit) {
+    throw new Error("Memory authority projection limit reached");
+  }
+  const projectedSourceIds = new Set(
+    existingAuthority
+      .filter(isManagedMemoryAuthority)
+      .map((memory) => String(memory.scope?.authority?.origin?.memoryId ?? ""))
+      .filter(Boolean),
+  );
   const eligible = memories.filter((memory) =>
     promotableSourceTypes.has(memory.source_type) &&
     memory.sensitivity !== "confidential" &&
-    memory.scope?.factKey
+    memory.scope?.factKey &&
+    !projectedSourceIds.has(memory.id)
   );
   if (eligible.length > limit) {
     throw new Error("Memory authority sync limit reached");
@@ -275,6 +290,7 @@ export async function synchronizeMemoryAuthority({
   const report = {
     inspected: memories.length,
     eligible: eligible.length,
+    alreadyProjected: projectedSourceIds.size,
     promoted: 0,
     confirmed: 0,
     failed: 0,
