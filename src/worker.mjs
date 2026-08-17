@@ -14,6 +14,7 @@ import {
 } from "./dws.mjs";
 import { safeErrorCode } from "./logging.mjs";
 import { routeProjectMemories } from "./project-memory-routing.mjs";
+import { notifyPendingMobileApprovals } from "./mobile-approval.mjs";
 import { sanitizeDraftMemoryCandidates } from "./memory-candidate.mjs";
 import { proposeWorkPlanForTask } from "./plan-proposal.mjs";
 import { loadProjectManifests } from "./project-manifests.mjs";
@@ -1005,6 +1006,7 @@ export async function runWorker({
   let stopped = false;
   let lastHeartbeatAt = 0;
   let lastManualReplyCheckAt = 0;
+  let lastMobileApprovalCheckAt = 0;
   let heartbeatTimer;
   const stopController = new AbortController();
 
@@ -1050,6 +1052,22 @@ export async function runWorker({
       }
     }
     if (await store.isPaused()) return expired > 0 || reconciled > 0;
+    let mobileNotifications = 0;
+    if (
+      config.mobileApprovalEnabled &&
+      Date.now() - lastMobileApprovalCheckAt >= config.mobileApprovalNotifyIntervalMs
+    ) {
+      lastMobileApprovalCheckAt = Date.now();
+      try {
+        const mobile = await notifyPendingMobileApprovals({ store, dws, config });
+        mobileNotifications = mobile.sent;
+        if (mobile.sent > 0) log("mobile_approval.notified", { count: mobile.sent });
+      } catch (error) {
+        log("mobile_approval.notification_error", {
+          errorCode: safeErrorCode(error),
+        });
+      }
+    }
     const draftResults = await Promise.all(
       Array.from(
         { length: config.workerConcurrency ?? 1 },
@@ -1058,7 +1076,7 @@ export async function runWorker({
     );
     const drafted = draftResults.some(Boolean);
     const sent = await processApprovedTask({ store, dws, config });
-    return expired > 0 || reconciled > 0 || drafted || sent;
+    return expired > 0 || reconciled > 0 || mobileNotifications > 0 || drafted || sent;
   };
 
   if (once) {

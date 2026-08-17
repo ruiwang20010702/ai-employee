@@ -37,6 +37,7 @@ evidence, and memory:
 - read the target system back instead of trusting a model or tool receipt;
 - stop when the human takes over;
 - keep durable memory reviewable in isolated gbrain Markdown sources.
+- optionally approve or reject message drafts from a DingTalk self-chat on mobile while keeping high-risk plans in the full console.
 
 DingTalk uses DWS. Feishu uses its official WebSocket and messaging APIs with
 no DWS dependency. `MessageAdapter`, `AgentRuntime`, and `ModelProvider` are

@@ -11,6 +11,7 @@ preview or production until a later exact-commit release.
 
 ### Added
 
+- Optional DingTalk mobile approval for message drafts with owner-only self-chat commands, idempotent notifications, expiry, replay protection, and transactional full-draft hash binding.
 - The Foursday memory runtime now requires an isolated `GBRAIN_HOME` and dedicated PostgreSQL connection. Knowledge reads, Markdown sync, exact read-back, and cleanup all receive that identity explicitly instead of relying on `source_id` alone; managed pages can safely rebind their source version after a physically separate index rebuild when the content digest is unchanged.
 - Migration 023 adds a durable memory-authority cleanup outbox. Authority writes and removals use path-scoped Git commits; revocation, replacement, deletion, and privacy erasure sync and verify that the original slug is unreadable, while failures commit restoration and retry.
 - Memory-authority sync skips existing projections, batches new pages into one gbrain source sync, and performs at most four concurrent exact read-backs so initial fixed-source onboarding does not monopolize the health window.

@@ -528,3 +528,45 @@ test("无人值守低风险回复必须同时开放真实私聊发送", () => {
     }
   }
 });
+
+test("钉钉移动审批必须绑定当前账号并开放消息发送", () => {
+  const names = [
+    "AI_EMPLOYEE_MOBILE_APPROVAL_ENABLED",
+    "AI_EMPLOYEE_MOBILE_APPROVAL_NOTIFY_INTERVAL_MS",
+    "DINGTALK_SELF_USER_ID",
+    "AI_EMPLOYEE_ALLOWED_CAPABILITIES",
+  ];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.AI_EMPLOYEE_MOBILE_APPROVAL_ENABLED = "true";
+    delete process.env.DINGTALK_SELF_USER_ID;
+    process.env.AI_EMPLOYEE_ALLOWED_CAPABILITIES = "draft_reply,send_message";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /requires DINGTALK_SELF_USER_ID/u,
+    );
+    process.env.DINGTALK_SELF_USER_ID = "owner";
+    process.env.AI_EMPLOYEE_ALLOWED_CAPABILITIES = "draft_reply";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /requires send_message/u,
+    );
+    process.env.AI_EMPLOYEE_ALLOWED_CAPABILITIES = "draft_reply,send_message";
+    assert.equal(loadConfig({ requireTargets: false }).mobileApprovalEnabled, true);
+    process.env.AI_EMPLOYEE_MOBILE_APPROVAL_NOTIFY_INTERVAL_MS = "4999";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must be 5000-300000/u,
+    );
+    process.env.AI_EMPLOYEE_MOBILE_APPROVAL_NOTIFY_INTERVAL_MS = "300001";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must be 5000-300000/u,
+    );
+  } finally {
+    for (const name of names) {
+      if (previous[name] == null) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});

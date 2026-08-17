@@ -15,6 +15,7 @@ import { assessWorkPlan } from "../src/work-plan.mjs";
 import { workPlanMemoryEvidenceScope } from "../src/work-evidence.mjs";
 import { capabilityBudgetForPlan } from "../src/capability-budget.mjs";
 import { buildGraphProjection, createGraphEdge, createGraphNode } from "../src/governed-work-graph.mjs";
+import { draftSha256 } from "../src/decision-quality.mjs";
 import {
   applyProjectMemorySync,
   previewProjectMemorySync,
@@ -187,6 +188,24 @@ function messages() {
     },
   ];
 }
+
+integration("PostgreSQL 移动审批在事务内绑定当前完整草稿哈希", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  await store.ingestMessages(messages().slice(0, 1), base);
+  const [taskId] = await store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  await store.claimTask({ now: new Date(base.getTime() + 10) });
+  await store.completeDraft(taskId, {
+    shouldReply: true, reply: "当前草稿", confidence: 0.8, riskLevel: "medium", reason: "需要审批",
+  });
+  await assert.rejects(() => store.decideTask(taskId, {
+    decision: "approved", actor: "dingtalk-mobile", expectedDraftSha256: draftSha256("旧草稿"),
+  }), /draft changed/u);
+  assert.equal((await store.getTask(taskId)).status, "awaiting_approval");
+  assert.equal(await store.decideTask(taskId, {
+    decision: "approved", actor: "dingtalk-mobile", expectedDraftSha256: draftSha256("当前草稿"),
+  }), "approved");
+});
 
 async function sendPostgresClarification(store, taskId, now) {
   await store.claimTask({ now });

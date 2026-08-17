@@ -1344,7 +1344,11 @@ export class Store {
     });
   }
 
-  decideTask(taskId, { decision, actor, reason = "" }, now = new Date()) {
+  decideTask(
+    taskId,
+    { decision, actor, reason = "", expectedDraftSha256 = null },
+    now = new Date(),
+  ) {
     if (!["approved", "rejected"].includes(decision)) {
       throw new Error("decision must be approved or rejected");
     }
@@ -1355,6 +1359,17 @@ export class Store {
       if (!task) throw new Error(`task not found: ${taskId}`);
       if (task.status !== "awaiting_approval") {
         throw new Error(`task is not awaiting approval: ${task.status}`);
+      }
+      if (expectedDraftSha256 != null) {
+        if (!/^[a-f0-9]{64}$/u.test(expectedDraftSha256)) {
+          throw new Error("expected draft sha256 is invalid");
+        }
+        const draft = task.result_json
+          ? JSON.parse(this.cipher.decrypt(task.result_json))
+          : null;
+        if (draftSha256(draft?.reply ?? "") !== expectedDraftSha256) {
+          throw new Error("draft changed; review again");
+        }
       }
       const timestamp = nowIso(now);
       this.db

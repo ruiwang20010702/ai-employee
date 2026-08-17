@@ -1717,6 +1717,8 @@ export async function startAdminServer({
           decision: body.decision,
           actor: "admin-ui",
           reason: String(body.reason ?? ""),
+          expectedDraftSha256:
+            body.decision === "approved" ? body.draftSha256 : null,
         });
         json(response, 200, { status });
         return;

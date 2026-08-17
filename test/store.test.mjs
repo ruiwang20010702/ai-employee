@@ -9,6 +9,7 @@ import { Store } from "../src/store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 import { workPlanMemoryEvidenceScope } from "../src/work-evidence.mjs";
 import { buildGraphProjection, createGraphEdge, createGraphNode } from "../src/governed-work-graph.mjs";
+import { draftSha256 } from "../src/decision-quality.mjs";
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "ai-employee-test-"));
@@ -468,6 +469,24 @@ test("外发必须经过审批并记录幂等副作用", async (t) => {
   );
   store.completeSideEffect(taskId, "send_message", { success: true });
   assert.equal(store.getTask(taskId).status, "completed");
+});
+
+test("SQLite 移动审批在事务内绑定当前完整草稿哈希", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-07-31T10:00:00.000Z");
+  store.ingestMessages(messages().slice(0, 1), base);
+  const [taskId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  store.claimTask({ now: new Date(base.getTime() + 10) });
+  store.completeDraft(taskId, {
+    shouldReply: true, reply: "当前草稿", confidence: 0.8, riskLevel: "medium", reason: "需要审批",
+  });
+  assert.throws(() => store.decideTask(taskId, {
+    decision: "approved", actor: "dingtalk-mobile", expectedDraftSha256: draftSha256("旧草稿"),
+  }), /draft changed/u);
+  assert.equal(store.getTask(taskId).status, "awaiting_approval");
+  assert.equal(store.decideTask(taskId, {
+    decision: "approved", actor: "dingtalk-mobile", expectedDraftSha256: draftSha256("当前草稿"),
+  }), "approved");
 });
 
 test("非发送态不能创建副作用且缺失账本不能确认完成", async (t) => {

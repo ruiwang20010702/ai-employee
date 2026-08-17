@@ -7,6 +7,7 @@ import { bindMessagesToSender, DwsAdapter } from "./dws.mjs";
 import { createProductionStore } from "./production-store.mjs";
 import { safeErrorCode } from "./logging.mjs";
 import { isMainModule } from "./main-module.mjs";
+import { processMobileApprovalCommands } from "./mobile-approval.mjs";
 
 function log(type, fields = {}) {
   console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
@@ -229,6 +230,16 @@ export async function startListener({
       let fetched = 0;
       let inserted = 0;
       let errors = 0;
+      if (config.mobileApprovalEnabled) {
+        try {
+          const mobile = await processMobileApprovalCommands({ store, dws, config });
+          fetched += mobile.fetched;
+          if (mobile.decided > 0) log("mobile_approval.decided", { count: mobile.decided });
+        } catch (error) {
+          errors += 1;
+          log("mobile_approval.command_error", { errorCode: safeErrorCode(error) });
+        }
+      }
       for (const userId of config.targetUserIds) {
         try {
           const result = await ingestTarget({ userId, config, store, dws });

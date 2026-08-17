@@ -150,6 +150,63 @@ test("DWS 子进程只接收工具运行白名单环境", async () => {
   }
 });
 
+test("移动审批只解析与当前账号精确匹配的本人自聊消息", async () => {
+  const calls = [];
+  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
+  dws.run = async (args) => {
+    calls.push(args);
+    if (args[0] === "contact" && args[2] === "get-self") {
+      return { result: [{ orgEmployeeModel: { userId: "owner", orgUserName: "Owner" } }] };
+    }
+    if (args[0] === "contact" && args[2] === "search") {
+      return { result: [{ userId: "owner", openDingTalkId: "DT-OWNER" }] };
+    }
+    return {
+      result: {
+        messages: [
+          { openMessageId: "self", openConversationId: "self-chat", senderUserId: "owner", direction: "outgoing", createTime: "2026-08-17T10:01:00Z", content: "批准 ABCD1234" },
+          { openMessageId: "other", openConversationId: "self-chat", senderUserId: "other", direction: "incoming", createTime: "2026-08-17T10:02:00Z", content: "批准 ABCD1234" },
+        ],
+      },
+    };
+  };
+  const messages = await dws.fetchMobileApprovalMessages({
+    selfUserId: "owner",
+    start: new Date("2026-08-17T10:00:00Z"),
+    end: new Date("2026-08-17T10:03:00Z"),
+  });
+  assert.deepEqual(messages.map((message) => message.id), ["self"]);
+  assert.equal(messages[0].approvalOwnerVerified, true);
+  const listCall = calls.find((args) => args.includes("list-direct"));
+  assert.ok(listCall.includes("--open-dingtalk-id"));
+  assert.equal(listCall.includes("--user"), false);
+});
+
+test("移动审批通知固定发送给当前认证账号并使用幂等 AI 消息", async () => {
+  const calls = [];
+  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
+  dws.run = async (args) => {
+    calls.push(args);
+    if (args[0] === "contact" && args[2] === "get-self") {
+      return { result: [{ orgEmployeeModel: { userId: "owner", orgUserName: "Owner" } }] };
+    }
+    if (args[0] === "contact" && args[2] === "search") {
+      return { result: [{ userId: "owner", openDingTalkId: "DT-OWNER" }] };
+    }
+    return { success: true };
+  };
+  await dws.sendMobileApproval({
+    selfUserId: "owner",
+    text: "待审批",
+    idempotencyKey: "mobile-idempotency",
+  });
+  const send = calls.at(-1);
+  assert.deepEqual(send.slice(0, 4), ["chat", "message", "send", "--open-dingtalk-id"]);
+  assert.ok(send.includes("DT-OWNER"));
+  assert.ok(send.includes("--ai-tag"));
+  assert.equal(send[send.indexOf("--uuid") + 1], "mobile-idempotency");
+});
+
 test("人工回复按当前账号发送记录和会话匹配", async () => {
   const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
   dws.fetchBySenderAll = async ({ senderUserId }) => [

@@ -1118,7 +1118,7 @@ export class PostgresStore {
 
   async decideTask(
     taskId,
-    { decision, actor, reason = "" },
+    { decision, actor, reason = "", expectedDraftSha256 = null },
     now = new Date(),
   ) {
     if (!["approved", "rejected"].includes(decision)) {
@@ -1127,7 +1127,7 @@ export class PostgresStore {
     return this.transaction(async (client) => {
       const selected = await client.query(
         `
-        SELECT status, approval_version
+        SELECT status, approval_version, result_ciphertext
         FROM tasks
         WHERE id = $1 AND tenant_id = $2
         FOR UPDATE
@@ -1138,6 +1138,17 @@ export class PostgresStore {
       const task = selected.rows[0];
       if (task.status !== "awaiting_approval") {
         throw new Error(`task is not awaiting approval: ${task.status}`);
+      }
+      if (expectedDraftSha256 != null) {
+        if (!/^[a-f0-9]{64}$/u.test(expectedDraftSha256)) {
+          throw new Error("expected draft sha256 is invalid");
+        }
+        const draft = task.result_ciphertext
+          ? JSON.parse(this.cipher.decrypt(task.result_ciphertext))
+          : null;
+        if (draftSha256(draft?.reply ?? "") !== expectedDraftSha256) {
+          throw new Error("draft changed; review again");
+        }
       }
       await client.query(
         `

@@ -47,6 +47,7 @@ test("production config initializer writes protected isolated references and ref
   assert.equal(config.DINGTALK_TARGET_USER_IDS, "");
   assert.equal(config.DINGTALK_TARGET_GROUP_IDS, "");
   assert.equal(config.DINGTALK_SELF_USER_ID, "");
+  assert.equal(config.AI_EMPLOYEE_MOBILE_APPROVAL_ENABLED, false);
   assert.equal(config.DATABASE_URL, "");
   assert.equal(result.secretStorage, "keychain");
   assert.equal(result.generatedSecrets.length, 0);

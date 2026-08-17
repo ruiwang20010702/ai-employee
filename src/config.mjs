@@ -355,6 +355,28 @@ export function loadConfig({
       "AI_EMPLOYEE_AUTO_APPROVE_CLARIFICATIONS requires low-risk auto approval",
     );
   }
+  const mobileApprovalEnabled = boolean(
+    "AI_EMPLOYEE_MOBILE_APPROVAL_ENABLED",
+    false,
+  );
+  if (mobileApprovalEnabled && !selfUserId) {
+    throw new Error("AI_EMPLOYEE_MOBILE_APPROVAL_ENABLED requires DINGTALK_SELF_USER_ID");
+  }
+  if (mobileApprovalEnabled && !capabilities.has("send_message")) {
+    throw new Error("AI_EMPLOYEE_MOBILE_APPROVAL_ENABLED requires send_message");
+  }
+  const mobileApprovalNotifyIntervalMs = positiveInteger(
+    "AI_EMPLOYEE_MOBILE_APPROVAL_NOTIFY_INTERVAL_MS",
+    30_000,
+  );
+  if (
+    mobileApprovalNotifyIntervalMs < 5_000 ||
+    mobileApprovalNotifyIntervalMs > 300_000
+  ) {
+    throw new Error(
+      "AI_EMPLOYEE_MOBILE_APPROVAL_NOTIFY_INTERVAL_MS must be 5000-300000",
+    );
+  }
   if (
     capabilities.has("work_plan_execution") &&
     !requiredComponents.includes("executor")
@@ -545,6 +567,8 @@ export function loadConfig({
     autoApproveMinimumConfidence,
     autoApproveGroupReplies,
     autoApproveClarifications,
+    mobileApprovalEnabled,
+    mobileApprovalNotifyIntervalMs,
     debugContent: process.env.AI_EMPLOYEE_DEBUG_CONTENT === "true",
   };
 }

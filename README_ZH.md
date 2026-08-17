@@ -32,6 +32,7 @@ Foursday 把工作消息转化为可审阅回复和项目工作，只执行明�
 - 执行后回读目标系统，不相信模型自述；
 - 人工接管时停止自动流程；
 - 长期记忆保存在可阅读、相互隔离的 gbrain Markdown source。
+- 需要人工判断的消息可以在本机管理台处理，也可以选择在钉钉手机端通过本人自聊短码批准或拒绝；高风险计划仍留在完整控制台。
 
 钉钉使用 DWS；飞书直接使用官方 WebSocket 与消息 API，不依赖 DWS。
 `MessageAdapter`、`AgentRuntime` 和 `ModelProvider` 是独立的版本化契约。
