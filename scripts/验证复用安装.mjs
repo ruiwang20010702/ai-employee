@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { validateCodexPluginPackage } from "../src/codex-plugin-package.mjs";
@@ -22,6 +22,9 @@ import { isMainModule } from "../src/main-module.mjs";
 const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const npmPath = process.platform === "win32" ? "npm.cmd" : "npm";
+const noGbrainEnvironment = {
+  PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+};
 
 function isolatedEnvironment(extra = {}) {
   const allowed = [
@@ -471,9 +474,9 @@ export async function verifyReusableInstallation({
       "Reusable initialization preview created a configuration file",
     );
     const [initializedA, initializedB] = await Promise.all([
-      run(installedGuide, ["init", "--apply"], { cwd: workspaceA })
+      run(installedGuide, ["init", "--apply"], { cwd: workspaceA, env: noGbrainEnvironment })
         .then(({ stdout }) => JSON.parse(stdout)),
-      run(installedGuide, ["init", "--apply"], { cwd: workspaceB })
+      run(installedGuide, ["init", "--apply"], { cwd: workspaceB, env: noGbrainEnvironment })
         .then(({ stdout }) => JSON.parse(stdout)),
     ]);
     const canonicalWorkspaceA = await realpath(workspaceA);
@@ -524,9 +527,24 @@ export async function verifyReusableInstallation({
       ((await stat(workspaceConfigB)).mode & 0o777) === 0o600,
       "Independent workspace paths or permissions are not isolated",
     );
+    assert(
+      /^foursday-[a-f0-9]{16}$/u.test(workspaceValuesA.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID) &&
+      /^foursday-[a-f0-9]{16}$/u.test(workspaceValuesB.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID) &&
+      workspaceValuesA.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID !==
+        workspaceValuesB.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID &&
+      initializedA.memorySource.registered === false &&
+      initializedB.memorySource.registered === false &&
+      initializedA.memorySource.registrationPending === "gbrain_unavailable" &&
+      initializedB.memorySource.registrationPending === "gbrain_unavailable",
+      "Independent workspaces reused a gbrain source or hid pending registration",
+    );
+    await Promise.all([
+      access(join(initializedA.memorySource.root, "projects", "README.md")),
+      access(join(initializedB.memorySource.root, "prospective", "README.md")),
+    ]);
     let workspaceOverwriteRefused = false;
     try {
-      await run(installedGuide, ["init", "--apply"], { cwd: workspaceA });
+      await run(installedGuide, ["init", "--apply"], { cwd: workspaceA, env: noGbrainEnvironment });
     } catch {
       workspaceOverwriteRefused = true;
     }
@@ -534,7 +552,7 @@ export async function verifyReusableInstallation({
     const guideCheck = JSON.parse((await run(
       installedGuide,
       ["check", "--config", configPath],
-      { cwd: runtimeDirectory },
+      { cwd: runtimeDirectory, env: noGbrainEnvironment },
     )).stdout);
     assert(
       guideCheck.schema === "ai-employee-reuse/v1" &&
@@ -557,7 +575,7 @@ export async function verifyReusableInstallation({
     await run(
       installedGuide,
       ["init", "--apply", "--config", configPath],
-      { cwd: runtimeDirectory },
+      { cwd: runtimeDirectory, env: noGbrainEnvironment },
     );
     const configMode = (await stat(configPath)).mode & 0o777;
     assert(configMode === 0o600, "Generated production config permissions are not 600");
@@ -597,7 +615,7 @@ export async function verifyReusableInstallation({
       await run(
         installedGuide,
         ["init", "--apply", "--config", configPath],
-        { cwd: runtimeDirectory },
+        { cwd: runtimeDirectory, env: noGbrainEnvironment },
       );
     } catch {
       refusedOverwrite = true;

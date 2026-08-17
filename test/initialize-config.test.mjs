@@ -26,6 +26,17 @@ test("production config initializer writes protected isolated references and ref
   assert.equal(config.CLAUDE_CODE_PATH, "claude");
   assert.equal(config.AI_EMPLOYEE_AGENT_RUNTIME, "codex");
   assert.equal(config.GBRAIN_PATH, "gbrain");
+  assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE, "gbrain");
+  assert.match(
+    config.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID,
+    /^foursday-[a-f0-9]{16}$/u,
+  );
+  assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE, false);
+  assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM, false);
+  assert.equal(
+    config.AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT,
+    join(directory, "nested", "gbrain", "brain"),
+  );
   assert.equal(config.AI_EMPLOYEE_TENANT_ID, "");
   assert.equal(config.AI_EMPLOYEE_APPROVER, "");
   assert.equal(config.DINGTALK_TARGET_USER_IDS, "");

@@ -11,6 +11,8 @@ preview or production until a later exact-commit release.
 
 ### Added
 
+- `foursday init --apply` now creates a protected seven-directory Markdown memory skeleton, an independent Git repository, and a unique non-federated `foursday-<suffix>` gbrain source when gbrain is available. Missing gbrain is reported as pending instead of being presented as success; memory writes and auto-confirm stay disabled.
+- The English and Chinese GitHub homepages are now concise navigation surfaces instead of duplicated product, pilot, growth, and operations manuals; canonical detail remains in the existing topic documents.
 - Direct-message drafts now rebuild a bounded 24-hour conversation window, identify self versus the other participant from the exact source message, and treat messages up to two minutes apart as one review episode. Confirmed project-identity aliases route only the matching project memories and preserve that association for later shorthand in the same conversation. A later unsent draft expires the older draft and approval, including reverse completion races; unverifiable history retries instead of silently falling back to one-message drafting.
 - A one-time local owner registration page collects a login identifier, optional email alias, and matching password confirmation. Existing read/write tokens prove ownership once; success atomically persists the verifier, signs the owner in, and permanently closes registration.
 - The operations console and personal cockpit now share one local username-or-email and password session, while the existing read/write tokens remain available as an API and recovery compatibility path.

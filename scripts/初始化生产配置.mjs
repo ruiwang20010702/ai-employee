@@ -1,9 +1,13 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultProductionConfigPath } from "../src/production-config-file.mjs";
 import { isMainModule } from "../src/main-module.mjs";
+import {
+  memorySourceBootstrapPlan,
+  memorySourceConfigValues,
+} from "../src/memory-source-bootstrap.mjs";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const examplePath = join(projectRoot, "deploy", "生产配置.example.json");
@@ -14,6 +18,14 @@ function keychainReference(service, account) {
 
 function uniqueKeychainService() {
   return `foursday-${randomBytes(8).toString("hex")}`;
+}
+
+function isolatedMemorySourceId(keychainService) {
+  if (/^foursday-[a-f0-9]{16}$/u.test(keychainService)) return keychainService;
+  return `foursday-${createHash("sha256")
+    .update(String(keychainService))
+    .digest("hex")
+    .slice(0, 16)}`;
 }
 
 export async function initializeProductionConfig({
@@ -45,6 +57,11 @@ export async function initializeProductionConfig({
   values.CLAUDE_CODE_PATH = "claude";
   values.AI_EMPLOYEE_AGENT_RUNTIME = "codex";
   values.GBRAIN_PATH = "gbrain";
+  const memorySource = memorySourceBootstrapPlan({
+    configPath: destination,
+    sourceId: isolatedMemorySourceId(keychainService),
+  });
+  Object.assign(values, memorySourceConfigValues(memorySource));
   values.GH_PATH = "";
   values.AI_EMPLOYEE_TENANT_ID = "";
   values.AI_EMPLOYEE_APPROVER = "";
@@ -73,6 +90,7 @@ export async function initializeProductionConfig({
       "DINGTALK_SELF_USER_ID",
       "AI_EMPLOYEE_APPROVER",
     ],
+    memorySource,
   };
 }
 

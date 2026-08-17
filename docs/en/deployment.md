@@ -50,6 +50,13 @@ npx --no-install foursday secrets
 npx --no-install foursday secrets --apply
 ```
 
+The preview writes nothing. `init --apply` creates the protected production
+configuration plus a seven-directory Markdown skeleton in an independent Git
+repository. Each installation receives a unique `foursday-<suffix>` gbrain
+source ID. If gbrain is available it is registered as non-federated; otherwise
+the result reports `registrationPending` and preflight remains blocked. Memory
+writes and auto-confirm stay disabled in both cases.
+
 Mutating setup commands are preview-only without `--apply`. Initialization refuses to overwrite an existing configuration and stores only workspace-specific Keychain references in a mode-`600` file.
 
 ## Production safety sequence

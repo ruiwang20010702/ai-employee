@@ -16,6 +16,16 @@ async function fixture(t) {
   return { directory, configPath: join(directory, ".runtime", "production.json") };
 }
 
+async function fakeMemorySourceInitializer({ configPath, root }) {
+  return {
+    sourceId: "foursday",
+    root: root ?? join(configPath, "..", "gbrain", "brain"),
+    federated: false,
+    created: true,
+    registered: true,
+  };
+}
+
 test("新环境向导默认使用当前工作目录而不是安装包目录", () => {
   assert.equal(
     reuseConfigPath(["check"], "/workspace/new-owner"),
@@ -186,14 +196,22 @@ test("初始化入口默认只预览，显式应用后创建配置且拒绝覆�
   assert.equal(preview.configExists, false);
   await assert.rejects(readFile(configPath), (error) => error.code === "ENOENT");
 
-  const result = await runReuseGuide({ args: ["init", "--apply"], cwd: directory });
+  const result = await runReuseGuide({
+    args: ["init", "--apply"],
+    cwd: directory,
+    memorySourceInitializer: fakeMemorySourceInitializer,
+  });
   assert.equal(result.path, configPath);
   assert.equal(result.mode, "600");
   assert.equal(result.executed, true);
   assert.equal(result.generatedSecrets.length, 0);
   assert.equal(result.externalSecretReferences.length, 4);
   await assert.rejects(
-    runReuseGuide({ args: ["init", "--apply"], cwd: directory }),
+    runReuseGuide({
+      args: ["init", "--apply"],
+      cwd: directory,
+      memorySourceInitializer: fakeMemorySourceInitializer,
+    }),
     (error) => error.code === "EEXIST",
   );
 });
@@ -235,7 +253,11 @@ test("安装包的一条命令入口启动同一套回环 Web 接入页", async 
 
 test("新环境钥匙串命令默认预览且显式应用参数单独传递", async (t) => {
   const { directory, configPath } = await fixture(t);
-  await runReuseGuide({ args: ["init", "--apply"], cwd: directory });
+  await runReuseGuide({
+    args: ["init", "--apply"],
+    cwd: directory,
+    memorySourceInitializer: fakeMemorySourceInitializer,
+  });
   const calls = [];
   const keychainProvisioner = async (options) => {
     calls.push(options);

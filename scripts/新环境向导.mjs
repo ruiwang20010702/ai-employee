@@ -9,6 +9,10 @@ import { provisionGeneratedKeychainSecrets } from "./初始化钥匙串密钥.mj
 import { inspectReuseReadiness } from "../src/reuse-readiness.mjs";
 import { isMainModule } from "../src/main-module.mjs";
 import { activationHelp, runActivation } from "./启动体验.mjs";
+import {
+  initializeMemorySource,
+  memorySourceBootstrapPlan,
+} from "../src/memory-source-bootstrap.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -223,6 +227,7 @@ export async function runReuseGuide({
   cwd = process.cwd(),
   keychainProvisioner = provisionGeneratedKeychainSecrets,
   configInitializer = initializeProductionConfig,
+  memorySourceInitializer = initializeMemorySource,
   scriptRunner = defaultScriptRunner,
   activationRunner = runActivation,
 } = {}) {
@@ -258,6 +263,7 @@ export async function runReuseGuide({
       throw new Error(`Unexpected argument: ${options.positionals[0]}`);
     }
     if (!options.apply) {
+      const memorySource = memorySourceBootstrapPlan({ configPath });
       return {
         schema: planSchema,
         command,
@@ -266,15 +272,23 @@ export async function runReuseGuide({
         applyRequired: true,
         configPath,
         configExists: await access(configPath).then(() => true).catch(() => false),
-        effect: "创建权限为 600 且只含独立钥匙串引用的生产配置；已有文件绝不覆盖",
+        effect: "创建权限为 600 且只含独立钥匙串引用的生产配置，并初始化隔离、非联邦的 Foursday Markdown 记忆源；已有文件绝不覆盖",
+        memorySource,
       };
     }
     const initialized = await configInitializer({ outputPath: configPath });
+    const memorySource = await memorySourceInitializer({
+      configPath,
+      root: initialized.memorySource?.root,
+      sourceId: initialized.memorySource?.sourceId,
+      gbrainPath: "gbrain",
+    });
     return {
       command,
       dryRun: false,
       executed: true,
       ...initialized,
+      memorySource,
       next: "先运行 foursday secrets --apply，再填写 requiredEdits 并运行 foursday check",
     };
   }
