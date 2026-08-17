@@ -21,11 +21,23 @@ test("生产配置只接受白名单标量并写入指定环境", async () => {
     DATABASE_POOL_MAX: 12,
     DATABASE_SSL: true,
   });
-  const environment = { DATABASE_SECRET: "postgresql://example" };
+  const environment = {
+    DATABASE_SECRET: "postgresql://example",
+    GBRAIN_REMOTE_TOKEN: "personal-token",
+    GBRAIN_REMOTE_URL: "https://personal.example",
+    GBRAIN_HOME: "/personal/gbrain",
+    GBRAIN_DATABASE_URL: "postgresql://personal:secret@localhost/personal",
+    GBRAIN_SOURCE: "default",
+  };
   await applyProductionConfigFile({ path, environment });
   assert.equal(environment.DATABASE_URL, "postgresql://example");
   assert.equal(environment.DATABASE_POOL_MAX, "12");
   assert.equal(environment.DATABASE_SSL, "true");
+  assert.equal(environment.GBRAIN_REMOTE_TOKEN, undefined);
+  assert.equal(environment.GBRAIN_REMOTE_URL, undefined);
+  assert.equal(environment.GBRAIN_HOME, undefined);
+  assert.equal(environment.GBRAIN_DATABASE_URL, undefined);
+  assert.equal(environment.GBRAIN_SOURCE, undefined);
 });
 
 test("生产运行拒绝内联密钥但迁移工具仍可只读识别旧配置", async () => {

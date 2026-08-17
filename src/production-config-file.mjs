@@ -97,6 +97,14 @@ export const productionConfigKeys = new Set([
   "PG_RESTORE_PATH",
 ]);
 
+const personalGbrainEnvironmentKeys = Object.freeze([
+  "GBRAIN_REMOTE_TOKEN",
+  "GBRAIN_REMOTE_URL",
+  "GBRAIN_HOME",
+  "GBRAIN_DATABASE_URL",
+  "GBRAIN_SOURCE",
+]);
+
 export function defaultProductionConfigPath() {
   return fileURLToPath(
     new URL("../.runtime/production.json", import.meta.url),
@@ -153,6 +161,7 @@ export async function applyProductionConfigFile({
       stagedEnvironment[key] = String(value);
     }
   }
+  for (const key of personalGbrainEnvironmentKeys) delete environment[key];
   Object.assign(environment, stagedEnvironment);
   return { configPath, values, resolvedSecretKeys };
 }
