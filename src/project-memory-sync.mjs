@@ -76,10 +76,24 @@ function parseGeneratedMemories(output) {
   return parsed.memories;
 }
 
-function generatedMemoryAllowed(memory, rule) {
+function generatedMemoryAllowed(memory, rule, sourceIds) {
   const factKey = String(memory?.factKey ?? "").trim();
   const retentionDays = Number(memory?.retentionDays);
-  return rule.allowedFactKeyPrefixes.some((prefix) => factKey.startsWith(prefix)) &&
+  const confidence = Number(memory?.confidence);
+  return memory &&
+    !Array.isArray(memory) &&
+    typeof memory === "object" &&
+    ["project", "principle"].includes(memory.type) &&
+    typeof memory.statement === "string" &&
+    memory.statement.trim().length >= 1 &&
+    memory.statement.trim().length <= 1_000 &&
+    typeof memory.sourceQuote === "string" &&
+    memory.sourceQuote.trim().length >= 1 &&
+    memory.sourceQuote.trim().length <= 1_000 &&
+    sourceIds.has(String(memory.sourceId ?? "")) &&
+    ["public", "internal", "confidential"].includes(memory.sensitivity) &&
+    Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 &&
+    rule.allowedFactKeyPrefixes.some((prefix) => factKey.startsWith(prefix)) &&
     Number.isSafeInteger(retentionDays) &&
     retentionDays >= 1 &&
     retentionDays <= rule.maxRetentionDays;
@@ -87,12 +101,13 @@ function generatedMemoryAllowed(memory, rule) {
 
 function assertGeneratedBundleAuthorization(bundle, rule) {
   const expectedSources = sourceDeclarations(rule.sourcePaths);
+  const sourceIds = new Set(expectedSources.map((source) => source.id));
   const actualSources = Array.isArray(bundle?.sources) ? bundle.sources : [];
   const memories = Array.isArray(bundle?.memories) ? bundle.memories : [];
   if (JSON.stringify(actualSources) !== JSON.stringify(expectedSources)) {
     throw new Error("Project memory sync sources no longer match the project authorization");
   }
-  if (memories.some((memory) => !generatedMemoryAllowed(memory, rule))) {
+  if (memories.some((memory) => !generatedMemoryAllowed(memory, rule, sourceIds))) {
     throw new Error("Project memory sync candidate exceeds the project authorization");
   }
 }
@@ -182,10 +197,13 @@ export async function previewProjectMemorySync({
     await rm(isolatedWorkspace, { recursive: true, force: true });
   }
   const rawMemories = parseGeneratedMemories(generated.output);
+  const sourceIds = new Set(sources.map((source) => source.id));
   const rejectedByAuthorization = rawMemories.filter(
-    (memory) => !generatedMemoryAllowed(memory, rule),
+    (memory) => !generatedMemoryAllowed(memory, rule, sourceIds),
   ).length;
-  const memories = rawMemories.filter((memory) => generatedMemoryAllowed(memory, rule));
+  const memories = rawMemories.filter((memory) =>
+    generatedMemoryAllowed(memory, rule, sourceIds),
+  );
   const bundle = {
     schema: historicalProjectImportSchema,
     project: {

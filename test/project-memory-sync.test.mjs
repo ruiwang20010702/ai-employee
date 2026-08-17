@@ -253,6 +253,37 @@ test("自动确认必须绑定固定来源路径和 automatic 模式", () => {
   assert.throws(() => validateProjectManifest(base), /requires automatic mode/u);
 });
 
+test("模型夹带未支持类型时逐条拒绝而不让整批固定来源同步失败", async (t) => {
+  const { project, store, runtime } = await fixture(t);
+  const original = runtime.generateArtifact.bind(runtime);
+  runtime.generateArtifact = async (input) => {
+    const valid = JSON.parse((await original(input)).output).memories[0];
+    return {
+      runtimeId: "test-runtime",
+      output: JSON.stringify({ memories: [
+        valid,
+        {
+          ...valid,
+          type: "knowledge",
+          factKey: "decision.unsupported_type",
+        },
+      ] }),
+    };
+  };
+  const generated = await previewProjectMemorySync({ project, store, runtime, now });
+  assert.equal(generated.preview.candidates.length, 1);
+  assert.equal(generated.preview.rejectedByAuthorization, 1);
+  const result = await applyProjectMemorySync({
+    generated,
+    project,
+    store,
+    capabilities: memoryCapabilities,
+    now,
+  });
+  assert.equal(result.memoriesConfirmed, 1);
+  assert.equal(result.reviewRequired, 1);
+});
+
 test("后台同步仅在授权来源变化时调用模型并在成功后推进检查点", async (t) => {
   const { root, project, store, runtime } = await fixture(t);
   let runtimeCalls = 0;
