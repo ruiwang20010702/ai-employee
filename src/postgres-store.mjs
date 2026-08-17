@@ -727,11 +727,23 @@ export class PostgresStore {
     });
   }
 
-  async completeDraft(taskId, draft, now = new Date()) {
+  async completeDraft(
+    taskId,
+    draft,
+    now = new Date(),
+    { supersedeWindowMs = 0 } = {},
+  ) {
+    if (
+      !Number.isFinite(supersedeWindowMs) ||
+      supersedeWindowMs < 0 ||
+      supersedeWindowMs > 10 * 60 * 1_000
+    ) {
+      throw new Error("Draft supersede window must be between 0 and 600000 ms");
+    }
     const status = draft.shouldReply ? "awaiting_approval" : "no_reply";
     return this.transaction(async (client) => {
       const selected = await client.query(
-        `SELECT continuation_of_task_id, sender_key, conversation_key
+        `SELECT continuation_of_task_id, sender_key, conversation_key, created_at
          FROM tasks
          WHERE id = $1 AND tenant_id = $2 AND status = 'processing'
          FOR UPDATE`,
@@ -744,6 +756,34 @@ export class PostgresStore {
       if (draft.relatedToWaitingTask && !continuationId) {
         throw new Error("Draft cannot continue a missing waiting task");
       }
+      const episodeEnabled = supersedeWindowMs > 0 && continuationId == null;
+      const episodeStart = episodeEnabled
+        ? new Date(new Date(selected.rows[0].created_at).getTime() - supersedeWindowMs)
+        : null;
+      const episodeEnd = episodeEnabled
+        ? new Date(new Date(selected.rows[0].created_at).getTime() + supersedeWindowMs)
+        : null;
+      const newerTask = episodeEnabled && draft.shouldReply
+        ? await client.query(
+          `SELECT id FROM tasks
+           WHERE tenant_id = $1 AND id <> $2
+             AND sender_key = $3 AND conversation_key = $4
+             AND continuation_of_task_id IS NULL
+             AND created_at > $5 AND created_at <= $6
+             AND status IN ('queued','processing','awaiting_approval','no_reply')
+           ORDER BY created_at DESC LIMIT 1
+           FOR UPDATE`,
+          [
+            this.tenantId,
+            taskId,
+            selected.rows[0].sender_key,
+            selected.rows[0].conversation_key,
+            selected.rows[0].created_at,
+            episodeEnd,
+          ],
+        )
+        : null;
+      const finalStatus = newerTask?.rowCount > 0 ? "expired" : status;
       const result = await client.query(
         `
         UPDATE tasks
@@ -754,13 +794,55 @@ export class PostgresStore {
         [
           taskId,
           this.tenantId,
-          status,
+          finalStatus,
           this.cipher.encrypt(JSON.stringify(draft)),
           now,
         ],
       );
       if (result.rowCount !== 1) {
         throw new Error(`Task is not processing: ${taskId}`);
+      }
+      const supersededTaskIds = [];
+      if (episodeEnabled && newerTask?.rowCount === 0) {
+        const previous = await client.query(
+          `SELECT id FROM tasks
+           WHERE tenant_id = $1 AND id <> $2
+             AND sender_key = $3 AND conversation_key = $4
+             AND continuation_of_task_id IS NULL
+             AND created_at >= $5 AND created_at < $6
+             AND status = 'awaiting_approval'
+           ORDER BY created_at
+           FOR UPDATE`,
+          [
+            this.tenantId,
+            taskId,
+            selected.rows[0].sender_key,
+            selected.rows[0].conversation_key,
+            episodeStart,
+            selected.rows[0].created_at,
+          ],
+        );
+        for (const previousTask of previous.rows) {
+          const expired = await client.query(
+            `UPDATE tasks SET status = 'expired', updated_at = $3
+             WHERE tenant_id = $1 AND id = $2 AND status = 'awaiting_approval'`,
+            [this.tenantId, previousTask.id, now],
+          );
+          if (expired.rowCount !== 1) continue;
+          supersededTaskIds.push(previousTask.id);
+          await this._cancelWorkPlansForSourceTask(
+            client,
+            previousTask.id,
+            now,
+            "system:conversation-followup",
+          );
+          await this.audit(client, {
+            taskId: previousTask.id,
+            eventType: "draft.superseded_by_followup",
+            actor: "system:conversation-followup",
+            details: { replacementTaskId: taskId },
+          });
+        }
       }
       if (continuationId) {
         const hasPendingFollowup = draft.relatedToWaitingTask
@@ -800,14 +882,18 @@ export class PostgresStore {
       }
       await this.audit(client, {
         taskId,
-        eventType: draft.shouldReply
+        eventType: finalStatus === "expired"
+          ? "draft.superseded_by_followup"
+          : draft.shouldReply
           ? "draft.awaiting_approval"
           : "draft.no_reply",
         details: {
           confidence: draft.confidence,
           riskLevel: draft.riskLevel,
+          supersededTaskIds,
         },
       });
+      return { status: finalStatus, supersededTaskIds };
     });
   }
 

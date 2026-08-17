@@ -128,6 +128,8 @@ test("Codex 只接收最小会话字段且临时草稿会被删除", async (t) =
   assert.deepEqual(result.memoryCandidates, []);
   const prompt = await readFile(promptFile, "utf8");
   assert.match(prompt, /帮我看看/u);
+  assert.match(prompt, /"role": "other"/u);
+  assert.match(prompt, /role=self 表示当前账号发出的消息/u);
   assert.doesNotMatch(prompt, /secret-user-id|secret-message-id|secret-gateway/u);
   const outputPath = fileURLToPath(
     new URL(`../.runtime/drafts/${taskId}.response.json`, import.meta.url),

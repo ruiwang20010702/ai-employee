@@ -387,10 +387,24 @@ export class DwsAdapter {
     throw new Error("DWS pagination exceeded 100 pages");
   }
 
-  async fetchDirect({ userId, before = new Date(), limit = 30 }) {
+  async fetchDirect({
+    userId,
+    before = new Date(),
+    limit = 30,
+    lookbackMs = 2 * 60 * 60 * 1_000,
+  }) {
+    const beforeTime = epoch(before);
+    if (beforeTime == null) throw new Error("DWS direct context cutoff is invalid");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+      throw new Error("DWS direct context limit must be between 1 and 50");
+    }
+    if (!Number.isSafeInteger(lookbackMs) || lookbackMs < 60_000 || lookbackMs > 24 * 60 * 60 * 1_000) {
+      throw new Error("DWS direct context lookback must be between 1 minute and 24 hours");
+    }
     const identityFlag = /^DT[A-Za-z0-9]/.test(String(userId))
       ? "--open-dingtalk-id"
       : "--user";
+    const queryLimit = Math.min(200, Math.max(limit, limit * 4));
     const payload = await this.run([
       "chat",
       "message",
@@ -398,15 +412,19 @@ export class DwsAdapter {
       identityFlag,
       userId,
       "--time",
-      localTimestamp(before),
+      localTimestamp(new Date(beforeTime - lookbackMs)),
       "--forward",
-      "false",
+      "true",
       "--limit",
-      String(limit),
+      String(queryLimit),
     ]);
-    return collectMessages(payload, userId).sort((a, b) =>
-      String(a.createTime).localeCompare(String(b.createTime)),
-    );
+    return collectMessages(payload, userId)
+      .filter((message) => {
+        const createdAt = epoch(message.createTime);
+        return createdAt != null && createdAt <= beforeTime + 999;
+      })
+      .sort((a, b) => String(a.createTime).localeCompare(String(b.createTime)))
+      .slice(-limit);
   }
 
   async hasManualReply({
@@ -512,11 +530,12 @@ export class DwsAdapter {
     throw new Error("DWS message scope must be direct or group");
   }
 
-  async getConversation({ participantId, before, limit }) {
+  async getConversation({ participantId, before, limit, lookbackMs }) {
     return (await this.fetchDirect({
       userId: participantId,
       before,
       limit,
+      lookbackMs,
     })).map((message) => normalizeDwsMessage(message));
   }
 

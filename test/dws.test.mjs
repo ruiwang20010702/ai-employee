@@ -392,6 +392,40 @@ test("已有开放账号任务使用开放账号参数拉取私聊", async () =>
   await dws.fetchDirect({ userId: "DTestOpenId123" });
   assert.ok(args.includes("--open-dingtalk-id"));
   assert.ok(!args.includes("--user"));
+  assert.equal(args[args.indexOf("--forward") + 1], "true");
+});
+
+test("私聊上下文从过去向现在读取并只保留截止时间前最后若干条", async () => {
+  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
+  let args;
+  dws.run = async (input) => {
+    args = input;
+    return {
+      result: {
+        conversationMessagesList: [{
+          singleChat: true,
+          openConversationId: "direct-1",
+          messages: [
+            { openMessageId: "too-old", createTime: "2026-08-17T01:59:00.000Z" },
+            { openMessageId: "m1", createTime: "2026-08-17T03:30:00.000Z" },
+            { openMessageId: "m2", createTime: "2026-08-17T03:59:00.000Z" },
+            { openMessageId: "m3", createTime: "2026-08-17T04:00:00.000Z" },
+            { openMessageId: "future", createTime: "2026-08-17T04:00:02.000Z" },
+          ],
+        }],
+      },
+    };
+  };
+  const messages = await dws.fetchDirect({
+    userId: "staff-user-1",
+    before: new Date("2026-08-17T04:00:00.000Z"),
+    lookbackMs: 2 * 60 * 60 * 1_000,
+    limit: 2,
+  });
+  assert.equal(args[args.indexOf("--time") + 1], "2026-08-17 10:00:00");
+  assert.equal(args[args.indexOf("--forward") + 1], "true");
+  assert.equal(args[args.indexOf("--limit") + 1], "8");
+  assert.deepEqual(messages.map((message) => message.id), ["m2", "m3"]);
 });
 
 test("已有开放账号任务使用开放账号参数发送私聊", async () => {

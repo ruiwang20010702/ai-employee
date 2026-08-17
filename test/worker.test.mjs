@@ -7,11 +7,43 @@ import { Store } from "../src/store.mjs";
 import { FeishuAdapter } from "../src/feishu.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 import {
+  classifyDirectConversationRoles,
   processApprovedTask,
   processDraftTask,
   reconcileManualReplies,
   runWorker,
 } from "../src/worker.mjs";
+
+test("私聊上下文用当前源消息识别对方并正确标记双方角色", () => {
+  const task = {
+    sender_user_id: "staff-user-1",
+    payload: {
+      senderName: "测试用户",
+      messageIds: ["source-message"],
+      latestMessageId: "source-message",
+      messages: [{ id: "source-message" }],
+    },
+  };
+  const messages = classifyDirectConversationRoles([
+    {
+      id: "older-other",
+      senderOpenDingTalkId: "open-other",
+      raw: { sender: "测试用户" },
+    },
+    {
+      id: "older-self",
+      senderOpenDingTalkId: "open-self",
+      raw: { sender: "当前账号" },
+    },
+    {
+      id: "source-message",
+      senderOpenDingTalkId: "open-other",
+      raw: { sender: "测试用户" },
+    },
+  ], task);
+  assert.deepEqual(messages.map((message) => message.role), ["other", "self", "other"]);
+  assert.deepEqual(messages.map((message) => message.isSelf), [false, true, false]);
+});
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "ai-worker-test-"));
@@ -190,6 +222,57 @@ test("Worker 只生成草稿并进入待审批", async (t) => {
         confidence: 0.9,
         riskLevel: "low",
         reason: "对方提出请求",
+      };
+    },
+  });
+  assert.equal(store.getTask(taskId).status, "awaiting_approval");
+});
+
+test("Worker 读取源消息之前二十四小时的私聊并向草稿传递双方角色", async (t) => {
+  const store = await fixture(t);
+  const taskId = enqueue(store, "current-message");
+  await processDraftTask({
+    store,
+    dws: {
+      async getConversation(options) {
+        assert.equal(options.participantId, "u1");
+        assert.equal(options.before.toISOString(), "2020-01-01T10:00:01.000Z");
+        assert.equal(options.lookbackMs, 24 * 60 * 60 * 1_000);
+        return [
+          {
+            id: "earlier-other",
+            createTime: "2020-01-01T09:59:00.000Z",
+            content: "第一句",
+            senderOpenDingTalkId: "open-other",
+          },
+          {
+            id: "earlier-self",
+            createTime: "2020-01-01T09:59:30.000Z",
+            content: "我之前的回复",
+            senderOpenDingTalkId: "open-self",
+          },
+          {
+            id: "current-message",
+            createTime: "2020-01-01T10:00:00.000Z",
+            content: "第二句",
+            senderOpenDingTalkId: "open-other",
+          },
+        ];
+      },
+    },
+    config: baseConfig,
+    async generator(event, options) {
+      assert.equal(event.taskId, taskId);
+      assert.deepEqual(
+        options.conversation.map((message) => message.role),
+        ["other", "self", "other"],
+      );
+      return {
+        shouldReply: true,
+        reply: "我结合前文一起处理。",
+        confidence: 0.9,
+        riskLevel: "low",
+        reason: "需要结合连续会话",
       };
     },
   });
@@ -1162,7 +1245,7 @@ test("计划生成期间出现人工回复时注册前再次阻止计划", async
   assert.equal(store.getTask(taskId).status, "cancelled_manual");
 });
 
-test("人工复查持续不可用时不落草稿或计划并进入安全重试", async (t) => {
+test("私聊上下文持续不可用时不调用模型并进入安全重试", async (t) => {
   const store = await fixture(t);
   const taskId = enqueue(store);
   let generated = false;
@@ -1179,7 +1262,6 @@ test("人工复查持续不可用时不落草稿或计划并进入安全重试",
     config: { ...baseConfig, selfUserId: "self" },
     async generator(_event, options) {
       generated = true;
-      assert.deepEqual(options.conversation, []);
       return {
         shouldReply: true,
         reply: "我先看一下。",
@@ -1189,7 +1271,34 @@ test("人工复查持续不可用时不落草稿或计划并进入安全重试",
       };
     },
   });
-  assert.equal(generated, true);
+  assert.equal(generated, false);
+  assert.equal(store.getTask(taskId).status, "queued");
+  assert.equal(store.getTask(taskId).attempts, 1);
+});
+
+test("私聊历史未包含当前源消息时不生成单条草稿", async (t) => {
+  const store = await fixture(t);
+  const taskId = enqueue(store, "source-missing");
+  let generated = false;
+  await processDraftTask({
+    store,
+    dws: {
+      async getConversation() {
+        return [{
+          id: "older-message",
+          createTime: "2020-01-01T09:50:00.000Z",
+          content: "更早的消息",
+          senderOpenDingTalkId: "open-other",
+        }];
+      },
+    },
+    config: baseConfig,
+    async generator() {
+      generated = true;
+      throw new Error("must not run");
+    },
+  });
+  assert.equal(generated, false);
   assert.equal(store.getTask(taskId).status, "queued");
   assert.equal(store.getTask(taskId).attempts, 1);
 });
@@ -1275,6 +1384,87 @@ test("草稿只使用已确认且非机密的正式记忆", async (t) => {
     },
   });
   assert.equal(store.getTask(taskId).status, "no_reply");
+});
+
+test("私聊后续省略项目名时沿用二十四小时会话中的项目身份记忆", async (t) => {
+  const store = await fixture(t);
+  const confirm = (input) => {
+    const id = store.proposeMemory({
+      type: "project",
+      sourceType: "operator_confirmed_project_index",
+      sourceId: input.sourceId,
+      createdBy: "tester",
+      sensitivity: "internal",
+      ...input,
+    });
+    store.confirmMemory(id, "approver");
+  };
+  confirm({
+    subject: "s9_vocab_pipeline",
+    projectId: "s9_vocab_pipeline",
+    statement: "S9-Vocab-Pipeline 项目身份。",
+    sourceId: "s9-identity",
+    scope: {
+      factKey: "identity.project_aliases",
+      canonicalName: "S9-Vocab-Pipeline",
+      aliases: ["S9-Vocab-Pipeline", "S9"],
+    },
+  });
+  confirm({
+    subject: "s9_vocab_pipeline",
+    projectId: "s9_vocab_pipeline",
+    statement: "S9 项目使用受控内容流水线。",
+    sourceId: "s9-fact",
+    scope: { factKey: "principle.controlled_pipeline" },
+  });
+  confirm({
+    subject: "foursday",
+    projectId: "foursday",
+    statement: "Foursday 项目身份。",
+    sourceId: "foursday-identity",
+    scope: {
+      factKey: "identity.project_aliases",
+      canonicalName: "Foursday",
+      aliases: ["Foursday", "ai员工"],
+    },
+  });
+  const taskId = enqueue(store, "project-followup", "继续吧");
+  await processDraftTask({
+    store,
+    dws: {
+      async fetchDirect() {
+        return [
+          {
+            id: "earlier-project-message",
+            createTime: "2020-01-01T09:58:00.000Z",
+            content: "继续处理 S9-Vocab-Pipeline",
+            senderOpenDingTalkId: "open-other",
+          },
+          {
+            id: "project-followup",
+            createTime: "2020-01-01T10:00:00.000Z",
+            content: "继续吧",
+            senderOpenDingTalkId: "open-other",
+          },
+        ];
+      },
+    },
+    config: baseConfig,
+    async generator(_event, options) {
+      assert.deepEqual(
+        options.memories.map((memory) => memory.statement).sort(),
+        ["S9 项目使用受控内容流水线。", "S9-Vocab-Pipeline 项目身份。"].sort(),
+      );
+      return {
+        shouldReply: true,
+        reply: "继续处理 S9 项目。",
+        confidence: 0.9,
+        riskLevel: "low",
+        reason: "沿用当前会话项目",
+      };
+    },
+  });
+  assert.equal(store.getTask(taskId).status, "awaiting_approval");
 });
 
 test("全局暂停时仍检测人工接管并请求停止执行中计划", async (t) => {

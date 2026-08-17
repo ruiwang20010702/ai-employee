@@ -13,6 +13,7 @@ import {
   normalizeDwsIdentity,
 } from "./dws.mjs";
 import { safeErrorCode } from "./logging.mjs";
+import { routeProjectMemories } from "./project-memory-routing.mjs";
 import { sanitizeDraftMemoryCandidates } from "./memory-candidate.mjs";
 import { proposeWorkPlanForTask } from "./plan-proposal.mjs";
 import { loadProjectManifests } from "./project-manifests.mjs";
@@ -53,15 +54,82 @@ async function findManualReply(dws, {
   });
 }
 
+export function classifyDirectConversationRoles(messages, task) {
+  const sourceMessageIds = new Set([
+    ...(task.payload?.messageIds ?? []),
+    task.payload?.latestMessageId,
+    ...(task.payload?.messages ?? []).map((message) => message.id),
+  ].filter(Boolean).map(String));
+  const participantOpenIds = new Set(
+    messages
+      .filter((message) => sourceMessageIds.has(String(message.id ?? "")))
+      .map((message) => String(message.senderOpenDingTalkId ?? "").trim())
+      .filter(Boolean),
+  );
+  const participantName = String(task.payload?.senderName ?? "").trim();
+  return messages.map((message) => {
+    const messageId = String(message.id ?? "");
+    const senderOpenId = String(message.senderOpenDingTalkId ?? "").trim();
+    const rawSenderName = typeof message.raw?.sender === "string"
+      ? message.raw.sender.trim()
+      : "";
+    let role = "unknown";
+    if (sourceMessageIds.has(messageId)) {
+      role = "other";
+    } else if (participantOpenIds.size === 1 && senderOpenId) {
+      role = participantOpenIds.has(senderOpenId) ? "other" : "self";
+    } else if (message.isSelf === true) {
+      role = "self";
+    } else if (participantName && rawSenderName === participantName) {
+      role = "other";
+    }
+    return {
+      ...message,
+      role,
+      isSelf: role === "self" ? true : role === "other" ? false : null,
+    };
+  });
+}
+
 async function conversationForTask(dws, task) {
-  if (typeof dws.getConversation === "function") {
-    return dws.getConversation({
+  const latestCreateTime = new Date(task.payload?.latestCreateTime ?? task.created_at);
+  const before = Number.isNaN(latestCreateTime.getTime())
+    ? new Date()
+    : new Date(latestCreateTime.getTime() + 1_000);
+  let messages;
+  const usesConversationContract = typeof dws.getConversation === "function";
+  if (usesConversationContract) {
+    messages = await dws.getConversation({
       conversationId: task.conversation_id,
       participantId: task.sender_user_id,
+      before,
       limit: 50,
+      lookbackMs: 24 * 60 * 60 * 1_000,
+    });
+  } else {
+    messages = await dws.fetchDirect({
+      userId: task.sender_user_id,
+      before,
+      limit: 50,
+      lookbackMs: 24 * 60 * 60 * 1_000,
     });
   }
-  return dws.fetchDirect({ userId: task.sender_user_id, limit: 50 });
+  const classified = classifyDirectConversationRoles(messages, task);
+  if (usesConversationContract) {
+    const sourceMessageIds = new Set([
+      ...(task.payload?.messageIds ?? []),
+      task.payload?.latestMessageId,
+    ].filter(Boolean).map(String));
+    if (
+      sourceMessageIds.size > 0 &&
+      !classified.some((message) => sourceMessageIds.has(String(message.id ?? "")))
+    ) {
+      const error = new Error("Direct conversation context is missing the source message");
+      error.code = "direct_context_source_missing";
+      throw error;
+    }
+  }
+  return classified;
 }
 
 async function sendThroughAdapter(dws, task, { isGroup, text }) {
@@ -368,6 +436,16 @@ export async function processDraftTask({
     config.targetGroupIds,
     task.conversation_id,
   );
+  const completeDraft = (draft) => store.completeDraft(
+    task.id,
+    draft,
+    new Date(),
+    {
+      supersedeWindowMs: isGroup
+        ? 0
+        : Number(config.bundleGapMs ?? 120_000),
+    },
+  );
   const pausedReason = await replyPauseReason(store, task, isGroup);
   if (pausedReason) {
     await store.deferTaskForPause(task.id);
@@ -384,7 +462,7 @@ export async function processDraftTask({
       Number.isFinite(config.replyMaxAgeMs) &&
       Date.now() - latestAt > config.replyMaxAgeMs
     ) {
-      await store.completeDraft(task.id, {
+      await completeDraft({
         shouldReply: false,
         reply: "",
         confidence: 1,
@@ -411,7 +489,7 @@ export async function processDraftTask({
           ),
         });
         if (manual.known && manual.replied) {
-          await store.completeDraft(task.id, {
+          await completeDraft({
             shouldReply: false,
             reply: "",
             confidence: 1,
@@ -437,7 +515,7 @@ export async function processDraftTask({
         requesterId: task.sender_user_id,
         isGroup,
       });
-      await store.completeDraft(task.id, draft);
+      await completeDraft(draft);
       log("worker.capability_summary_completed", {
         taskId: task.id,
         projectScope: isGroup ? "count_only" : "authorized_names",
@@ -453,18 +531,30 @@ export async function processDraftTask({
           taskId: task.id,
           errorCode: safeErrorCode(error),
         });
+        throw new Error(
+          `direct context unavailable: ${safeErrorCode(error)}`,
+        );
       }
     }
     let memories = [];
     try {
-      const [principles, person] = await Promise.all([
+      const [principles, person, projects] = await Promise.all([
         store.searchMemories?.({ type: "principle" }) ?? [],
         store.searchMemories?.({
           type: "person",
           subject: task.sender_user_id,
         }) ?? [],
+        store.searchMemories?.({ type: "project", limit: 200 }) ?? [],
       ]);
-      memories = [...principles, ...person].filter(
+      const projectText = [
+        ...conversation.map((message) => message.content),
+        task.payload.content,
+      ].join("\n");
+      const routedProjects = routeProjectMemories({
+        text: projectText,
+        memories: projects,
+      });
+      memories = [...principles, ...person, ...routedProjects].filter(
         (memory) => memory.sensitivity !== "confidential",
       );
     } catch (error) {
@@ -527,7 +617,14 @@ export async function processDraftTask({
       ...generatedDraft,
       memoryCandidates: memoryReview.candidates,
     };
-    await store.completeDraft(task.id, draft);
+    const completion = await completeDraft(draft);
+    if (completion?.status === "expired") {
+      log("worker.draft_superseded", {
+        taskId: task.id,
+        reason: "newer_conversation_message",
+      });
+      return true;
+    }
     const memorySummary = await proposeDraftMemoryCandidates({
       store,
       task,

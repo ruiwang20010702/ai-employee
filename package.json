@@ -65,6 +65,7 @@
     "projects:shadow:admit": "node scripts/纳入影子时间返还.mjs",
     "projects:memory:sync": "node scripts/同步项目记忆.mjs",
     "projects:memory:watch": "node scripts/自动同步项目记忆.mjs --watch",
+    "projects:identities": "node scripts/导入项目身份记忆.mjs",
     "extensions:validate": "node scripts/验证社区扩展.mjs",
     "extensions:evidence:verify": "node scripts/验证社区扩展证据.mjs",
     "setup:check": "node scripts/新环境向导.mjs check",

@@ -282,6 +282,105 @@ test("待审批草稿超过期限后失效", async (t) => {
   assert.equal(store.getTask(taskId).status, "expired");
 });
 
+test("同一私聊两分钟内的后续任务会让未发送旧草稿和旧审批失效", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-17T10:00:00.000Z");
+  ingestSingle(store, { id: "episode-first", at: base, content: "我先说第一点" });
+  const [firstId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  store.claimTask({ now: new Date(base.getTime() + 20) });
+  store.completeDraft(firstId, {
+    shouldReply: true,
+    reply: "先按第一点回复。",
+    confidence: 0.8,
+    riskLevel: "low",
+    reason: "需要回复",
+  }, new Date(base.getTime() + 30), { supersedeWindowMs: 120_000 });
+  assert.equal(store.getTask(firstId).status, "awaiting_approval");
+  const manifest = {
+    version: 1,
+    projectId: "episode-project",
+    name: "连续会话项目",
+    rootDirectory: "/workspace/episode",
+    requesters: ["u1"],
+    capabilities: { research: { mode: "automatic" } },
+  };
+  const oldPlan = store.registerWorkPlan(assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: manifest.projectId,
+      requesterId: "u1",
+      sourceTaskId: firstId,
+      objective: "处理第一点",
+      steps: [{
+        id: "research",
+        capability: "research",
+        description: "核对第一点",
+        expectedEvidence: "事实",
+      }],
+    },
+  }));
+  assert.equal(oldPlan.status, "ready");
+
+  const followupAt = new Date(base.getTime() + 60_000);
+  ingestSingle(store, { id: "episode-followup", at: followupAt, content: "还有第二点" });
+  const [followupId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(followupAt.getTime() + 10),
+  });
+  store.claimTask({ now: new Date(followupAt.getTime() + 20) });
+  const completion = store.completeDraft(followupId, {
+    shouldReply: true,
+    reply: "我把两点合在一起回复。",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "连续会话需要合并",
+  }, new Date(followupAt.getTime() + 30), { supersedeWindowMs: 120_000 });
+  assert.deepEqual(completion, { status: "awaiting_approval", supersededTaskIds: [firstId] });
+  assert.equal(store.getTask(firstId).status, "expired");
+  assert.equal(store.getTask(followupId).status, "awaiting_approval");
+  assert.equal(store.getWorkPlan(oldPlan.id).status, "cancelled");
+  assert.throws(
+    () => store.decideTask(firstId, { decision: "approved", actor: "tester" }),
+    /not awaiting approval/u,
+  );
+});
+
+test("同一私聊草稿并发倒序完成时仍只保留最新任务", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-17T11:00:00.000Z");
+  ingestSingle(store, { id: "concurrent-first", at: base, content: "第一句" });
+  const [firstId] = store.createReadyTasks({ quietWindowMs: 1, now: new Date(base.getTime() + 10) });
+  assert.equal(store.claimTask({ now: new Date(base.getTime() + 20) }).id, firstId);
+  const followupAt = new Date(base.getTime() + 30_000);
+  ingestSingle(store, { id: "concurrent-followup", at: followupAt, content: "第二句" });
+  const [followupId] = store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(followupAt.getTime() + 10),
+  });
+  assert.equal(store.claimTask({ now: new Date(followupAt.getTime() + 20) }).id, followupId);
+  store.completeDraft(followupId, {
+    shouldReply: true,
+    reply: "合并后的新草稿",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "结合两句",
+  }, new Date(followupAt.getTime() + 30), { supersedeWindowMs: 120_000 });
+  const olderCompletion = store.completeDraft(firstId, {
+    shouldReply: true,
+    reply: "已经过时的旧草稿",
+    confidence: 0.8,
+    riskLevel: "low",
+    reason: "只看见第一句",
+  }, new Date(followupAt.getTime() + 40), { supersedeWindowMs: 120_000 });
+  assert.equal(olderCompletion.status, "expired");
+  assert.equal(store.getTask(firstId).status, "expired");
+  assert.equal(store.getTask(followupId).status, "awaiting_approval");
+});
+
 test("任务失败后重试，达到上限才进入死信", async (t) => {
   const store = await fixture(t);
   const base = new Date("2026-07-31T10:00:00.000Z");

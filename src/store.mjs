@@ -1186,17 +1186,54 @@ export class Store {
     return "queued";
   }
 
-  completeDraft(taskId, draft, now = new Date()) {
+  completeDraft(
+    taskId,
+    draft,
+    now = new Date(),
+    { supersedeWindowMs = 0 } = {},
+  ) {
+    if (
+      !Number.isFinite(supersedeWindowMs) ||
+      supersedeWindowMs < 0 ||
+      supersedeWindowMs > 10 * 60 * 1_000
+    ) {
+      throw new Error("Draft supersede window must be between 0 and 600000 ms");
+    }
     const status = draft.shouldReply ? "awaiting_approval" : "no_reply";
-    this.transaction(() => {
+    return this.transaction(() => {
       const task = this.db.prepare(
-        `SELECT continuation_of_task_id, sender_user_id, conversation_id
+        `SELECT continuation_of_task_id, sender_user_id, conversation_id, created_at
          FROM tasks WHERE id = ? AND status = 'processing'`,
       ).get(taskId);
       if (!task) throw new Error(`Task is not processing: ${taskId}`);
       if (draft.relatedToWaitingTask && !task.continuation_of_task_id) {
         throw new Error("Draft cannot continue a missing waiting task");
       }
+      const episodeEnabled =
+        supersedeWindowMs > 0 && task.continuation_of_task_id == null;
+      const episodeStart = episodeEnabled
+        ? new Date(new Date(task.created_at).getTime() - supersedeWindowMs).toISOString()
+        : null;
+      const episodeEnd = episodeEnabled
+        ? new Date(new Date(task.created_at).getTime() + supersedeWindowMs).toISOString()
+        : null;
+      const newerTask = episodeEnabled && draft.shouldReply
+        ? this.db.prepare(
+          `SELECT id FROM tasks
+           WHERE id <> ? AND sender_user_id = ? AND conversation_id = ?
+             AND continuation_of_task_id IS NULL
+             AND created_at > ? AND created_at <= ?
+             AND status IN ('queued','processing','awaiting_approval','no_reply')
+           ORDER BY created_at DESC LIMIT 1`,
+        ).get(
+          taskId,
+          task.sender_user_id,
+          task.conversation_id,
+          task.created_at,
+          episodeEnd,
+        )
+        : null;
+      const finalStatus = newerTask ? "expired" : status;
       const result = this.db
         .prepare(
         `
@@ -1207,13 +1244,43 @@ export class Store {
       `,
       )
       .run(
-        status,
+        finalStatus,
         this.cipher.encrypt(JSON.stringify(draft)),
         nowIso(now),
         nowIso(now),
         taskId,
       );
       if (result.changes !== 1) throw new Error(`Task is not processing: ${taskId}`);
+      const supersededTaskIds = [];
+      if (episodeEnabled && !newerTask) {
+        const previous = this.db.prepare(
+          `SELECT id FROM tasks
+           WHERE id <> ? AND sender_user_id = ? AND conversation_id = ?
+             AND continuation_of_task_id IS NULL
+             AND created_at >= ? AND created_at < ?
+             AND status = 'awaiting_approval'
+           ORDER BY created_at`,
+        ).all(
+          taskId,
+          task.sender_user_id,
+          task.conversation_id,
+          episodeStart,
+          task.created_at,
+        );
+        for (const previousTask of previous) {
+          const expired = this.db.prepare(
+            `UPDATE tasks SET status = 'expired', updated_at = ?
+             WHERE id = ? AND status = 'awaiting_approval'`,
+          ).run(nowIso(now), previousTask.id);
+          if (expired.changes !== 1) continue;
+          supersededTaskIds.push(previousTask.id);
+          this._cancelWorkPlansForSourceTask(
+            previousTask.id,
+            now,
+            "system:conversation-followup",
+          );
+        }
+      }
       if (task.continuation_of_task_id) {
         const hasPendingFollowup = draft.relatedToWaitingTask && this.db.prepare(
           `SELECT 1 FROM messages
@@ -1236,6 +1303,7 @@ export class Store {
           throw new Error("Waiting task continuation is no longer available");
         }
       }
+      return { status: finalStatus, supersededTaskIds };
     });
   }
 

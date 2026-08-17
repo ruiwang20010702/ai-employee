@@ -1,0 +1,50 @@
+{
+  "schema": "foursday-project-identities/v1",
+  "projects": [
+    {
+      "subject": "dsh",
+      "canonicalName": "DSH",
+      "aliases": ["DSH", "deepseek-harness", "学习 deepseek-harness 项目"]
+    },
+    {
+      "subject": "foursday",
+      "canonicalName": "Foursday",
+      "aliases": ["Foursday", "ai员工", "AI员工", "AI员工设计", "查找 GitHub 开源员工项目"]
+    },
+    {
+      "subject": "dingtalk_knowledge_base",
+      "canonicalName": "钉钉知识库搭建",
+      "aliases": ["钉钉知识库搭建", "钉钉知识库", "知识库搭建"]
+    },
+    {
+      "subject": "daily_weekly_reports",
+      "canonicalName": "日报周报撰写",
+      "aliases": ["日报周报撰写", "AIEC 日报", "AIEC 周报"]
+    },
+    {
+      "subject": "vocab_2_2",
+      "canonicalName": "单词2.2",
+      "aliases": ["单词2.2", "单词 2.2"]
+    },
+    {
+      "subject": "vocab_2_1",
+      "canonicalName": "单词2.1",
+      "aliases": ["单词2.1", "单词 2.1"]
+    },
+    {
+      "subject": "vocab_2_0",
+      "canonicalName": "单词2.0",
+      "aliases": ["单词2.0", "单词 2.0"]
+    },
+    {
+      "subject": "vocab",
+      "canonicalName": "单词",
+      "aliases": ["单词"]
+    },
+    {
+      "subject": "s9_vocab_pipeline",
+      "canonicalName": "S9-Vocab-Pipeline",
+      "aliases": ["S9-Vocab-Pipeline", "S9 Vocab Pipeline", "S9词表流水线", "S9"]
+    }
+  ]
+}

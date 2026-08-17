@@ -2448,6 +2448,49 @@ integration("PostgreSQL 已确认影子时间返还并发导入幂等且随项�
   assert.equal((await store.listTimeReturns({ projectId: "shadow_project" })).length, 0);
 });
 
+integration("PostgreSQL 同一私聊续发会原子废止旧草稿", async (t) => {
+  const store = await fixture(t);
+  const base = new Date("2026-08-17T10:00:00.000Z");
+  const ingest = async (id, at, content) => store.ingestMessages([{
+    id,
+    senderUserId: "episode-user",
+    senderName: "测试用户",
+    conversationId: "episode-conversation",
+    createTime: at.toISOString(),
+    content,
+  }], at);
+  await ingest("pg-episode-first", base, "第一句");
+  const [firstId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(base.getTime() + 10),
+  });
+  await store.claimTask({ now: new Date(base.getTime() + 20) });
+  await store.completeDraft(firstId, {
+    shouldReply: true,
+    reply: "旧草稿",
+    confidence: 0.8,
+    riskLevel: "low",
+    reason: "需要回复",
+  }, new Date(base.getTime() + 30), { supersedeWindowMs: 120_000 });
+  const followupAt = new Date(base.getTime() + 60_000);
+  await ingest("pg-episode-followup", followupAt, "第二句");
+  const [followupId] = await store.createReadyTasks({
+    quietWindowMs: 1,
+    now: new Date(followupAt.getTime() + 10),
+  });
+  await store.claimTask({ now: new Date(followupAt.getTime() + 20) });
+  const result = await store.completeDraft(followupId, {
+    shouldReply: true,
+    reply: "合并后的新草稿",
+    confidence: 0.9,
+    riskLevel: "low",
+    reason: "连续会话",
+  }, new Date(followupAt.getTime() + 30), { supersedeWindowMs: 120_000 });
+  assert.deepEqual(result, { status: "awaiting_approval", supersededTaskIds: [firstId] });
+  assert.equal((await store.getTask(firstId)).status, "expired");
+  assert.equal((await store.getTask(followupId)).status, "awaiting_approval");
+});
+
 integration("PostgreSQL 主动触发运行绑定实例并在隐私删除前要求停用", async (t) => {
   const store = await fixture(t);
   const now = new Date("2026-08-12T05:00:00.000Z");
