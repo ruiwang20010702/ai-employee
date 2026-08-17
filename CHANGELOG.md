@@ -12,6 +12,7 @@ preview or production until a later exact-commit release.
 ### Added
 
 - Migration 023 adds a durable memory-authority cleanup outbox. Authority writes and removals use path-scoped Git commits; revocation, replacement, deletion, and privacy erasure sync and verify that the original slug is unreadable, while failures commit restoration and retry.
+- Memory-authority sync skips existing projections, batches new pages into one gbrain source sync, and performs at most four concurrent exact read-backs so initial fixed-source onboarding does not monopolize the health window.
 - Separate opt-in switches now cover allowlisted, explicitly mentioned low-risk group replies and single-question low-risk direct clarifications. Group clarifications, work requests, and medium/high-risk content remain approval-bound.
 - Project knowledge reads are pinned to the dedicated Foursday gbrain source, fixed-source project-memory sync now runs in the five-minute memory service, and prohibited or unauthorized work receives a deterministic capability-limit reply.
 - An optional, default-off unattended-send policy may auto-approve only high-confidence, low-risk direct-chat replies with no clarification or work request. Group chat, plans, medium/high risk, human-takeover checks, idempotency, and receipt verification remain unchanged.

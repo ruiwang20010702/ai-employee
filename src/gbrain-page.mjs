@@ -232,6 +232,57 @@ export async function writeGbrainMarkdownAuthority(
   return { slug, written: !existing, markdownPathVerified: true };
 }
 
+export async function writeGbrainMarkdownAuthorityBatch(
+  gbrainPath,
+  documents,
+  {
+    root,
+    sourceId = "foursday",
+    timeoutMs = 120_000,
+    run = execFileAsync,
+    gitRun = execFileAsync,
+  } = {},
+) {
+  if (!Array.isArray(documents) || documents.length < 1 || documents.length > 500) {
+    throw new Error("Memory authority batch must contain 1-500 pages");
+  }
+  const seen = new Set();
+  let written = 0;
+  const deferredSync = async (_path, args) => {
+    if (args[0] !== "sync") {
+      throw new Error("Memory authority batch attempted an unexpected command");
+    }
+    return { stdout: "", stderr: "" };
+  };
+  for (const document of documents) {
+    if (seen.has(document.slug)) {
+      throw new Error("Memory authority batch contains a duplicate slug");
+    }
+    seen.add(document.slug);
+    const result = await writeGbrainMarkdownAuthority(gbrainPath, document, {
+      root,
+      sourceId,
+      timeoutMs,
+      run: deferredSync,
+      gitRun,
+    });
+    if (result.written) written += 1;
+  }
+  const executable = run === execFileAsync
+    ? await resolveGbrainPath(gbrainPath)
+    : gbrainPath;
+  await run(executable, ["sync", "--source", sourceId], {
+    timeout: timeoutMs,
+    maxBuffer: 8 * 1024 * 1024,
+    env: safeCommandEnvironment(executable),
+  });
+  return {
+    pages: documents.length,
+    written,
+    synchronized: true,
+  };
+}
+
 function managedAuthorityDestination(root, slug) {
   if (!isAbsolute(String(root ?? ""))) {
     throw new Error("Memory authority Markdown root must be absolute");

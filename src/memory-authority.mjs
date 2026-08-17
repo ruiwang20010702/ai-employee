@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   readGbrainPage,
   writeGbrainMarkdownAuthority,
+  writeGbrainMarkdownAuthorityBatch,
 } from "./gbrain-page.mjs";
 import {
   containsCredentialMaterial,
@@ -156,38 +157,16 @@ function liveVersion(page) {
     : new Date(page.updatedAt).toISOString();
 }
 
-export async function promoteMemoryToAuthority(memory, {
+async function projectAuthorityDocument(memory, document, {
   store,
-  gbrainPath = "gbrain",
-  autoConfirm = false,
-  autoConfirmMinimumConfidence = 0.95,
-  now = new Date(),
-  writePage = writeGbrainMarkdownAuthority,
-  readPage = readGbrainPage,
-  leaseMs = 15 * 60 * 1_000,
-  authorityRoot,
-  authoritySourceId = "foursday",
-} = {}) {
-  if (typeof store?.upsertAuthorityMemoryProjection !== "function") {
-    throw new Error("Memory authority requires PostgreSQL projection support");
-  }
-  if (!Number.isFinite(leaseMs) || leaseMs < 600_000 || leaseMs > 3_600_000) {
-    throw new Error("Memory authority lease must be 10-60 minutes");
-  }
-  if (
-    !Number.isFinite(Number(autoConfirmMinimumConfidence)) ||
-    Number(autoConfirmMinimumConfidence) < 0 ||
-    Number(autoConfirmMinimumConfidence) > 1
-  ) {
-    throw new Error("Memory authority auto-confirm confidence must be 0-1");
-  }
-  const document = authorityMarkdownForMemory(memory, {
-    generatedAt: memory.created_at ?? now,
-  });
-  await writePage(gbrainPath, document, {
-    root: authorityRoot,
-    sourceId: authoritySourceId,
-  });
+  gbrainPath,
+  autoConfirm,
+  autoConfirmMinimumConfidence,
+  now,
+  readPage,
+  leaseMs,
+  authoritySourceId,
+}) {
   const page = await readPage(gbrainPath, document.slug, {
     sourceId: authoritySourceId,
   });
@@ -238,6 +217,68 @@ export async function promoteMemoryToAuthority(memory, {
   };
 }
 
+async function concurrentMap(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const run = async () => {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  };
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => run(),
+  ));
+  return results;
+}
+
+export async function promoteMemoryToAuthority(memory, {
+  store,
+  gbrainPath = "gbrain",
+  autoConfirm = false,
+  autoConfirmMinimumConfidence = 0.95,
+  now = new Date(),
+  writePage = writeGbrainMarkdownAuthority,
+  readPage = readGbrainPage,
+  leaseMs = 15 * 60 * 1_000,
+  authorityRoot,
+  authoritySourceId = "foursday",
+} = {}) {
+  if (typeof store?.upsertAuthorityMemoryProjection !== "function") {
+    throw new Error("Memory authority requires PostgreSQL projection support");
+  }
+  if (!Number.isFinite(leaseMs) || leaseMs < 600_000 || leaseMs > 3_600_000) {
+    throw new Error("Memory authority lease must be 10-60 minutes");
+  }
+  if (
+    !Number.isFinite(Number(autoConfirmMinimumConfidence)) ||
+    Number(autoConfirmMinimumConfidence) < 0 ||
+    Number(autoConfirmMinimumConfidence) > 1
+  ) {
+    throw new Error("Memory authority auto-confirm confidence must be 0-1");
+  }
+  const document = authorityMarkdownForMemory(memory, {
+    generatedAt: memory.created_at ?? now,
+  });
+  await writePage(gbrainPath, document, {
+    root: authorityRoot,
+    sourceId: authoritySourceId,
+  });
+  return projectAuthorityDocument(memory, document, {
+    store,
+    gbrainPath,
+    autoConfirm,
+    autoConfirmMinimumConfidence,
+    now,
+    readPage,
+    leaseMs,
+    authoritySourceId,
+  });
+}
+
 export async function synchronizeMemoryAuthority({
   store,
   gbrainPath = "gbrain",
@@ -246,6 +287,7 @@ export async function synchronizeMemoryAuthority({
   now = new Date(),
   limit = 100,
   writePage = writeGbrainMarkdownAuthority,
+  writeBatchPage = writeGbrainMarkdownAuthorityBatch,
   readPage = readGbrainPage,
   leaseMs = 15 * 60 * 1_000,
   authorityRoot,
@@ -296,6 +338,72 @@ export async function synchronizeMemoryAuthority({
     failed: 0,
     failures: [],
   };
+  if (eligible.length > 0 && writePage === writeGbrainMarkdownAuthority) {
+    const prepared = [];
+    for (const memory of eligible) {
+      try {
+        prepared.push({
+          memory,
+          document: authorityMarkdownForMemory(memory, {
+            generatedAt: memory.created_at ?? now,
+          }),
+        });
+      } catch (error) {
+        report.failed += 1;
+        report.failures.push({ memoryId: memory.id, errorCode: safeErrorCode(error) });
+      }
+    }
+    if (prepared.length > 0) {
+      try {
+        const batch = await writeBatchPage(
+          gbrainPath,
+          prepared.map((item) => item.document),
+          {
+            root: authorityRoot,
+            sourceId: authoritySourceId,
+          },
+        );
+        report.batch = batch;
+        const results = await concurrentMap(prepared, 4, async (item) => {
+          try {
+            return await projectAuthorityDocument(item.memory, item.document, {
+              store,
+              gbrainPath,
+              autoConfirm,
+              autoConfirmMinimumConfidence,
+              now,
+              readPage,
+              leaseMs,
+              authoritySourceId,
+            });
+          } catch (error) {
+            return { error, memoryId: item.memory.id };
+          }
+        });
+        for (const result of results) {
+          if (result.error) {
+            report.failed += 1;
+            report.failures.push({
+              memoryId: result.memoryId,
+              errorCode: safeErrorCode(result.error),
+            });
+          } else {
+            if (result.created) report.promoted += 1;
+            if (result.confirmed) report.confirmed += 1;
+          }
+        }
+      } catch (error) {
+        for (const { memory } of prepared) {
+          report.failed += 1;
+          report.failures.push({
+            memoryId: memory.id,
+            errorCode: safeErrorCode(error),
+          });
+        }
+      }
+    }
+    return report;
+  }
   for (const memory of eligible) {
     try {
       const result = await promoteMemoryToAuthority(memory, {

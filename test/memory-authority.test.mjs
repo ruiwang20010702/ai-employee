@@ -17,6 +17,7 @@ import {
 } from "../src/memory-authority.mjs";
 import {
   writeGbrainMarkdownAuthority,
+  writeGbrainMarkdownAuthorityBatch,
   writeGbrainPage,
   retireGbrainMarkdownAuthority,
 } from "../src/gbrain-page.mjs";
@@ -219,6 +220,49 @@ test("已有受管理投影时不重复写入或同步原始来源", async () =>
   assert.equal(writes, 0);
 });
 
+test("默认权威同步批量写入一次并对每页执行精确回读", async () => {
+  const sources = [memory(), memory({
+    id: "memory_source_2",
+    statement: "第二条受治理事实。",
+    scope: { factKey: "decision.second_fact" },
+  })];
+  let batchCalls = 0;
+  let readCalls = 0;
+  const documents = new Map();
+  const report = await synchronizeMemoryAuthority({
+    store: {
+      async listMemories({ sourceType }) {
+        if (sourceType === "gbrain") return [];
+        return sourceType === "dingtalk_message" ? sources : [];
+      },
+      async upsertAuthorityMemoryProjection(input) {
+        return {
+          id: `authority-${input.sourceMemoryId}`,
+          status: "proposed",
+          created: true,
+        };
+      },
+      async confirmMemory() {},
+    },
+    now,
+    autoConfirm: true,
+    writeBatchPage: async (_path, batch) => {
+      batchCalls += 1;
+      for (const document of batch) documents.set(document.slug, document);
+      return { pages: batch.length, written: batch.length, synchronized: true };
+    },
+    readPage: async (_path, slug) => {
+      readCalls += 1;
+      return { slug, content: documents.get(slug).content, updatedAt: now.toISOString() };
+    },
+  });
+  assert.equal(batchCalls, 1);
+  assert.equal(readCalls, 2);
+  assert.equal(report.promoted, 2);
+  assert.equal(report.confirmed, 2);
+  assert.equal(report.failed, 0);
+});
+
 test("受管理 gbrain 记忆可覆盖人物和原则命名空间", () => {
   assert.equal(isManagedMemoryAuthority({
     source_type: "gbrain",
@@ -312,6 +356,29 @@ test("受管理 Markdown 撤销后隔离原文件、同步并精确确认 gbrain
     { code: "ENOENT" },
   );
   assert.deepEqual(calls.map((args) => args[0]), ["sync", "call"]);
+});
+
+test("Markdown 权威批量写入只执行一次 gbrain source 同步", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "foursday-authority-batch-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await initializeGit(root);
+  const syncCalls = [];
+  const result = await writeGbrainMarkdownAuthorityBatch(
+    "/trusted/gbrain",
+    [
+      { slug: "atoms/foursday/principles/core/batch-a", content: "# A\n" },
+      { slug: "atoms/foursday/principles/core/batch-b", content: "# B\n" },
+    ],
+    {
+      root,
+      run: async (_path, args) => {
+        syncCalls.push(args);
+        return { stdout: "" };
+      },
+    },
+  );
+  assert.deepEqual(result, { pages: 2, written: 2, synchronized: true });
+  assert.deepEqual(syncCalls, [["sync", "--source", "foursday"]]);
 });
 
 test("记忆权威回收作业失败时保留重试状态且不冒充完成", async () => {
