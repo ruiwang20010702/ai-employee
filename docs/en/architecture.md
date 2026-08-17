@@ -4,7 +4,7 @@
 
 ## System shape
 
-Foursday separates fast message ingestion, slow model work, external side effects, and human control. PostgreSQL is the production state and evidence store; SQLite is retained for local development and parity testing.
+Foursday separates fast message ingestion, slow model work, external side effects, and human control. PostgreSQL is the production state and evidence store; SQLite is retained only for isolated public-pilot sessions, local development, and parity testing.
 
 ```mermaid
 flowchart LR
@@ -34,6 +34,35 @@ flowchart LR
 | Health and alerts | Track heartbeats, dead tasks, unknown sends, leases, message coverage, and SLO samples |
 | Admin console | Expose local review and control with separate read/write tokens |
 | Codex plugin | Present read-only status, drafts, plans, capabilities, and takeover information |
+
+## Unified memory architecture
+
+The memory model has three orthogonal dimensions instead of a misleading L0-L7 ladder:
+
+- **Four parallel kinds:** working, episodic, semantic, and prospective memory.
+- **One lifecycle:** capture, extract, govern, write Markdown, exact read-back, project into PostgreSQL, consolidate, retrieve, supersede, and expire.
+- **Three storage responsibilities:** Git-backed Markdown is the long-term authority; gbrain is the write-through/entity/graph/retrieval adapter; Foursday PostgreSQL owns transactional state, authorization, leases, encrypted projections, and audit.
+
+Person, project, principle, and knowledge records are sibling namespaces within semantic memory. Dreaming/consolidation and retrieval operate across the four kinds; they are not additional memory tiers.
+
+```mermaid
+flowchart LR
+    INPUT["Messages / documents / verified outcomes"] --> GATE["Provenance, DLP, confidence, conflict"]
+    GATE --> MD["gbrain Markdown authority"]
+    MD --> VERIFY["Exact slug + statement + digest + version"]
+    VERIFY --> PG["Encrypted PostgreSQL projection and lease"]
+    PG --> USE["Scoped context assembly"]
+    MD --> USE
+```
+
+Managed low-risk semantic facts use deterministic `atoms/foursday/` pages. The source and subject identities are fingerprinted in Markdown while the original provenance stays encrypted in PostgreSQL. A write is not usable memory until exact gbrain read-back and PostgreSQL projection both succeed. Conflicts remain proposed; credentials, PII, sensitive person material, and confidential candidates are rejected.
+
+Production defaults to `AI_EMPLOYEE_MEMORY_AUTHORITY_MODE=gbrain`. Writes and safe auto-confirm are separate default-off gates. Enabling either does not enable message sending, plan execution, or proactive work. Production formal memory never loads the SQLite adapter.
+
+The personal brain keeps the `default` gbrain source. Automated work memory
+uses a separate non-federated `foursday` source, and every authority read,
+Markdown write, and sync explicitly binds that source ID. Production refuses
+authority writes through `default`.
 
 ## Versioned integration contracts
 

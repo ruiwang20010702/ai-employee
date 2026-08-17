@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { readGbrainPage } from "./gbrain-page.mjs";
+import {
+  isManagedMemoryAuthority,
+  parseAuthorityStatement,
+} from "./memory-authority.mjs";
 
 const sourceAccessStatuses = new Set([
   "not_required",
@@ -70,23 +74,33 @@ export async function checkMemorySourceAccess(
   if (memory.source_type !== "gbrain") {
     return denied("not_required", "source_not_live_checked", checkedAt);
   }
-  const project = projects.get(memory.project_id);
-  if (!project) return denied("revoked", "project_not_authorized", checkedAt);
-  const rule = project.capabilities?.knowledge_read;
-  if (!rule || rule.mode === "disabled") {
-    return denied("revoked", "knowledge_read_disabled", checkedAt);
-  }
-  if (rule.expiresAt && new Date(rule.expiresAt) <= checkedAt) {
-    return denied("revoked", "knowledge_read_expired", checkedAt);
-  }
   const slug = String(memory.source_id ?? "");
-  if (
-    !slug ||
-    !rule.allowedSlugPrefixes?.some(
-      (prefix) => slug.startsWith(prefix) && slug.length > prefix.length,
-    )
-  ) {
-    return denied("revoked", "slug_outside_project", checkedAt);
+  const managedAuthority = isManagedMemoryAuthority(memory);
+  let rule;
+  if (managedAuthority) {
+    rule = {
+      expiresAt: null,
+      timeoutMs: 30_000,
+      maxContentBytes: 256 * 1024,
+    };
+  } else {
+    const project = projects.get(memory.project_id);
+    if (!project) return denied("revoked", "project_not_authorized", checkedAt);
+    rule = project.capabilities?.knowledge_read;
+    if (!rule || rule.mode === "disabled") {
+      return denied("revoked", "knowledge_read_disabled", checkedAt);
+    }
+    if (rule.expiresAt && new Date(rule.expiresAt) <= checkedAt) {
+      return denied("revoked", "knowledge_read_expired", checkedAt);
+    }
+    if (
+      !slug ||
+      !rule.allowedSlugPrefixes?.some(
+        (prefix) => slug.startsWith(prefix) && slug.length > prefix.length,
+      )
+    ) {
+      return denied("revoked", "slug_outside_project", checkedAt);
+    }
   }
   if (!Number.isFinite(leaseMs) || leaseMs < 600_000 || leaseMs > 3_600_000) {
     throw new Error("Memory source access lease must be 10-60 minutes");
@@ -96,6 +110,9 @@ export async function checkMemorySourceAccess(
     page = await readPage(gbrainPath, slug, {
       timeoutMs: rule.timeoutMs ?? 30_000,
       maxBuffer: rule.maxContentBytes + 1024 * 1024,
+      sourceId: managedAuthority
+        ? memory.scope?.authority?.sourceId
+        : null,
     });
   } catch {
     return denied("unavailable", "source_unavailable", checkedAt);
@@ -105,6 +122,22 @@ export async function checkMemorySourceAccess(
   }
   if (Buffer.byteLength(page.content) > rule.maxContentBytes) {
     return denied("unavailable", "source_content_exceeded", checkedAt);
+  }
+  if (managedAuthority) {
+    try {
+      if (parseAuthorityStatement(page.content) !== memory.statement.trim()) {
+        return denied("unavailable", "authority_statement_changed", checkedAt);
+      }
+    } catch {
+      return denied("unavailable", "authority_content_invalid", checkedAt);
+    }
+    const expectedDigest = memory.scope?.authority?.contentSha256;
+    if (
+      !/^[a-f0-9]{64}$/u.test(String(expectedDigest ?? "")) ||
+      createHash("sha256").update(page.content).digest("hex") !== expectedDigest
+    ) {
+      return denied("unavailable", "authority_content_changed", checkedAt);
+    }
   }
   const liveVersion = page.updatedAt == null
     ? `sha256:${createHash("sha256").update(page.content).digest("hex")}`

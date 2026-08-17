@@ -138,7 +138,7 @@ test("项目记忆同步工作台口径绑定模型调用、服务端快照和�
   assert.match(readmeZh, /显式使用写入令牌才调用模型/u);
   assert.match(requirements, /生成包只在服务端保存十分钟/u);
   assert.match(capabilities, /generated bundle stays only in server memory for ten minutes/u);
-  assert.match(matrix, /工作台同步入口仍是未部署本地候选/u);
+  assert.match(matrix, /统一记忆.*技术候选已实现并通过 PostgreSQL 回归/u);
   for (const text of [readme, readmeZh, requirements, capabilities]) {
     assert.match(text, /(?:already authorized|既有授权|不能超出既有授权|already-authorized)/u);
   }
@@ -223,7 +223,7 @@ test("权威文档区分当前技术部署与业务放量状态", async () => {
   const productionSha = acceptance.match(/当前生产精确绑定提交 `([0-9a-f]{40})`/u)?.[1];
   assert.ok(version);
   assert.ok(productionSha);
-  assert.equal(version, "V2.4");
+  assert.equal(version, "V2.5");
   assert.match(matrix, /V2\.4 技术版本[^\n]*已部署/u);
   assert.doesNotMatch(matrix, /V2\.4[^\n|]*(?:尚未提交|尚未推送|尚未部署)/u);
   assert.match(matrix, /业务自动化尚未放量/u);

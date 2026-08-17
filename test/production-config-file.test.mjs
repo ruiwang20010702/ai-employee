@@ -416,3 +416,42 @@ test("管理台浏览器会话默认八小时且限制在五分钟到一天", ()
     else process.env[name] = previous;
   }
 });
+
+test("生产默认使用 gbrain 记忆权威且自动确认必须先开放写入", () => {
+  const names = [
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_MODE",
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE",
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM",
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT",
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID",
+  ];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    for (const name of names) delete process.env[name];
+    assert.equal(loadConfig({ requireTargets: false }).memoryAuthorityMode, "disabled");
+    process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE = "gbrain";
+    assert.equal(loadConfig({ requireTargets: false }).memoryAuthorityMode, "gbrain");
+    process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM = "true";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /requires authority writes/u,
+    );
+    process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE = "true";
+    process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT = "/private/var/tmp/foursday-memory";
+    process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID = "foursday";
+    assert.equal(
+      loadConfig({ requireTargets: false }).memoryAuthorityAutoConfirm,
+      true,
+    );
+    process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE = "disabled";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /requires gbrain authority mode/u,
+    );
+  } finally {
+    for (const name of names) {
+      if (previous[name] == null) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});

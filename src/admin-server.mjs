@@ -958,6 +958,13 @@ export async function startAdminServer({
             ]),
           ),
           confirmedMemoryCount: memories.length,
+          memoryAuthority: {
+            mode: config.memoryAuthorityMode ?? "gbrain",
+            writeEnabled: config.memoryAuthorityWrite === true,
+            autoConfirm: config.memoryAuthorityAutoConfirm === true,
+            durableStore: "gbrain_markdown",
+            runtimeStore: "postgresql",
+          },
           projectCount: capabilities.projects.length,
           sendMode: config.capabilities.has("send_message")
             ? "真实发送已启用"

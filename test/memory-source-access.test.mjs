@@ -6,6 +6,7 @@ import {
   validateSourceAccessChange,
 } from "../src/memory-source-access.mjs";
 import { memoryIsUsable, validateMemoryProposal } from "../src/memory-policy.mjs";
+import { createHash } from "node:crypto";
 
 const now = new Date("2026-08-05T08:00:00.000Z");
 const memory = {
@@ -43,6 +44,73 @@ test("gbrain 记忆必须绑定项目且只能是项目或知识类型", () => {
     sourceId: "projects/one/rule",
     createdBy: "owner",
   }), /require a project/u);
+  assert.doesNotThrow(() => validateMemoryProposal({
+    type: "principle",
+    subject: "规则",
+    statement: "先核对来源再使用。",
+    sourceType: "gbrain",
+    sourceId: "atoms/foursday/principles/core/fact",
+    sourceVersion: "v1",
+    scope: {
+      factKey: "principle.source_readback",
+      authority: {
+        schema: "foursday-memory-authority/v1",
+        managed: true,
+        sourceId: "foursday",
+      },
+    },
+    createdBy: "system:memory-authority",
+  }));
+});
+
+test("受管理的 Markdown 权威记忆不依赖项目知识授权但必须逐字回读", async () => {
+  const content = [
+    "# Foursday memory",
+    "<!-- foursday-memory-statement:start -->",
+    "先核对来源再使用。",
+    "<!-- foursday-memory-statement:end -->",
+  ].join("\n");
+  const authority = {
+    id: "authority-1",
+    type: "principle",
+    project_id: null,
+    statement: "先核对来源再使用。",
+    source_type: "gbrain",
+    source_id: "atoms/foursday/principles/core/fact",
+    source_version: "2026-08-17T08:00:00.000Z",
+    scope: {
+      factKey: "principle.source_readback",
+      authority: {
+        schema: "foursday-memory-authority/v1",
+        managed: true,
+        sourceId: "foursday",
+        contentSha256: createHash("sha256").update(content).digest("hex"),
+      },
+    },
+  };
+  const verified = await checkMemorySourceAccess(authority, {
+    projects: new Map(),
+    now,
+    readPage: async (_path, _slug, options) => {
+      assert.equal(options.sourceId, "foursday");
+      return ({
+      slug: authority.source_id,
+      updatedAt: authority.source_version,
+      content,
+      });
+    },
+  });
+  assert.equal(verified.status, "verified");
+  const changed = await checkMemorySourceAccess(authority, {
+    projects: new Map(),
+    now,
+    readPage: async () => ({
+      slug: authority.source_id,
+      updatedAt: authority.source_version,
+      content: content.replace("先核对来源再使用。", "未经同步的修改。"),
+    }),
+  });
+  assert.equal(changed.reason, "authority_statement_changed");
 });
 
 test("来源访问租约只在精确页面、项目授权和版本一致时签发", async () => {

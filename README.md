@@ -150,6 +150,42 @@ The adapter SDK also defines verifiable contracts and safe example manifests
 for Slack, Teams, Gmail, and Google Workspace. These are extension boundaries,
 not claims that production connectors are already shipped.
 
+## Memory you can inspect
+
+Foursday does not treat memory as an opaque vector database. Its memory model
+has four parallel kinds—working, episodic, semantic, and prospective memory.
+People, projects, principles, and knowledge are sibling namespaces inside
+semantic memory; consolidation and retrieval are lifecycle services, not extra
+memory tiers.
+
+```mermaid
+flowchart LR
+    SOURCE["Messages / documents / verified work"] --> GOVERN["Provenance, privacy, conflict gates"]
+    GOVERN --> MARKDOWN["Git-backed Markdown in gbrain"]
+    MARKDOWN --> READBACK["Exact slug, statement, digest, and version read-back"]
+    READBACK --> POSTGRES["Encrypted PostgreSQL runtime projection"]
+    POSTGRES --> CONTEXT["Person + project + intent context"]
+    MARKDOWN --> CONTEXT
+```
+
+Markdown is the reviewable long-term authority. gbrain provides write-through,
+entity, graph, and retrieval access; its PostgreSQL index is rebuildable.
+Foursday's PostgreSQL remains the transactional authority for messages, tasks,
+permissions, leases, encrypted projections, and audit. Production never loads
+SQLite for formal memory. SQLite remains isolated to the public pilot and test
+fixtures so the zero-account preview stays easy to run.
+
+Personal knowledge and automated work memory use different gbrain sources:
+`default` remains personal, while Foursday requires a dedicated non-federated
+`foursday` source and explicitly binds every read, write, and sync to it.
+
+Low-risk, source-bound semantic facts can be written to deterministic
+`atoms/foursday/` pages only after the operator enables the write gate. A fact
+becomes usable only after exact gbrain read-back and PostgreSQL projection.
+Conflicts remain quarantined; credentials, PII, sensitive person material, and
+confidential candidates are rejected. Auto-confirm is a separate, default-off
+gate and never enables message sending or work execution.
+
 ## From verified loops to a governed work graph
 
 Foursday already runs evidence-gated loops: understand a request, bind it to a

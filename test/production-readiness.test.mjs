@@ -40,6 +40,9 @@ function validConfig(overrides = {}) {
     claudeCodePath: "claude",
     agentRuntime: "codex",
     gbrainPath: "gbrain",
+    memoryAuthorityMode: "gbrain",
+    memoryAuthorityWrite: false,
+    memoryAuthorityAutoConfirm: false,
     projectsDirectory: "/projects",
     targetUserIds: [],
     targetGroupIds: [],
@@ -212,6 +215,7 @@ test("生产预检只要求选中的 Claude Code 而不强制 Codex", async () =
       advisories: [],
     }),
     dwsChecker: async () => ({ authenticated: true }),
+    gbrainChecker: async () => ({ required: true, version: "0.45.12.0" }),
     createPool: () => ({ async end() {} }),
     checkDatabase: async () => ({ database: "employee" }),
     migrationInspector: currentMigrations,
@@ -319,7 +323,7 @@ test("启用记忆来源复核时按项目知识能力预检 gbrain", async () =
   assert.equal(result.gbrainRuntime.required, true);
 });
 
-test("未启用知识页读取时预检不要求安装 gbrain", async () => {
+test("即使未启用项目知识读取，生产记忆权威仍强制验证 gbrain", async () => {
   const calls = [];
   const result = await checkProductionReadiness({
     config: validConfig(),
@@ -327,15 +331,21 @@ test("未启用知识页读取时预检不要求安装 gbrain", async () => {
     executableChecker: async (name) => calls.push(name),
     codexChecker: async () => ({ status: "ok" }),
     dwsChecker: async () => ({ authenticated: true }),
-    gbrainChecker: async () => {
-      throw new Error("must not run");
-    },
+    gbrainChecker: async () => ({ required: true, version: "0.45.12.0" }),
     createPool: () => ({ async end() {} }),
     checkDatabase: async () => ({ database: true }),
     migrationInspector: currentMigrations,
   });
-  assert.deepEqual(result.gbrainRuntime, { required: false });
-  assert.equal(calls.includes("gbrain"), false);
+  assert.deepEqual(result.gbrainRuntime, { required: true, version: "0.45.12.0" });
+  assert.equal(calls.includes("gbrain"), true);
+});
+
+test("生产记忆权威拒绝回退到数据库正文模式", () => {
+  assert.throws(() => validateProductionReadinessConfig(validConfig({
+    memoryAuthorityMode: "disabled",
+  }), {
+    AI_EMPLOYEE_BACKUP_KEY: backupKey,
+  }), /must use gbrain/u);
 });
 
 test("生产预检可报告待迁移，严格诊断必须在业务查询前停止", async () => {
@@ -354,6 +364,7 @@ test("生产预检可报告待迁移，严格诊断必须在业务查询前停�
     executableChecker: async () => {},
     codexChecker: async () => ({ status: "ok" }),
     dwsChecker: async () => ({ authenticated: true }),
+    gbrainChecker: async () => ({ required: true, version: "0.45.12.0" }),
     createPool: () => ({ async end() {} }),
     checkDatabase: async () => ({ database: "employee" }),
     migrationInspector: async () => pendingMigrations,

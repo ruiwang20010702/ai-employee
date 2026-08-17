@@ -9,6 +9,7 @@ import {
   inspectMigrationStatus,
 } from "./migration-status.mjs";
 import { createAdminSessionManager } from "./admin-session-auth.mjs";
+import { resolveGbrainPath } from "./gbrain-page.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -141,10 +142,13 @@ export async function checkGbrainRuntime(
 ) {
   let version;
   try {
-    const { stdout } = await run(gbrainPath, ["version"], {
+    const executable = run === execFileAsync
+      ? await resolveGbrainPath(gbrainPath)
+      : gbrainPath;
+    const { stdout } = await run(executable, ["version"], {
       timeout: 10_000,
       maxBuffer: 512 * 1024,
-      env: safeCodexEnvironment(gbrainPath),
+      env: safeCodexEnvironment(executable),
     });
     version = String(stdout).trim().match(/^gbrain\s+([^\s]+)/u)?.[1] ?? null;
   } catch {
@@ -158,6 +162,12 @@ export function validateProductionReadinessConfig(
   config,
   environment = process.env,
 ) {
+  if ((config.memoryAuthorityMode ?? "gbrain") !== "gbrain") {
+    throw new Error("Production memory authority must use gbrain");
+  }
+  if (config.memoryAuthorityAutoConfirm && !config.memoryAuthorityWrite) {
+    throw new Error("Memory authority auto-confirm requires authority writes");
+  }
   validateBase64Key("AI_EMPLOYEE_DATA_KEY", config.dataKey);
   validateBase64Key(
     "AI_EMPLOYEE_BACKUP_KEY",
@@ -230,7 +240,7 @@ export async function checkProductionReadiness({
       );
     }
   }
-  const gbrainRequired = [...projects.values()].some(
+  const gbrainRequired = (config.memoryAuthorityMode ?? "gbrain") === "gbrain" || [...projects.values()].some(
     (project) => project.capabilities.knowledge_read != null &&
       project.capabilities.knowledge_read.mode !== "disabled",
   );
@@ -273,6 +283,13 @@ export async function checkProductionReadiness({
       codexRuntime: selectedAgentRuntime === "codex" ? agentRuntime : null,
       dwsRuntime,
       gbrainRuntime,
+      memoryAuthority: {
+        mode: config.memoryAuthorityMode ?? "gbrain",
+        writeEnabled: config.memoryAuthorityWrite === true,
+        autoConfirm: config.memoryAuthorityAutoConfirm === true,
+        durableStore: "gbrain_markdown",
+        runtimeStore: "postgresql",
+      },
     };
   } finally {
     await pool.end();

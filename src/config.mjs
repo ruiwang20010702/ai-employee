@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -165,6 +165,42 @@ export function loadConfig({
   );
   if (memorySourceLimit > 5_000) {
     throw new Error("AI_EMPLOYEE_MEMORY_SOURCE_LIMIT must be <= 5000");
+  }
+  const memoryAuthorityMode = choice(
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_MODE",
+    production ? "gbrain" : "disabled",
+    ["disabled", "gbrain"],
+  );
+  const memoryAuthorityWrite = boolean(
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE",
+    false,
+  );
+  const memoryAuthorityAutoConfirm = boolean(
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM",
+    false,
+  );
+  const memoryAuthorityRoot = process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT?.trim() || null;
+  const memoryAuthoritySourceId = String(
+    process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID ?? "foursday",
+  ).trim();
+  if (memoryAuthorityWrite && memoryAuthorityMode !== "gbrain") {
+    throw new Error(
+      "AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE requires gbrain authority mode",
+    );
+  }
+  if (memoryAuthorityAutoConfirm && !memoryAuthorityWrite) {
+    throw new Error(
+      "AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM requires authority writes",
+    );
+  }
+  if (memoryAuthorityWrite && (!memoryAuthorityRoot || !isAbsolute(memoryAuthorityRoot))) {
+    throw new Error("AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT must be absolute when writes are enabled");
+  }
+  if (!/^[a-z0-9-]{1,32}$/u.test(memoryAuthoritySourceId)) {
+    throw new Error("AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID is invalid");
+  }
+  if (memoryAuthorityWrite && memoryAuthoritySourceId === "default") {
+    throw new Error("Memory authority writes require a dedicated non-default gbrain source");
   }
   const alertIntervalMs = positiveNumber(
     "AI_EMPLOYEE_ALERT_INTERVAL_MS",
@@ -332,6 +368,11 @@ export function loadConfig({
     ),
     memorySourceLeaseMs,
     memorySourceLimit,
+    memoryAuthorityMode,
+    memoryAuthorityWrite,
+    memoryAuthorityAutoConfirm,
+    memoryAuthorityRoot,
+    memoryAuthoritySourceId,
     requireMessageReconciliation: boolean(
       "AI_EMPLOYEE_REQUIRE_MESSAGE_RECONCILIATION",
       false,

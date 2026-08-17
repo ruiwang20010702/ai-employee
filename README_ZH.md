@@ -156,6 +156,26 @@ npm run projects:shadow:admit -- --evidence-directory /绝对路径/新证据目
 
 仓库同时提供 Slack、Teams、Gmail 和 Google Workspace 的可验证适配器契约与安全示例清单。它们是社区扩展边界，不代表这些生产连接器已经交付。
 
+## 可阅读、可追溯的统一记忆
+
+Foursday 不把记忆藏在不可审计的向量数据库里。记忆内容分为工作、情景、语义和前瞻四类并列范围；人物、项目、原则和知识是语义记忆的并列子域，整理和检索属于统一生命周期，不是额外层级。
+
+```mermaid
+flowchart LR
+    SOURCE["消息 / 文档 / 已验证工作"] --> GOVERN["来源、隐私和冲突门禁"]
+    GOVERN --> MARKDOWN["gbrain 中 Git 管理的 Markdown"]
+    MARKDOWN --> READBACK["精确回读 slug、正文、摘要和版本"]
+    READBACK --> POSTGRES["PostgreSQL 加密运行投影"]
+    POSTGRES --> CONTEXT["人物 + 项目 + 当前意图上下文"]
+    MARKDOWN --> CONTEXT
+```
+
+Markdown 是可审阅的长期正文权威；gbrain 提供写入、实体、图谱和检索，它自己的 PostgreSQL 索引可以重建；Foursday PostgreSQL 继续负责消息、任务、权限、租约、加密投影和审计。正式记忆的生产入口不加载 SQLite；SQLite 只保留给隔离公开体验和测试，使零账号预览仍然容易启动。
+
+个人知识继续使用 gbrain 的 `default` source；Foursday 强制使用独立且非联邦的 `foursday` source，每次读取、写入和同步都显式绑定该 source。开放写入时使用 `default` 会直接拒绝，避免自动记忆进入个人知识库或个人页面进入工作分身上下文。
+
+低风险且有来源的语义事实只有在负责人开放写入门禁后，才会进入确定性的 `atoms/foursday/` 页面。只有 gbrain 精确回读和 PostgreSQL 投影全部成功，事实才可用于回复。冲突内容保持隔离；凭据、PII、敏感人物材料和机密候选直接拒绝。自动确认是另一项默认关闭的开关，不会顺带打开消息发送或任务执行。
+
 ## 从可验证闭环到受治理工作图
 
 Foursday 已经具备证据驱动的工作闭环：理解请求、绑定项目、形成计划、完成审批、执行、回读目标，并且只在本人确认后沉淀记忆。下一阶段不是抛弃这些闭环，而是把多个闭环之间原本隐含的关系显式建模为 **受治理工作图（Governed Work Graph）**。

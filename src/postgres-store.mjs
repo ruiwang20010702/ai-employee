@@ -2277,6 +2277,150 @@ export class PostgresStore {
     });
   }
 
+  async upsertAuthorityMemoryProjection({
+    sourceMemoryId,
+    slug,
+    sourceVersion,
+    authorityContentSha256,
+    authoritySourceId,
+    accessExpiresAt,
+    actor,
+  }, now = new Date()) {
+    if (!String(sourceMemoryId ?? "").trim()) {
+      throw new Error("Memory authority source memory is required");
+    }
+    if (!/^atoms\/foursday\/[a-z0-9/_-]+$/u.test(String(slug ?? ""))) {
+      throw new Error("Memory authority slug is outside the managed namespace");
+    }
+    if (!/^[a-f0-9]{64}$/u.test(String(authorityContentSha256 ?? ""))) {
+      throw new Error("Memory authority content digest is invalid");
+    }
+    if (!String(sourceVersion ?? "").trim()) {
+      throw new Error("Memory authority source version is required");
+    }
+    if (!/^[a-z0-9-]{1,32}$/u.test(String(authoritySourceId ?? ""))) {
+      throw new Error("Memory authority source id is invalid");
+    }
+    const expiresAt = new Date(accessExpiresAt);
+    if (Number.isNaN(expiresAt.getTime()) || expiresAt <= now) {
+      throw new Error("Memory authority access expiry must be in the future");
+    }
+    if (!String(actor ?? "").trim()) {
+      throw new Error("Memory authority actor is required");
+    }
+    const authorityId = `memory_authority_${createHash("sha256")
+      .update(`${this.tenantId}\n${sourceMemoryId}\n${slug}`)
+      .digest("hex")
+      .slice(0, 32)}`;
+    return this.transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT * FROM memory_items
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+         FOR UPDATE`,
+        [this.tenantId, sourceMemoryId],
+      );
+      if (selected.rowCount !== 1) {
+        throw new Error("Memory authority source memory is unavailable");
+      }
+      const sourceRow = selected.rows[0];
+      if (
+        !["proposed", "confirmed", "revoked"].includes(sourceRow.status) ||
+        sourceRow.source_type === "gbrain"
+      ) {
+        throw new Error("Memory is not eligible for authority projection");
+      }
+      const source = memoryFromRow(sourceRow, this.cipher);
+      const scope = {
+        ...source.scope,
+        authority: {
+          schema: "foursday-memory-authority/v1",
+          managed: true,
+          contentSha256: authorityContentSha256,
+          sourceId: authoritySourceId,
+          origin: {
+            sourceType: source.source_type,
+            sourceId: source.source_id,
+            sourceVersion: source.source_version,
+            memoryId: source.id,
+          },
+        },
+      };
+      const supersedesId = source.status === "confirmed"
+        ? source.id
+        : source.supersedes_id ?? null;
+      const inserted = await client.query(
+        `INSERT INTO memory_items(
+          id, tenant_id, type, subject_key, subject_ciphertext, project_id,
+          statement_ciphertext, source_type, source_id_ciphertext,
+          source_version, source_access_status, source_access_reason,
+          source_access_checked_at, source_access_expires_at,
+          scope_ciphertext, confidence, status, sensitivity, expires_at,
+          created_by, updated_by, supersedes_id, created_at, updated_at
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,'gbrain',$8,$9,'verified',
+          'authority_write_readback_verified',$10,$11,$12,$13,'proposed',$14,$15,
+          $16,$16,$17,$18,$18
+        )
+        ON CONFLICT (tenant_id, id) DO NOTHING`,
+        [
+          authorityId,
+          this.tenantId,
+          source.type,
+          sourceRow.subject_key,
+          sourceRow.subject_ciphertext,
+          source.project_id,
+          sourceRow.statement_ciphertext,
+          this.cipher.encrypt(slug),
+          sourceVersion,
+          now,
+          expiresAt,
+          this.cipher.encrypt(JSON.stringify(scope)),
+          source.confidence,
+          source.sensitivity,
+          source.expires_at,
+          actor,
+          supersedesId,
+          source.created_at ?? now,
+        ],
+      );
+      if (inserted.rowCount === 1 && source.status === "proposed") {
+        await client.query(
+          `UPDATE memory_items
+           SET status = 'revoked', updated_by = $3, updated_at = $4
+           WHERE tenant_id = $1 AND id = $2 AND status = 'proposed'`,
+          [this.tenantId, source.id, actor, now],
+        );
+      }
+      const projected = await client.query(
+        `SELECT * FROM memory_items
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+        [this.tenantId, authorityId],
+      );
+      if (projected.rowCount !== 1) {
+        throw new Error("Memory authority projection was not persisted");
+      }
+      if (inserted.rowCount === 1) {
+        await this.audit(client, {
+          eventType: "memory.authority_projected",
+          actor,
+          details: {
+            memoryId: authorityId,
+            sourceMemoryId,
+            sourceType: source.source_type,
+            projectId: source.project_id,
+          },
+        });
+      }
+      const memory = memoryFromRow(projected.rows[0], this.cipher);
+      return {
+        id: memory.id,
+        status: memory.status,
+        created: inserted.rowCount === 1,
+        supersedesId: memory.supersedes_id,
+      };
+    });
+  }
+
   async deleteMemory(id, actor, confirmation, now = new Date()) {
     if (confirmation !== memoryDeletionConfirmation(id)) {
       throw new Error("Memory deletion confirmation does not match");

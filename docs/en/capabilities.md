@@ -147,6 +147,28 @@ fact it replaces. Long documents may remain in gbrain and be referenced through
 the existing exact-slug project authorization instead of being copied into
 formal memory.
 
+### Unified memory authority
+
+Foursday now treats working, episodic, semantic, and prospective memory as four
+parallel kinds. Person, project, principle, and knowledge facts are sibling
+semantic namespaces. Consolidation and retrieval are lifecycle services rather
+than additional tiers.
+
+Git-backed Markdown in gbrain is the durable semantic authority. gbrain's own
+PostgreSQL data is a rebuildable knowledge index. The Foursday PostgreSQL
+database stores encrypted runtime projections, original provenance, access
+leases, supersession, permissions, and audit. Production formal memory does not
+use SQLite; the SQLite adapter remains isolated to public-pilot sessions and
+tests.
+
+When `AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE=true`, eligible low-risk candidates
+are written to deterministic `atoms/foursday/` pages. The runtime then reads the
+exact page back and verifies its slug, statement block, digest, and version
+before creating a usable PostgreSQL projection. `AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM`
+is a separate gate and requires writes to be enabled. Conflicts remain
+quarantined, while credentials, PII, sensitive person material, and confidential
+candidates never enter the authority page.
+
 ### Project recipe shadow validation
 
 After previewing an historical import, a user can rehearse one of the project's

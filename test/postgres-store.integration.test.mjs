@@ -1497,6 +1497,60 @@ integration("PostgreSQL gbrain 记忆来源访问租约控制确认和检索", a
   assert.equal(auditCount.rows[0].count, 2);
 });
 
+integration("PostgreSQL 将来源候选原子迁移为 gbrain 权威投影", async (t) => {
+  const store = await fixture(t);
+  const now = new Date("2026-08-17T08:00:00.000Z");
+  const sourceId = await store.proposeMemory({
+    type: "project",
+    subject: "foursday",
+    projectId: "foursday",
+    statement: "长期记忆正文以 Markdown 为权威。",
+    sourceType: "dingtalk_message",
+    sourceId: "message-private-1",
+    sourceVersion: "task-private-1",
+    scope: { factKey: "decision.memory_authority" },
+    confidence: 1,
+    sensitivity: "internal",
+    expiresAt: new Date("2027-08-17T08:00:00.000Z"),
+    createdBy: "system:memory-candidate",
+  }, now);
+  const projection = await store.upsertAuthorityMemoryProjection({
+    sourceMemoryId: sourceId,
+    slug: "atoms/foursday/projects/foursday/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    sourceVersion: "2026-08-17T08:00:01.000Z",
+    authorityContentSha256: "b".repeat(64),
+    authoritySourceId: "foursday",
+    accessExpiresAt: new Date(now.getTime() + 900_000),
+    actor: "system:memory-authority",
+  }, now);
+  assert.equal(projection.created, true);
+  assert.equal((await store.getMemory(sourceId)).status, "revoked");
+  const authority = await store.getMemory(projection.id);
+  assert.equal(authority.source_type, "gbrain");
+  assert.equal(authority.source_access_status, "verified");
+  assert.equal(authority.scope.authority.schema, "foursday-memory-authority/v1");
+  assert.equal(authority.scope.authority.origin.sourceId, "message-private-1");
+  await store.confirmMemory(projection.id, "system:memory-authority", now);
+  const results = await store.searchMemories({
+    type: "project",
+    projectId: "foursday",
+    now: new Date(now.getTime() + 1),
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].id, projection.id);
+  const repeated = await store.upsertAuthorityMemoryProjection({
+    sourceMemoryId: sourceId,
+    slug: authority.source_id,
+    sourceVersion: authority.source_version,
+    authorityContentSha256: authority.scope.authority.contentSha256,
+    authoritySourceId: "foursday",
+    accessExpiresAt: new Date(now.getTime() + 900_000),
+    actor: "system:memory-authority",
+  }, now);
+  assert.equal(repeated.created, false);
+  assert.equal(repeated.id, projection.id);
+});
+
 integration("PostgreSQL 冲突记忆必须显式替代且不产生双活事实", async (t) => {
   const store = await fixture(t);
   const base = {

@@ -43,8 +43,13 @@ export function validateMemoryProposal(input) {
   }
   const sourceType = required(input.sourceType, "sourceType");
   const projectId = input.projectId ? required(input.projectId, "projectId") : null;
+  const managedAuthority = sourceType === "gbrain" &&
+    scope?.authority?.schema === "foursday-memory-authority/v1" &&
+    scope.authority.managed === true &&
+    String(input.sourceId ?? "").startsWith("atoms/foursday/");
   if (
     sourceType === "gbrain" &&
+    !managedAuthority &&
     (!projectId || !["project", "knowledge"].includes(type))
   ) {
     throw new Error("gbrain memories require a project and project or knowledge type");
