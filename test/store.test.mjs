@@ -1092,6 +1092,14 @@ test("gbrain 记忆必须持有未过期来源访问租约", async (t) => {
     sourceVersion: "live-v1",
   }, "system:memory-source", now);
   assert.equal(store.getMemory(id).source_version, "live-v1");
+  store.setMemorySourceAccess(id, {
+    status: "verified",
+    reason: "authority_exact_content_rebound",
+    checkedAt: new Date(now.getTime() + 1_000),
+    expiresAt: new Date(now.getTime() + 900_000),
+    sourceVersion: "live-v2",
+  }, "system:memory-source", new Date(now.getTime() + 1_000));
+  assert.equal(store.getMemory(id).source_version, "live-v2");
   store.confirmMemory(id, "owner", now);
   assert.equal(store.searchMemories({
     type: "knowledge",

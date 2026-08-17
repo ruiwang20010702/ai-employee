@@ -74,15 +74,16 @@ gbrain Markdown      → 可审阅的长期记忆正文
 gbrain PostgreSQL    → 可重建的搜索、实体与图谱索引
 ```
 
-个人知识继续使用 gbrain `default`；自动工作记忆强制使用独立、非联邦的
-`foursday` source，每次读写和同步都显式绑定 source。新安装会初始化：
+个人知识继续使用自己的 gbrain 数据库与 `default` source；自动工作记忆
+强制使用独立 `GBRAIN_HOME`、独立 PostgreSQL 数据库和非联邦的
+`foursday` source，每次读写和同步都显式绑定这三项。新安装会初始化：
 
 ```text
 atoms/  conversations/  people/  preferences/
 projects/  concepts/  prospective/
 ```
 
-低风险事实只有完成 Markdown 写入、单文件 Git 提交、gbrain 精确回读和 PostgreSQL 投影后才可使用。每个项目默认最多保留 12 条核心权威事实，其余细节留在知识文档中按需读取。撤销、替代、永久删除或隐私擦除会先在 PostgreSQL 事务内登记回收作业，再提交受管理 Markdown 的删除、同步并验证原 slug 已不可读，最后删除 source 外临时文件；失败会提交恢复并重试。冲突保持隔离；凭据、PII、敏感人物材料和机密候选直接拒绝。
+低风险事实只有完成 Markdown 写入、单文件 Git 提交、gbrain 精确回读和 PostgreSQL 投影后才可使用。每个项目默认最多保留 12 条核心权威事实；聊天命中该项目时也最多装配这 12 条，其余细节留在知识文档中按需读取。撤销、替代、永久删除或隐私擦除会先在 PostgreSQL 事务内登记回收作业，再提交受管理 Markdown 的删除、同步并验证原 slug 已不可读，最后删除 source 外临时文件；失败会提交恢复并重试。冲突保持隔离；凭据、PII、敏感人物材料和机密候选直接拒绝。
 
 ## 与普通机器人的区别
 
@@ -131,8 +132,11 @@ foursday secrets --apply      # 在钥匙串生成密钥，不把生成的生产
 foursday check
 ```
 
-`init --apply` 自动创建 7 类 Markdown 目录、独立 Git 仓库和非联邦
-`foursday` source；记忆写入和自动确认仍关闭。
+`init --apply` 自动创建 7 类 Markdown 目录、独立 Git 仓库和独立
+`GBRAIN_HOME`；配置专用 gbrain PostgreSQL 后才注册非联邦 `foursday`
+source。记忆写入和自动确认仍关闭。
+
+记忆 Git 仓库默认不配置远端，绝不会推送到公开 Foursday 代码仓库；如需异地备份，应使用单独私有仓库并在推送前扫描秘密与 PII。
 
 ## 首次部署
 

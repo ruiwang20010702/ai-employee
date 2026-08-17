@@ -14,7 +14,10 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { runCodexArtifact } from "./codex-artifact-runner.mjs";
 import { capabilityCatalog } from "./capability-policy.mjs";
-import { readGbrainPage } from "./gbrain-page.mjs";
+import {
+  gbrainCommandEnvironment,
+  readGbrainPage,
+} from "./gbrain-page.mjs";
 import { canonicalGitHubMarkdownBody } from "./github-markdown.mjs";
 import {
   runControlledCommand,
@@ -967,6 +970,8 @@ export function createReadOnlyWorkAdapters({
   codexPath,
   gbrainPath = "gbrain",
   gbrainSourceId = null,
+  gbrainHome = null,
+  gbrainDatabaseUrl = null,
   artifactRuntime = null,
   evidencePaths = [],
   store = null,
@@ -1124,7 +1129,11 @@ export function createReadOnlyWorkAdapters({
         await execFileAsync(gbrainPath, ["version"], {
           timeout: 5_000,
           maxBuffer: 512 * 1024,
-          env: safeCommandEnvironment(gbrainPath),
+          env: gbrainCommandEnvironment(gbrainPath, {
+            sourceId: gbrainSourceId,
+            gbrainHome,
+            gbrainDatabaseUrl,
+          }),
         });
       },
       async execute({ step, manifest, signal }) {
@@ -1158,6 +1167,8 @@ export function createReadOnlyWorkAdapters({
             maxBuffer: rule.maxContentBytes + 1024 * 1024,
             signal,
             sourceId: gbrainSourceId,
+            gbrainHome,
+            gbrainDatabaseUrl,
           }));
         }
         const content = JSON.stringify(pages, null, 2);
@@ -1252,6 +1263,8 @@ export function createControlledWorkAdapters({
   dwsPath = null,
   gbrainPath = "gbrain",
   gbrainSourceId = null,
+  gbrainHome = null,
+  gbrainDatabaseUrl = null,
   ghPath = null,
   store = null,
 }) {
@@ -1260,6 +1273,8 @@ export function createControlledWorkAdapters({
       codexPath,
       gbrainPath,
       gbrainSourceId,
+      gbrainHome,
+      gbrainDatabaseUrl,
       artifactRuntime,
       store,
     }),

@@ -63,7 +63,12 @@ The memory service temporarily moves the digest-matched Markdown file outside
 the source, syncs, verifies that the original slug is absent, and removes the
 temporary file. Failure restores the file and keeps the job retryable.
 
-Production defaults to `AI_EMPLOYEE_MEMORY_AUTHORITY_MODE=gbrain`. Writes and safe auto-confirm are separate default-off gates. Enabling either does not enable message sending, plan execution, or proactive work. Production formal memory never loads the SQLite adapter.
+Production defaults to `AI_EMPLOYEE_MEMORY_AUTHORITY_MODE=gbrain`. Foursday
+also requires its own `GBRAIN_HOME` and authenticated PostgreSQL database;
+source IDs alone are not treated as physical isolation. Writes and safe
+auto-confirm are separate default-off gates. Enabling either does not enable
+message sending, plan execution, or proactive work. Production formal memory
+never loads the SQLite adapter.
 
 The personal brain keeps the `default` gbrain source. Automated work memory
 uses a separate non-federated `foursday` source, and every authority read,

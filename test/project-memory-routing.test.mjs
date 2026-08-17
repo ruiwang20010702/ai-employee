@@ -53,3 +53,26 @@ test("项目别名支持中英文多个项目且短英文别名有单词边界",
     [],
   );
 });
+
+test("每个命中项目最多装配十二条记忆且始终保留项目身份", () => {
+  const projectIdentity = identity("foursday", ["Foursday"]);
+  const memories = [
+    ...Array.from({ length: 15 }, (_, index) => ({
+      ...projectIdentity,
+      id: `fact-${index}`,
+      statement: `项目事实 ${index}`,
+      scope: { factKey: `project.fact_${index}` },
+    })),
+    projectIdentity,
+  ];
+  const routed = routeProjectMemories({ text: "继续 Foursday", memories });
+  assert.equal(routed.length, 12);
+  assert.equal(routed[0].id, projectIdentity.id);
+});
+
+test("项目记忆装配拒绝无效数量上限", () => {
+  assert.throws(
+    () => routeProjectMemories({ text: "Foursday", memories: [], maxMemoriesPerProject: 0 }),
+    /positive integer/,
+  );
+});

@@ -62,6 +62,7 @@ export async function initializeProductionConfig({
     sourceId: isolatedMemorySourceId(keychainService),
   });
   Object.assign(values, memorySourceConfigValues(memorySource));
+  values.AI_EMPLOYEE_GBRAIN_DATABASE_URL = "";
   values.GH_PATH = "";
   values.AI_EMPLOYEE_TENANT_ID = "";
   values.AI_EMPLOYEE_APPROVER = "";
@@ -85,6 +86,7 @@ export async function initializeProductionConfig({
     requiredSecretProvisioning: Object.keys(accounts),
     requiredEdits: [
       "DATABASE_URL",
+      "AI_EMPLOYEE_GBRAIN_DATABASE_URL",
       "AI_EMPLOYEE_TENANT_ID",
       "DINGTALK_TARGET_USER_IDS or DINGTALK_TARGET_GROUP_IDS",
       "DINGTALK_SELF_USER_ID",

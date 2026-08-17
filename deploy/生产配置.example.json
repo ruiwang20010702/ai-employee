@@ -16,6 +16,8 @@
   "CLAUDE_CODE_PATH": "claude",
   "AI_EMPLOYEE_AGENT_RUNTIME": "codex",
   "GBRAIN_PATH": "gbrain",
+  "AI_EMPLOYEE_GBRAIN_HOME": "/absolute/path/to/foursday-gbrain-runtime",
+  "AI_EMPLOYEE_GBRAIN_DATABASE_URL": "keychain://foursday-production/gbrain-database-url",
   "GH_PATH": "/absolute/path/to/gh",
   "AI_EMPLOYEE_ALLOWED_CAPABILITIES": "draft_reply,work_plan_proposal",
   "AI_EMPLOYEE_AUTO_APPROVE_LOW_RISK_REPLIES": false,

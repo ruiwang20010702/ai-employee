@@ -2362,7 +2362,7 @@ export class Store {
       `UPDATE memory_items SET
          source_access_status = ?, source_access_reason = ?,
          source_access_checked_at = ?, source_access_expires_at = ?,
-         source_version = COALESCE(source_version, ?)
+         source_version = COALESCE(?, source_version)
        WHERE id = ? AND source_type = 'gbrain' AND deleted_at IS NULL`,
     ).run(
       normalized.status,

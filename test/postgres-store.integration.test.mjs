@@ -1459,6 +1459,14 @@ integration("PostgreSQL gbrain 记忆来源访问租约控制确认和检索", a
     sourceVersion: "live-v1",
   }, "system:memory-source", now);
   assert.equal((await store.getMemory(id)).source_version, "live-v1");
+  await store.setMemorySourceAccess(id, {
+    status: "verified",
+    reason: "authority_exact_content_rebound",
+    checkedAt: new Date(now.getTime() + 1_000),
+    expiresAt: new Date(now.getTime() + 900_000),
+    sourceVersion: "live-v2",
+  }, "system:memory-source", new Date(now.getTime() + 1_000));
+  assert.equal((await store.getMemory(id)).source_version, "live-v2");
   await store.confirmMemory(id, "approver", now);
   assert.equal((await store.searchMemories({
     type: "knowledge",
@@ -1494,7 +1502,7 @@ integration("PostgreSQL gbrain 记忆来源访问租约控制确认和检索", a
      WHERE tenant_id = $1 AND event_type = 'memory.source_access_checked'`,
     [store.tenantId],
   );
-  assert.equal(auditCount.rows[0].count, 2);
+  assert.equal(auditCount.rows[0].count, 4);
 });
 
 integration("PostgreSQL 将来源候选原子迁移为 gbrain 权威投影", async (t) => {

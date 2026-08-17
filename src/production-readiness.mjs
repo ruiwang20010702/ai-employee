@@ -9,7 +9,10 @@ import {
   inspectMigrationStatus,
 } from "./migration-status.mjs";
 import { createAdminSessionManager } from "./admin-session-auth.mjs";
-import { resolveGbrainPath } from "./gbrain-page.mjs";
+import {
+  gbrainCommandEnvironment,
+  resolveGbrainPath,
+} from "./gbrain-page.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -139,6 +142,7 @@ export async function checkDwsRuntime(
 export async function checkGbrainRuntime(
   gbrainPath,
   run = execFileAsync,
+  environmentOptions = {},
 ) {
   let version;
   try {
@@ -148,7 +152,7 @@ export async function checkGbrainRuntime(
     const { stdout } = await run(executable, ["version"], {
       timeout: 10_000,
       maxBuffer: 512 * 1024,
-      env: safeCodexEnvironment(executable),
+      env: gbrainCommandEnvironment(executable, environmentOptions),
     });
     version = String(stdout).trim().match(/^gbrain\s+([^\s]+)/u)?.[1] ?? null;
   } catch {
@@ -167,6 +171,9 @@ export function validateProductionReadinessConfig(
   }
   if (config.memoryAuthorityAutoConfirm && !config.memoryAuthorityWrite) {
     throw new Error("Memory authority auto-confirm requires authority writes");
+  }
+  if (!config.gbrainHome || !config.gbrainDatabaseUrl) {
+    throw new Error("Production Foursday gbrain must use an isolated home and database");
   }
   validateBase64Key("AI_EMPLOYEE_DATA_KEY", config.dataKey);
   validateBase64Key(
@@ -264,7 +271,13 @@ export async function checkProductionReadiness({
       : codexChecker(config.codexPath),
     dwsChecker(config.dwsPath),
     gbrainRequired
-      ? gbrainChecker(config.gbrainPath)
+      ? gbrainChecker === checkGbrainRuntime
+        ? gbrainChecker(config.gbrainPath, execFileAsync, {
+            sourceId: config.memoryAuthoritySourceId,
+            gbrainHome: config.gbrainHome,
+            gbrainDatabaseUrl: config.gbrainDatabaseUrl,
+          })
+        : gbrainChecker(config.gbrainPath)
       : Promise.resolve({ required: false }),
   ]);
 
@@ -289,6 +302,9 @@ export async function checkProductionReadiness({
         autoConfirm: config.memoryAuthorityAutoConfirm === true,
         durableStore: "gbrain_markdown",
         runtimeStore: "postgresql",
+        indexStore: "dedicated_postgresql",
+        isolatedHome: Boolean(config.gbrainHome),
+        databaseDistinctFromRuntime: true,
       },
     };
   } finally {

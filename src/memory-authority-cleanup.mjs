@@ -8,6 +8,8 @@ export async function reconcileMemoryAuthorityCleanup({
   gbrainPath = "gbrain",
   authorityRoot,
   authoritySourceId = "foursday",
+  gbrainHome = null,
+  gbrainDatabaseUrl = null,
   limit = 100,
   owner = `${hostname()}:${process.pid}:${randomUUID()}`,
   retirePage = retireGbrainMarkdownAuthority,
@@ -35,6 +37,8 @@ export async function reconcileMemoryAuthorityCleanup({
       }, {
         root: authorityRoot,
         sourceId: claimed.authoritySourceId,
+        gbrainHome,
+        gbrainDatabaseUrl,
       });
       await store.completeMemoryAuthorityCleanup(claimed.id, owner, now());
       report.completed += 1;

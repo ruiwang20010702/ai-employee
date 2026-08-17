@@ -7,6 +7,7 @@ const keychainReference = /^keychain:\/\/([^/]+)\/([^/]+)$/u;
 
 export const secretConfigKeys = new Set([
   "DATABASE_URL",
+  "AI_EMPLOYEE_GBRAIN_DATABASE_URL",
   "AI_EMPLOYEE_DATA_KEY",
   "AI_EMPLOYEE_BACKUP_KEY",
   "AI_EMPLOYEE_HEALTH_AUTH_TOKEN",

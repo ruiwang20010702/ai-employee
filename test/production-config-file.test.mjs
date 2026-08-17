@@ -424,6 +424,9 @@ test("生产默认使用 gbrain 记忆权威且自动确认必须先开放写入
     "AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM",
     "AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT",
     "AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID",
+    "AI_EMPLOYEE_GBRAIN_HOME",
+    "AI_EMPLOYEE_GBRAIN_DATABASE_URL",
+    "DATABASE_URL",
   ];
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   try {
@@ -439,10 +442,28 @@ test("生产默认使用 gbrain 记忆权威且自动确认必须先开放写入
     process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE = "true";
     process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT = "/private/var/tmp/foursday-memory";
     process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID = "foursday";
+    process.env.AI_EMPLOYEE_GBRAIN_HOME = "/private/var/tmp/foursday-gbrain-home";
+    process.env.AI_EMPLOYEE_GBRAIN_DATABASE_URL =
+      "postgresql://foursday_gbrain:secret@127.0.0.1:55432/foursday_gbrain";
     assert.equal(
       loadConfig({ requireTargets: false }).memoryAuthorityAutoConfirm,
       true,
     );
+    process.env.DATABASE_URL =
+      "postgresql://employee:secret@127.0.0.1:55432/foursday_gbrain";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must not use the AI employee transaction database/u,
+    );
+    delete process.env.DATABASE_URL;
+    process.env.AI_EMPLOYEE_GBRAIN_DATABASE_URL =
+      "postgresql://foursday_gbrain:secret@127.0.0.1:55432/foursday_gbrain?host=example.com";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must not override database identity/u,
+    );
+    process.env.AI_EMPLOYEE_GBRAIN_DATABASE_URL =
+      "postgresql://foursday_gbrain:secret@127.0.0.1:55432/foursday_gbrain";
     process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE = "disabled";
     assert.throws(
       () => loadConfig({ requireTargets: false }),

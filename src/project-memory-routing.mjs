@@ -29,7 +29,14 @@ function identityAliases(memory) {
   ].map(normalized).filter(Boolean))];
 }
 
-export function routeProjectMemories({ text = "", memories = [] } = {}) {
+export function routeProjectMemories({
+  text = "",
+  memories = [],
+  maxMemoriesPerProject = 12,
+} = {}) {
+  if (!Number.isSafeInteger(maxMemoriesPerProject) || maxMemoriesPerProject < 1) {
+    throw new Error("Project memory routing limit must be a positive integer");
+  }
   const haystack = normalized(text);
   if (!haystack) return [];
   const matches = memories.flatMap((memory) => {
@@ -46,9 +53,18 @@ export function routeProjectMemories({ text = "", memories = [] } = {}) {
         other.alias.includes(candidate.alias)))
       .map((match) => match.subject),
   );
-  return memories.filter(
-    (memory) => memory.status === "confirmed" &&
-      memory.type === "project" &&
-      selectedSubjects.has(memory.subject),
-  );
+  return [...selectedSubjects].flatMap((subject) => {
+    const projectMemories = memories.filter(
+      (memory) => memory.status === "confirmed" &&
+        memory.type === "project" &&
+        memory.subject === subject,
+    );
+    const identity = projectMemories.find(
+      (memory) => memory.scope?.factKey === "identity.project_aliases",
+    );
+    return [
+      ...(identity ? [identity] : []),
+      ...projectMemories.filter((memory) => memory !== identity),
+    ].slice(0, maxMemoriesPerProject);
+  });
 }

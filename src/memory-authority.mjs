@@ -181,9 +181,13 @@ async function projectAuthorityDocument(memory, document, {
   readPage,
   leaseMs,
   authoritySourceId,
+  gbrainHome,
+  gbrainDatabaseUrl,
 }) {
   const page = await readPage(gbrainPath, document.slug, {
     sourceId: authoritySourceId,
+    gbrainHome,
+    gbrainDatabaseUrl,
   });
   if (page.slug !== document.slug) {
     throw new Error("Memory authority read-back identity mismatch");
@@ -261,6 +265,8 @@ export async function promoteMemoryToAuthority(memory, {
   leaseMs = 15 * 60 * 1_000,
   authorityRoot,
   authoritySourceId = "foursday",
+  gbrainHome = null,
+  gbrainDatabaseUrl = null,
 } = {}) {
   if (typeof store?.upsertAuthorityMemoryProjection !== "function") {
     throw new Error("Memory authority requires PostgreSQL projection support");
@@ -281,6 +287,8 @@ export async function promoteMemoryToAuthority(memory, {
   await writePage(gbrainPath, document, {
     root: authorityRoot,
     sourceId: authoritySourceId,
+    gbrainHome,
+    gbrainDatabaseUrl,
   });
   return projectAuthorityDocument(memory, document, {
     store,
@@ -291,6 +299,8 @@ export async function promoteMemoryToAuthority(memory, {
     readPage,
     leaseMs,
     authoritySourceId,
+    gbrainHome,
+    gbrainDatabaseUrl,
   });
 }
 
@@ -308,6 +318,8 @@ export async function synchronizeMemoryAuthority({
   leaseMs = 15 * 60 * 1_000,
   authorityRoot,
   authoritySourceId = "foursday",
+  gbrainHome = null,
+  gbrainDatabaseUrl = null,
 } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
     throw new Error("Memory authority sync limit must be 1-500");
@@ -411,6 +423,8 @@ export async function synchronizeMemoryAuthority({
           {
             root: authorityRoot,
             sourceId: authoritySourceId,
+            gbrainHome,
+            gbrainDatabaseUrl,
           },
         );
         report.batch = batch;
@@ -425,6 +439,8 @@ export async function synchronizeMemoryAuthority({
               readPage,
               leaseMs,
               authoritySourceId,
+              gbrainHome,
+              gbrainDatabaseUrl,
             });
           } catch (error) {
             return { error, memoryId: item.memory.id };
@@ -467,6 +483,8 @@ export async function synchronizeMemoryAuthority({
         leaseMs,
         authorityRoot,
         authoritySourceId,
+        gbrainHome,
+        gbrainDatabaseUrl,
       });
       if (result.created) report.promoted += 1;
       if (result.confirmed) report.confirmed += 1;

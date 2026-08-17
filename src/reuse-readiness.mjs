@@ -129,6 +129,17 @@ async function inspectConfig(configPath) {
   ) {
     result.requiredEdits.push("填写数据库连接");
   }
+  if (
+    !configured(values.AI_EMPLOYEE_GBRAIN_DATABASE_URL) ||
+    /replace|change_me|example/iu.test(
+      String(values.AI_EMPLOYEE_GBRAIN_DATABASE_URL),
+    )
+  ) {
+    result.requiredEdits.push("填写 Foursday gbrain 数据库连接");
+  }
+  if (!isAbsolute(String(values.AI_EMPLOYEE_GBRAIN_HOME ?? ""))) {
+    result.requiredEdits.push("填写 Foursday 独立 GBRAIN_HOME");
+  }
   if (!configured(values.AI_EMPLOYEE_TENANT_ID)) result.requiredEdits.push("填写租户编号");
   if (!configured(values.AI_EMPLOYEE_APPROVER)) result.requiredEdits.push("填写操作人编号");
   if (!configured(values.DINGTALK_SELF_USER_ID)) result.requiredEdits.push("填写当前账号编号");

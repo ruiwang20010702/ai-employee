@@ -40,6 +40,7 @@ test("记忆源预览固定独立非联邦 source 且不打开自动能力", asy
   assert.deepEqual(memorySourceConfigValues(plan), {
     AI_EMPLOYEE_MEMORY_AUTHORITY_MODE: "gbrain",
     AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT: plan.root,
+    AI_EMPLOYEE_GBRAIN_HOME: plan.gbrainHome,
     AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID: "foursday",
     AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE: false,
     AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM: false,
@@ -59,6 +60,8 @@ test("显式初始化创建七类目录、独立 Git 和非联邦 gbrain source"
   const first = await initializeMemorySource({
     configPath,
     gbrainPath: "/trusted/gbrain",
+    gbrainDatabaseUrl:
+      "postgresql://foursday_gbrain:secret@127.0.0.1:55432/foursday_gbrain",
     run,
   });
   assert.equal(first.createdFiles, 9);
@@ -74,6 +77,8 @@ test("显式初始化创建七类目录、独立 Git 和非联邦 gbrain source"
   const second = await initializeMemorySource({
     configPath,
     gbrainPath: "/trusted/gbrain",
+    gbrainDatabaseUrl:
+      "postgresql://foursday_gbrain:secret@127.0.0.1:55432/foursday_gbrain",
     run,
   });
   assert.equal(second.createdFiles, 0);

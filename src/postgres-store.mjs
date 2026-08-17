@@ -2432,7 +2432,7 @@ export class PostgresStore {
         `UPDATE memory_items SET
            source_access_status = $3, source_access_reason = $4,
            source_access_checked_at = $5, source_access_expires_at = $6,
-           source_version = COALESCE(source_version, $7)
+           source_version = COALESCE($7, source_version)
          WHERE tenant_id = $1 AND id = $2 AND source_type = 'gbrain'
            AND deleted_at IS NULL`,
         [

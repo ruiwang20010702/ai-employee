@@ -65,6 +65,8 @@ async function refreshMemorySource(memory) {
   const change = await checkMemorySourceAccess(memory, {
     projects: await loadProjectManifests(config.projectsDirectory),
     gbrainPath: config.gbrainPath,
+    gbrainHome: config.gbrainHome,
+    gbrainDatabaseUrl: config.gbrainDatabaseUrl,
     leaseMs: config.memorySourceLeaseMs,
   });
   await store.setMemorySourceAccess(
@@ -218,6 +220,8 @@ try {
         gbrainPath: config.gbrainPath,
         leaseMs: config.memorySourceLeaseMs,
         limit: config.memorySourceLimit,
+        gbrainHome: config.gbrainHome,
+        gbrainDatabaseUrl: config.gbrainDatabaseUrl,
       });
       print(report);
     } else {
@@ -413,6 +417,9 @@ try {
         codexPath: config.codexPath,
         dwsPath: config.dwsPath,
         gbrainPath: config.gbrainPath,
+        gbrainSourceId: config.memoryAuthoritySourceId,
+        gbrainHome: config.gbrainHome,
+        gbrainDatabaseUrl: config.gbrainDatabaseUrl,
         ghPath: config.ghPath,
         store,
       }),

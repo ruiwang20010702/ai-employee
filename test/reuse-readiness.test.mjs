@@ -57,6 +57,7 @@ test("完整安全配置通过本地复用门禁但不会执行联网预检", as
   const values = JSON.parse(await readFile(configPath, "utf8"));
   Object.assign(values, {
     DATABASE_URL: "env://AI_EMPLOYEE_DATABASE_URL",
+    AI_EMPLOYEE_GBRAIN_DATABASE_URL: "env://FOURSDAY_GBRAIN_DATABASE_URL",
     AI_EMPLOYEE_TENANT_ID: "tenant-1",
     AI_EMPLOYEE_APPROVER: "operator-1",
     DINGTALK_TARGET_USER_IDS: "target-1",
@@ -77,7 +78,7 @@ test("完整安全配置通过本地复用门禁但不会执行联网预检", as
   assert.deepEqual(result.config.requiredEdits, []);
   assert.deepEqual(result.config.unsafeCapabilitiesEnabled, []);
   assert.equal(result.config.inlineSecretValues, 0);
-  assert.equal(result.config.externalSecretReferences, 5);
+  assert.equal(result.config.externalSecretReferences, 6);
   assert.deepEqual(checked, ["dws", "codex", "pg_dump", "pg_restore", "/usr/bin/git"]);
   assert.deepEqual(result.nextActions, ["运行 foursday preflight 进行联网只读预检"]);
   assert.doesNotMatch(JSON.stringify(result), /AI_EMPLOYEE_DATABASE_URL|target-1|self-1/u);
@@ -89,6 +90,7 @@ test("复用检查按配置选择 Claude Code 而不再强制 Codex", async (t) 
   const values = JSON.parse(await readFile(configPath, "utf8"));
   Object.assign(values, {
     DATABASE_URL: "env://AI_EMPLOYEE_DATABASE_URL",
+    AI_EMPLOYEE_GBRAIN_DATABASE_URL: "env://FOURSDAY_GBRAIN_DATABASE_URL",
     AI_EMPLOYEE_TENANT_ID: "tenant-1",
     AI_EMPLOYEE_APPROVER: "operator-1",
     DINGTALK_TARGET_USER_IDS: "target-1",

@@ -3,6 +3,20 @@ import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
+const postgresIdentityOverrideParameters = new Set([
+  "host",
+  "hostaddr",
+  "port",
+  "database",
+  "dbname",
+  "user",
+  "password",
+]);
+
+function rejectsPostgresIdentityOverrides(url) {
+  return [...url.searchParams.keys()].some((key) =>
+    postgresIdentityOverrideParameters.has(key.toLowerCase()));
+}
 
 function positiveNumber(name, fallback) {
   const value = Number(process.env[name] ?? fallback);
@@ -194,6 +208,41 @@ export function loadConfig({
   const memoryAuthoritySourceId = String(
     process.env.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID ?? "foursday",
   ).trim();
+  const gbrainHome = process.env.AI_EMPLOYEE_GBRAIN_HOME?.trim() || null;
+  const gbrainDatabaseUrl =
+    process.env.AI_EMPLOYEE_GBRAIN_DATABASE_URL?.trim() || null;
+  if (gbrainHome && !isAbsolute(gbrainHome)) {
+    throw new Error("AI_EMPLOYEE_GBRAIN_HOME must be absolute");
+  }
+  if (Boolean(gbrainHome) !== Boolean(gbrainDatabaseUrl)) {
+    throw new Error(
+      "AI_EMPLOYEE_GBRAIN_HOME and AI_EMPLOYEE_GBRAIN_DATABASE_URL must be configured together",
+    );
+  }
+  if (gbrainDatabaseUrl) {
+    let parsed;
+    try {
+      parsed = new URL(gbrainDatabaseUrl);
+    } catch {
+      throw new Error("AI_EMPLOYEE_GBRAIN_DATABASE_URL is invalid");
+    }
+    if (!/^postgres(?:ql)?:$/u.test(parsed.protocol) || !parsed.username || !parsed.password) {
+      throw new Error("AI_EMPLOYEE_GBRAIN_DATABASE_URL must be an authenticated PostgreSQL URL");
+    }
+    if (rejectsPostgresIdentityOverrides(parsed)) {
+      throw new Error("AI_EMPLOYEE_GBRAIN_DATABASE_URL must not override database identity in query parameters");
+    }
+    if (databaseUrl) {
+      const runtime = new URL(databaseUrl);
+      if (
+        parsed.hostname === runtime.hostname &&
+        (parsed.port || "5432") === (runtime.port || "5432") &&
+        parsed.pathname === runtime.pathname
+      ) {
+        throw new Error("Foursday gbrain must not use the AI employee transaction database");
+      }
+    }
+  }
   if (memoryAuthorityWrite && memoryAuthorityMode !== "gbrain") {
     throw new Error(
       "AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE requires gbrain authority mode",
@@ -212,6 +261,9 @@ export function loadConfig({
   }
   if (memoryAuthorityWrite && memoryAuthoritySourceId === "default") {
     throw new Error("Memory authority writes require a dedicated non-default gbrain source");
+  }
+  if (memoryAuthorityWrite && (!gbrainHome || !gbrainDatabaseUrl)) {
+    throw new Error("Memory authority writes require an isolated Foursday gbrain home and database");
   }
   const alertIntervalMs = positiveNumber(
     "AI_EMPLOYEE_ALERT_INTERVAL_MS",
@@ -422,6 +474,8 @@ export function loadConfig({
     memoryAuthorityAutoConfirmMinimumConfidence,
     memoryAuthorityRoot,
     memoryAuthoritySourceId,
+    gbrainHome,
+    gbrainDatabaseUrl,
     requireMessageReconciliation: boolean(
       "AI_EMPLOYEE_REQUIRE_MESSAGE_RECONCILIATION",
       false,

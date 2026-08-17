@@ -36,6 +36,8 @@ try {
         maxProjectFacts: config.memoryAuthorityMaxProjectFacts,
         authorityRoot: config.memoryAuthorityRoot,
         authoritySourceId: config.memoryAuthoritySourceId,
+        gbrainHome: config.gbrainHome,
+        gbrainDatabaseUrl: config.gbrainDatabaseUrl,
       })
     : {
         inspected: 0,
@@ -53,6 +55,8 @@ try {
         gbrainPath: config.gbrainPath,
         authorityRoot: config.memoryAuthorityRoot,
         authoritySourceId: config.memoryAuthoritySourceId,
+        gbrainHome: config.gbrainHome,
+        gbrainDatabaseUrl: config.gbrainDatabaseUrl,
         limit: Math.min(config.memorySourceLimit, 500),
       })
     : {
@@ -68,6 +72,8 @@ try {
     gbrainPath: config.gbrainPath,
     leaseMs: config.memorySourceLeaseMs,
     limit: config.memorySourceLimit,
+    gbrainHome: config.gbrainHome,
+    gbrainDatabaseUrl: config.gbrainDatabaseUrl,
   });
   const report = { projectMemory, authority, cleanup, sources };
   await store.setCheckpoint("memory-source:last-report", JSON.stringify(report));

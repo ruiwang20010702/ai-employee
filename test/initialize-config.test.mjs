@@ -26,6 +26,11 @@ test("production config initializer writes protected isolated references and ref
   assert.equal(config.CLAUDE_CODE_PATH, "claude");
   assert.equal(config.AI_EMPLOYEE_AGENT_RUNTIME, "codex");
   assert.equal(config.GBRAIN_PATH, "gbrain");
+  assert.equal(
+    config.AI_EMPLOYEE_GBRAIN_HOME,
+    join(directory, "nested", "gbrain-runtime"),
+  );
+  assert.equal(config.AI_EMPLOYEE_GBRAIN_DATABASE_URL, "");
   assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE, "gbrain");
   assert.match(
     config.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID,
@@ -53,6 +58,7 @@ test("production config initializer writes protected isolated references and ref
   ]);
   assert.deepEqual(result.requiredEdits, [
     "DATABASE_URL",
+    "AI_EMPLOYEE_GBRAIN_DATABASE_URL",
     "AI_EMPLOYEE_TENANT_ID",
     "DINGTALK_TARGET_USER_IDS or DINGTALK_TARGET_GROUP_IDS",
     "DINGTALK_SELF_USER_ID",

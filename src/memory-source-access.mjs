@@ -68,6 +68,8 @@ export async function checkMemorySourceAccess(
     now = new Date(),
     leaseMs = 15 * 60 * 1000,
     readPage = readGbrainPage,
+    gbrainHome = null,
+    gbrainDatabaseUrl = null,
   },
 ) {
   const checkedAt = new Date(now);
@@ -113,6 +115,8 @@ export async function checkMemorySourceAccess(
       sourceId: managedAuthority
         ? memory.scope?.authority?.sourceId
         : null,
+      gbrainHome,
+      gbrainDatabaseUrl,
     });
   } catch {
     return denied("unavailable", "source_unavailable", checkedAt);
@@ -144,7 +148,8 @@ export async function checkMemorySourceAccess(
     : normalizedSourceVersion(page.updatedAt);
   if (
     memory.source_version &&
-    normalizedSourceVersion(memory.source_version) !== liveVersion
+    normalizedSourceVersion(memory.source_version) !== liveVersion &&
+    !managedAuthority
   ) {
     return denied("unavailable", "source_version_changed", checkedAt);
   }
@@ -152,7 +157,11 @@ export async function checkMemorySourceAccess(
   const authorizationExpiry = rule.expiresAt ? new Date(rule.expiresAt) : null;
   return validateSourceAccessChange({
     status: "verified",
-    reason: "exact_source_verified",
+    reason:
+      managedAuthority && memory.source_version &&
+        normalizedSourceVersion(memory.source_version) !== liveVersion
+        ? "authority_exact_content_rebound"
+        : "exact_source_verified",
     checkedAt,
     expiresAt:
       authorizationExpiry && authorizationExpiry < requestedExpiry
@@ -170,6 +179,8 @@ export async function reconcileMemorySources({
   leaseMs = 15 * 60 * 1000,
   readPage = readGbrainPage,
   limit = 500,
+  gbrainHome = null,
+  gbrainDatabaseUrl = null,
 }) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5_000) {
     throw new Error("Memory source reconciliation limit must be 1-5000");
@@ -190,6 +201,8 @@ export async function reconcileMemorySources({
       now,
       leaseMs,
       readPage,
+      gbrainHome,
+      gbrainDatabaseUrl,
     });
     await store.setMemorySourceAccess(memory.id, change, "system:memory-source");
     counts[change.status] = (counts[change.status] ?? 0) + 1;

@@ -92,9 +92,10 @@ gbrain Markdown      → reviewable long-term memory authority
 gbrain PostgreSQL    → rebuildable search / entity / graph index
 ```
 
-Personal knowledge stays in gbrain `default`. Automated work memory uses a
-dedicated, non-federated `foursday` source; every read, write, and sync binds
-that source. New installations initialize:
+Personal knowledge stays in its own gbrain database and `default` source.
+Automated work memory uses a separate `GBRAIN_HOME`, PostgreSQL database, and
+non-federated `foursday` source; every read, write, and sync binds all three.
+New installations initialize:
 
 ```text
 atoms/  conversations/  people/  preferences/
@@ -103,7 +104,8 @@ projects/  concepts/  prospective/
 
 Low-risk facts become usable only after Markdown write, a path-scoped Git
 commit, exact gbrain read-back, and PostgreSQL projection. Each project keeps
-at most 12 core authority facts by default; detailed rules
+at most 12 core authority facts by default, and a matched conversation loads
+at most those 12 facts for that project; detailed rules
 stay in project knowledge pages and are read only when needed. Revocation,
 replacement, deletion, and privacy erasure atomically enqueue cleanup; the
 worker commits the managed Markdown deletion, syncs, verifies that the original
@@ -157,8 +159,13 @@ foursday check
 ```
 
 `init --apply` creates the seven-directory Markdown skeleton, an independent Git
-repository, and a non-federated `foursday` source. Memory writes and auto-confirm
-remain off.
+repository, and an isolated `GBRAIN_HOME`. It registers the non-federated
+`foursday` source only after a dedicated gbrain PostgreSQL database is
+configured. Memory writes and auto-confirm remain off.
+
+The memory Git repository has no remote by default and is never pushed to the
+public Foursday code repository. Off-device backup should use a separate
+private repository with secret and PII scanning before every push.
 
 ## Governed Work Graph
 

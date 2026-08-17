@@ -28,6 +28,7 @@ import {
   evaluateDecisionReviewCoverage,
 } from "./decision-quality.mjs";
 import { safeCommandEnvironment } from "./controlled-command-runner.mjs";
+import { gbrainCommandEnvironment } from "./gbrain-page.mjs";
 import { isMainModule } from "./main-module.mjs";
 import { safeErrorCode } from "./logging.mjs";
 import { buildPlanTakeover } from "./plan-takeover.mjs";
@@ -537,7 +538,11 @@ async function capabilityAvailable(name, rule, config) {
     return execFileAsync(config.gbrainPath, ["version"], {
       timeout: 5_000,
       maxBuffer: 512 * 1024,
-      env: safeCommandEnvironment(config.gbrainPath),
+      env: gbrainCommandEnvironment(config.gbrainPath, {
+        sourceId: config.memoryAuthoritySourceId,
+        gbrainHome: config.gbrainHome,
+        gbrainDatabaseUrl: config.gbrainDatabaseUrl,
+      }),
     }).then(() => true).catch(() => false);
   }
   if (runtime === "dws") {

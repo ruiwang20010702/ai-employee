@@ -10,7 +10,10 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { resolveGbrainPath } from "./gbrain-page.mjs";
+import {
+  gbrainCommandEnvironment,
+  resolveGbrainPath,
+} from "./gbrain-page.mjs";
 
 const execFileAsync = promisify(execFile);
 export const memorySourceId = "foursday";
@@ -102,6 +105,7 @@ export function memorySourceBootstrapPlan({
     schema: "foursday-memory-source-bootstrap/v1",
     sourceId,
     root: target,
+    gbrainHome: join(configDirectory, "gbrain-runtime"),
     federated: false,
     directories: ["atoms", "conversations", "people", "preferences", "projects", "concepts", "prospective"],
     markdownFiles: Object.keys(readmes),
@@ -128,9 +132,15 @@ export async function initializeMemorySource({
   root,
   sourceId = memorySourceId,
   gbrainPath = "gbrain",
+  gbrainHome = null,
+  gbrainDatabaseUrl = null,
   run = execFileAsync,
 } = {}) {
   const plan = memorySourceBootstrapPlan({ configPath, root, sourceId });
+  plan.gbrainHome = resolve(gbrainHome ?? plan.gbrainHome);
+  if (!within(dirname(resolve(configPath)), plan.gbrainHome)) {
+    throw new Error("Foursday gbrain home must remain under the configuration directory");
+  }
   const configDirectory = dirname(resolve(configPath));
   await safeDirectory(configDirectory, relative(configDirectory, plan.root));
   const canonical = await realpath(plan.root);
@@ -165,6 +175,17 @@ export async function initializeMemorySource({
       "commit", "-m", "Initialize isolated memory source",
     ], plan.root, run);
   }
+  await safeDirectory(configDirectory, relative(configDirectory, plan.gbrainHome));
+  if (!gbrainDatabaseUrl) {
+    return {
+      ...plan,
+      created: true,
+      createdFiles,
+      gitInitialized: true,
+      registered: false,
+      registrationPending: "gbrain_database_unconfigured",
+    };
+  }
   let executable;
   try {
     executable = run === execFileAsync
@@ -190,7 +211,11 @@ export async function initializeMemorySource({
     ], {
       timeout: 30_000,
       maxBuffer: 2 * 1024 * 1024,
-      env: { PATH: dirname(executable) + ":/usr/bin:/bin:/usr/sbin:/sbin" },
+      env: gbrainCommandEnvironment(executable, {
+        sourceId: plan.sourceId,
+        gbrainHome: plan.gbrainHome,
+        gbrainDatabaseUrl,
+      }),
     });
     registered = true;
   } catch (error) {
@@ -213,6 +238,7 @@ export function memorySourceConfigValues(plan) {
   return {
     AI_EMPLOYEE_MEMORY_AUTHORITY_MODE: "gbrain",
     AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT: plan.root,
+    AI_EMPLOYEE_GBRAIN_HOME: plan.gbrainHome,
     AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID: plan.sourceId,
     AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE: false,
     AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM: false,

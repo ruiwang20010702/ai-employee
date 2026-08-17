@@ -315,6 +315,10 @@ test("gbrain 写适配器使用参数数组和最小环境并校验回执身份"
     slug: "atoms/foursday/principles/core/fact",
     content: "# safe",
   }, {
+    sourceId: "foursday",
+    gbrainHome: "/private/var/tmp/foursday-gbrain-home",
+    gbrainDatabaseUrl:
+      "postgresql://foursday_gbrain:secret@127.0.0.1:55432/foursday_gbrain",
     run: async (path, args, options) => {
       calls.push({ path, args, options });
       return { stdout: JSON.stringify({ slug: "atoms/foursday/principles/core/fact" }) };
@@ -323,6 +327,20 @@ test("gbrain 写适配器使用参数数组和最小环境并校验回执身份"
   assert.equal(calls[0].path, "/trusted/gbrain");
   assert.deepEqual(calls[0].args.slice(0, 2), ["call", "put_page"]);
   assert.equal(calls[0].options.env.AI_EMPLOYEE_DATA_KEY, undefined);
+  assert.equal(calls[0].options.env.GBRAIN_SOURCE, "foursday");
+  assert.equal(
+    calls[0].options.env.GBRAIN_HOME,
+    "/private/var/tmp/foursday-gbrain-home",
+  );
+  assert.match(calls[0].options.env.GBRAIN_DATABASE_URL, /foursday_gbrain/u);
+  await assert.rejects(writeGbrainPage("/trusted/gbrain", {
+    slug: "atoms/foursday/principles/core/fact",
+    content: "# safe",
+  }, {
+    gbrainDatabaseUrl:
+      "postgresql://foursday_gbrain:secret@127.0.0.1:55432/foursday_gbrain?host=example.com",
+    run: async () => ({ stdout: "{}" }),
+  }), /must not override database identity/u);
   await assert.rejects(writeGbrainPage("/trusted/gbrain", {
     slug: "atoms/foursday/principles/core/fact",
     content: "# safe",

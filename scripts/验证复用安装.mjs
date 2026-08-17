@@ -532,10 +532,14 @@ export async function verifyReusableInstallation({
       /^foursday-[a-f0-9]{16}$/u.test(workspaceValuesB.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID) &&
       workspaceValuesA.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID !==
         workspaceValuesB.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID &&
+      workspaceValuesA.AI_EMPLOYEE_GBRAIN_HOME !==
+        workspaceValuesB.AI_EMPLOYEE_GBRAIN_HOME &&
       initializedA.memorySource.registered === false &&
       initializedB.memorySource.registered === false &&
-      initializedA.memorySource.registrationPending === "gbrain_unavailable" &&
-      initializedB.memorySource.registrationPending === "gbrain_unavailable",
+      initializedA.memorySource.registrationPending ===
+        "gbrain_database_unconfigured" &&
+      initializedB.memorySource.registrationPending ===
+        "gbrain_database_unconfigured",
       "Independent workspaces reused a gbrain source or hid pending registration",
     );
     await Promise.all([
@@ -624,6 +628,8 @@ export async function verifyReusableInstallation({
 
     Object.assign(config, {
       DATABASE_URL: "env://AI_EMPLOYEE_REUSE_DATABASE_URL",
+      AI_EMPLOYEE_GBRAIN_DATABASE_URL:
+        "env://AI_EMPLOYEE_REUSE_GBRAIN_DATABASE_URL",
       AI_EMPLOYEE_DATA_KEY: "env://AI_EMPLOYEE_REUSE_DATA_KEY",
       AI_EMPLOYEE_BACKUP_KEY: "env://AI_EMPLOYEE_REUSE_BACKUP_KEY",
       AI_EMPLOYEE_ADMIN_READ_TOKEN: "env://AI_EMPLOYEE_REUSE_ADMIN_READ_TOKEN",
@@ -645,7 +651,7 @@ export async function verifyReusableInstallation({
     assert(
       configuredGuideCheck.config.exists === true &&
       configuredGuideCheck.config.protected === true &&
-      configuredGuideCheck.config.externalSecretReferences === 5 &&
+      configuredGuideCheck.config.externalSecretReferences === 6 &&
       configuredGuideCheck.config.inlineSecretValues === 0 &&
       configuredGuideCheck.config.unsafeCapabilitiesEnabled.length === 0 &&
       !JSON.stringify(configuredGuideCheck).includes("reuse-target-user") &&
@@ -714,6 +720,8 @@ export async function verifyReusableInstallation({
     const runtimeEnvironment = {
       AI_EMPLOYEE_CONFIG_FILE: configPath,
       AI_EMPLOYEE_REUSE_DATABASE_URL: "postgresql://reuse:reuse@127.0.0.1:5432/reuse",
+      AI_EMPLOYEE_REUSE_GBRAIN_DATABASE_URL:
+        "postgresql://reuse_gbrain:reuse@127.0.0.1:5432/reuse_gbrain",
       AI_EMPLOYEE_REUSE_DATA_KEY: Buffer.alloc(32, 1).toString("base64"),
       AI_EMPLOYEE_REUSE_BACKUP_KEY: Buffer.alloc(32, 2).toString("base64"),
       AI_EMPLOYEE_REUSE_ADMIN_READ_TOKEN: "r".repeat(64),

@@ -40,6 +40,9 @@ function validConfig(overrides = {}) {
     claudeCodePath: "claude",
     agentRuntime: "codex",
     gbrainPath: "gbrain",
+    gbrainHome: "/private/var/tmp/foursday-gbrain-home",
+    gbrainDatabaseUrl:
+      "postgresql://foursday_gbrain:secret@127.0.0.1:5432/foursday_gbrain",
     memoryAuthorityMode: "gbrain",
     memoryAuthorityWrite: false,
     memoryAuthorityAutoConfirm: false,
@@ -265,7 +268,14 @@ test("gbrain runtime check only returns a validated version", async () => {
     assert.equal(path, "gbrain");
     assert.deepEqual(args, ["version"]);
     assert.equal(options.env.AI_EMPLOYEE_DATA_KEY, undefined);
+    assert.equal(options.env.GBRAIN_HOME, "/private/var/tmp/foursday-gbrain-home");
+    assert.match(options.env.GBRAIN_DATABASE_URL, /foursday_gbrain/u);
     return { stdout: "gbrain 0.30.2\n" };
+  }, {
+    sourceId: "foursday",
+    gbrainHome: "/private/var/tmp/foursday-gbrain-home",
+    gbrainDatabaseUrl:
+      "postgresql://foursday_gbrain:secret@127.0.0.1:5432/foursday_gbrain",
   });
   assert.deepEqual(result, { required: true, version: "0.30.2" });
   await assert.rejects(

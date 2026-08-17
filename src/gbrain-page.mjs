@@ -16,6 +16,51 @@ import { promisify } from "node:util";
 import { safeCommandEnvironment } from "./controlled-command-runner.mjs";
 
 const execFileAsync = promisify(execFile);
+const postgresIdentityOverrideParameters = new Set([
+  "host",
+  "hostaddr",
+  "port",
+  "database",
+  "dbname",
+  "user",
+  "password",
+]);
+
+export function gbrainCommandEnvironment(
+  executable,
+  { sourceId = null, gbrainHome = null, gbrainDatabaseUrl = null } = {},
+) {
+  if (sourceId != null && !/^[a-z0-9-]{1,32}$/u.test(String(sourceId))) {
+    throw new Error("gbrain source id is invalid");
+  }
+  if (gbrainHome != null && !isAbsolute(String(gbrainHome))) {
+    throw new Error("GBRAIN_HOME must be absolute");
+  }
+  if (gbrainDatabaseUrl != null) {
+    let url;
+    try {
+      url = new URL(String(gbrainDatabaseUrl));
+    } catch {
+      throw new Error("Foursday gbrain database URL is invalid");
+    }
+    if (!/^postgres(?:ql)?:$/u.test(url.protocol) || !url.username || !url.password) {
+      throw new Error("Foursday gbrain database URL must be an authenticated PostgreSQL URL");
+    }
+    if ([...url.searchParams.keys()].some((key) =>
+      postgresIdentityOverrideParameters.has(key.toLowerCase()))) {
+      throw new Error("Foursday gbrain database URL must not override database identity in query parameters");
+    }
+  }
+  return {
+    ...safeCommandEnvironment(executable),
+    GBRAIN_SKIP_STARTUP_HOOKS: "1",
+    ...(sourceId ? { GBRAIN_SOURCE: String(sourceId) } : {}),
+    ...(gbrainHome ? { GBRAIN_HOME: String(gbrainHome) } : {}),
+    ...(gbrainDatabaseUrl
+      ? { GBRAIN_DATABASE_URL: String(gbrainDatabaseUrl) }
+      : {}),
+  };
+}
 
 export async function resolveGbrainPath(gbrainPath, lookup = execFileAsync) {
   if (typeof gbrainPath !== "string" || !gbrainPath.trim()) {
@@ -46,6 +91,8 @@ export async function readGbrainPage(
     maxBuffer = 8 * 1024 * 1024,
     signal,
     sourceId = null,
+    gbrainHome = null,
+    gbrainDatabaseUrl = null,
     run = execFileAsync,
   } = {},
 ) {
@@ -60,10 +107,11 @@ export async function readGbrainPage(
         timeout: timeoutMs,
         maxBuffer,
         signal,
-        env: {
-          ...safeCommandEnvironment(executable),
-          ...(sourceId ? { GBRAIN_SOURCE: sourceId } : {}),
-        },
+        env: gbrainCommandEnvironment(executable, {
+          sourceId,
+          gbrainHome,
+          gbrainDatabaseUrl,
+        }),
       },
     );
     const page = JSON.parse(stdout);
@@ -106,6 +154,9 @@ export async function writeGbrainPage(
     timeoutMs = 30_000,
     maxBuffer = 8 * 1024 * 1024,
     signal,
+    sourceId = null,
+    gbrainHome = null,
+    gbrainDatabaseUrl = null,
     run = execFileAsync,
   } = {},
 ) {
@@ -126,7 +177,11 @@ export async function writeGbrainPage(
         timeout: timeoutMs,
         maxBuffer,
         signal,
-        env: safeCommandEnvironment(executable),
+        env: gbrainCommandEnvironment(executable, {
+          sourceId,
+          gbrainHome,
+          gbrainDatabaseUrl,
+        }),
       },
     );
     const result = JSON.parse(stdout);
@@ -158,6 +213,8 @@ export async function writeGbrainMarkdownAuthority(
     timeoutMs = 120_000,
     run = execFileAsync,
     gitRun = execFileAsync,
+    gbrainHome = null,
+    gbrainDatabaseUrl = null,
   } = {},
 ) {
   if (!isAbsolute(String(root ?? ""))) {
@@ -227,7 +284,11 @@ export async function writeGbrainMarkdownAuthority(
   await run(executable, ["sync", "--source", sourceId], {
     timeout: timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
-    env: safeCommandEnvironment(executable),
+    env: gbrainCommandEnvironment(executable, {
+      sourceId,
+      gbrainHome,
+      gbrainDatabaseUrl,
+    }),
   });
   return { slug, written: !existing, markdownPathVerified: true };
 }
@@ -241,6 +302,8 @@ export async function writeGbrainMarkdownAuthorityBatch(
     timeoutMs = 120_000,
     run = execFileAsync,
     gitRun = execFileAsync,
+    gbrainHome = null,
+    gbrainDatabaseUrl = null,
   } = {},
 ) {
   if (!Array.isArray(documents) || documents.length < 1 || documents.length > 500) {
@@ -265,6 +328,8 @@ export async function writeGbrainMarkdownAuthorityBatch(
       timeoutMs,
       run: deferredSync,
       gitRun,
+      gbrainHome,
+      gbrainDatabaseUrl,
     });
     if (result.written) written += 1;
   }
@@ -274,7 +339,11 @@ export async function writeGbrainMarkdownAuthorityBatch(
   await run(executable, ["sync", "--source", sourceId], {
     timeout: timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
-    env: safeCommandEnvironment(executable),
+    env: gbrainCommandEnvironment(executable, {
+      sourceId,
+      gbrainHome,
+      gbrainDatabaseUrl,
+    }),
   });
   return {
     pages: documents.length,
@@ -367,6 +436,8 @@ export async function retireGbrainMarkdownAuthority(
     timeoutMs = 120_000,
     run = execFileAsync,
     gitRun = execFileAsync,
+    gbrainHome = null,
+    gbrainDatabaseUrl = null,
   } = {},
 ) {
   if (!/^[a-z0-9-]{1,32}$/u.test(String(sourceId ?? ""))) {
@@ -447,7 +518,11 @@ export async function retireGbrainMarkdownAuthority(
     await run(executable, ["sync", "--source", sourceId], {
       timeout: timeoutMs,
       maxBuffer: 8 * 1024 * 1024,
-      env: safeCommandEnvironment(executable),
+      env: gbrainCommandEnvironment(executable, {
+        sourceId,
+        gbrainHome,
+        gbrainDatabaseUrl,
+      }),
     });
     try {
       await run(
@@ -456,10 +531,11 @@ export async function retireGbrainMarkdownAuthority(
         {
           timeout: 30_000,
           maxBuffer: 2 * 1024 * 1024,
-          env: {
-            ...safeCommandEnvironment(executable),
-            GBRAIN_SOURCE: sourceId,
-          },
+          env: gbrainCommandEnvironment(executable, {
+            sourceId,
+            gbrainHome,
+            gbrainDatabaseUrl,
+          }),
         },
       );
       throw new Error("Memory authority page remained readable after cleanup");
@@ -487,7 +563,11 @@ export async function retireGbrainMarkdownAuthority(
       await run(executable, ["sync", "--source", sourceId], {
         timeout: timeoutMs,
         maxBuffer: 8 * 1024 * 1024,
-        env: safeCommandEnvironment(executable),
+        env: gbrainCommandEnvironment(executable, {
+          sourceId,
+          gbrainHome,
+          gbrainDatabaseUrl,
+        }),
       }).catch(() => {});
     }
     throw error;

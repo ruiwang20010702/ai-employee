@@ -101,6 +101,18 @@ test("受管理的 Markdown 权威记忆不依赖项目知识授权但必须逐�
     },
   });
   assert.equal(verified.status, "verified");
+  const rebound = await checkMemorySourceAccess(authority, {
+    projects: new Map(),
+    now,
+    readPage: async () => ({
+      slug: authority.source_id,
+      updatedAt: "2026-08-18T08:00:00.000Z",
+      content,
+    }),
+  });
+  assert.equal(rebound.status, "verified");
+  assert.equal(rebound.reason, "authority_exact_content_rebound");
+  assert.equal(rebound.sourceVersion, "2026-08-18T08:00:00.000Z");
   const changed = await checkMemorySourceAccess(authority, {
     projects: new Map(),
     now,

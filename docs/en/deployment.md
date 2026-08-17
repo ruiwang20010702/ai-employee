@@ -152,6 +152,11 @@ gate plus separate group and clarification gates. Group auto-approval still
 requires an allowlisted explicit mention, and group clarifications remain
 approval-bound.
 
+Production gbrain must use a dedicated `AI_EMPLOYEE_GBRAIN_HOME` and an
+externally injected `AI_EMPLOYEE_GBRAIN_DATABASE_URL` that does not point to the
+Foursday transaction database or the operator's personal gbrain database. The
+database URL must not be persisted in gbrain's `config.json`.
+
 ## V2.3 deployed-code rollout boundary
 
 The personal cockpit, recipes, proactive worker, meeting loop, GitHub Draft PR
