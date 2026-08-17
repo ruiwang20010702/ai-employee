@@ -117,6 +117,40 @@ test("Codex runtime doctor must return valid redacted ok JSON", async () => {
     version: "1.2.3",
     advisories: ["updates.status"],
   });
+  const optionalMcpAdvisory = await checkCodexRuntime("codex", async () => ({
+    stdout: JSON.stringify({
+      overallStatus: "warning",
+      codexVersion: "1.2.3",
+      checks: {
+        "auth.credentials": { status: "ok" },
+        "network.provider_reachability": { status: "ok" },
+        "mcp.config": {
+          status: "warning",
+          summary: "MCP configuration has optional issues",
+        },
+        "updates.status": { status: "warning" },
+      },
+    }),
+  }));
+  assert.deepEqual(optionalMcpAdvisory, {
+    status: "warning",
+    version: "1.2.3",
+    advisories: ["mcp.config", "updates.status"],
+  });
+  await assert.rejects(
+    () => checkCodexRuntime("codex", async () => ({
+      stdout: JSON.stringify({
+        overallStatus: "warning",
+        checks: {
+          "mcp.config": {
+            status: "warning",
+            summary: "Required MCP server is unavailable",
+          },
+        },
+      }),
+    })),
+    /non-ok status/u,
+  );
   await assert.rejects(
     () => checkCodexRuntime("codex", async () => ({
       stdout: JSON.stringify({

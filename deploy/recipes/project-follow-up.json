@@ -30,7 +30,9 @@
       "capability": "document_draft",
       "description": "形成 {{projectFocus}} 的进度、风险和下一步跟进草稿",
       "workingDirectory": "{{projectRoot}}",
-      "inputs": {},
+      "inputs": {
+        "evidenceStepIds": ["research-status"]
+      },
       "expectedEvidence": "生成带验收标准和责任边界的 Markdown 草稿",
       "rollback": null
     }

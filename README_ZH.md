@@ -10,20 +10,21 @@ Foursday 学习你的工作方式，把钉钉、飞书等企业消息转化为�
 
 钉钉使用 DWS，飞书直接使用开放平台事件与消息 API。默认不自动发送，也不会从聊天内容中获得新权限。它在能力上成为你的分身，但不会在身份上偷偷冒充你。
 
-[English](./README.md) · **简体中文** · [快速开始](#快速开始) · [公开预览版 v0.5.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [设计总览](./docs/设计总览.md) · [产品需求](./docs/产品需求文档.md) · [安全说明](./安全说明.md)
+[English](./README.md) · **简体中文** · [快速开始](#快速开始) · [公开预览版 v0.6.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1) · [设计总览](./docs/设计总览.md) · [产品需求](./docs/产品需求文档.md) · [安全说明](./安全说明.md)
 
 [![检查](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![安全扫描](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
-[![公开预览版：v0.5.0-rc.1](https://img.shields.io/badge/%E5%85%AC%E5%BC%80%E9%A2%84%E8%A7%88%E7%89%88-v0.5.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
-[![开发版本：v0.6.0](https://img.shields.io/badge/%E5%BC%80%E5%8F%91%E7%89%88%E6%9C%AC-v0.6.0-6f7bf7)](./CHANGELOG_ZH.md)
+[![公开预览版：v0.6.0-rc.1](https://img.shields.io/badge/%E5%85%AC%E5%BC%80%E9%A2%84%E8%A7%88%E7%89%88-v0.6.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1)
+[![开发状态：RC 后候选](https://img.shields.io/badge/%E5%BC%80%E5%8F%91%E7%8A%B6%E6%80%81-RC%20%E5%90%8E%E5%80%99%E9%80%89-6f7bf7)](./CHANGELOG_ZH.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[10 分钟开始](#快速开始) · [打开 v0.5.0-rc.1 预发布版](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [报告一次成功安装](https://github.com/ruiwang20010702/foursday/issues/50) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入 v0.5 外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [查看 90 天增长记分卡](./docs/公开增长记分卡.md) · [审阅公开发布手册](./docs/公开发布手册.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
+[10 分钟开始](#快速开始) · [打开 v0.6.0-rc.1 预发布版](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1) · [报告一次成功安装](https://github.com/ruiwang20010702/foursday/issues/50) · [观看 75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [加入外部体验](https://github.com/ruiwang20010702/foursday/issues/49) · [查看 90 天增长记分卡](./docs/公开增长记分卡.md) · [审阅公开发布手册](./docs/公开发布手册.md) · [领取首次贡献任务](./docs/首次贡献任务.md) · [了解安全边界](./安全说明.md)
 
-**版本状态：**`v0.5.0-rc.1` 是最新带标签的公开预览版；仓库和
-`package.json` 当前面向**尚未公开发布的 v0.6.0 开发版本**。
+**版本状态：**`v0.6.0-rc.1` 是最新带标签的公开预览版，精确绑定提交
+`6b30c22f97b19c6cfd30bf162b3f85000fa2bde9`。仓库可能继续包含尚未进入
+该预发布版或生产环境的 RC 后候选改动。
 `private: true` 只用于防止误发布到 npm，不影响按 MIT 许可证克隆与复用。
 
 <a href="./assets/foursday-v0.5-demo.mp4">
@@ -120,13 +121,13 @@ Foursday 默认服务一个人，不是为了给管理者监控团队。个人�
 | 功能 | 用户价值 | 当前实现 |
 |---|---|---|
 | 项目接入向导 | 一次配置目标、里程碑、协作对象、记忆范围、配方和风险预算 | 已实现；外部副作用默认关闭，本地准备动作需审批 |
-| 历史项目导入 | 把既有项目文件绑定为可追溯、可去重、可审阅的记忆候选 | 默认只预览；精确确认也只创建候选，不会自动形成正式记忆 |
+| 历史项目导入 | 把既有项目文件绑定为可追溯、可去重、可审阅的记忆候选 | 个人工作台读取本机 JSON 包后先用只读令牌展示来源、安全跳过、重复与冲突；只有写入令牌加手工输入的当前 `IMPORT-...` 摘要才应用，且只创建待审候选 |
 | 项目配方影子验证 | 在生产执行前，用干净且精确绑定的 Git 快照演练已选择的研究/文档配方 | 默认零写预览；显式本地运行只生成受保护的隔离账本、审阅包和待本人填写的时间问题 |
-| 项目记忆同步 | 用 Codex 或 Claude Code 增量扫描已授权文件，持续更新稳定项目事实 | 全局能力与项目范围双重授权；只有来源明确、无冲突的低风险事实可以自动确认 |
-| 工作配方库 | 重复流程直接复用，不再每次从消息重新规划 | 已实现 5 个带版本的官方配方；项目记忆更新单独走证据绑定配方 |
-| 项目驾驶舱 | 汇总目标、计划、证据、交付物、正式记忆、主动触发器和下一项最值得委托的工作 | 已在尚未公开发布的 0.6.0 开发线上实现，并部署于生产提交 `ca43e02`：本机控制台与只读 Codex 工具按本人确认的历史结果形成“本周工作返还队列”；只规划，不执行，未验证配方基线不冒充返还时间 |
+| 项目记忆同步 | 用 Codex 或 Claude Code 增量扫描已授权文件，持续更新稳定项目事实 | 工作台先用双令牌零写预览固定来源、事实前缀、保留期、授权到期时间和自动确认边界，并生成精确 `MEMORY-AUTH-...` 确认值；应用只更新项目清单，不会开启全局能力。之后另一次显式使用写入令牌才调用模型并应用服务端一次性快照。待审事实直接在同一项目卡片确认或拒绝，冲突必须明确选择替代哪条旧事实；只有既有授权中的低风险、来源未变且无冲突事实可以自动确认 |
+| 工作配方库 | 重复流程直接复用，不再每次从消息重新规划 | 已实现 5 个带版本的官方配方；个人工作台用同一张工作委托单一次收集项目、会议、日报、记忆或 GitHub 配方的类型化输入，先预览步骤、风险、证据和精确计划哈希；只有单独提交同一哈希才登记，工作台登记一律进入待审批，不能自动执行 |
+| 项目驾驶舱 | 汇总目标、计划、证据、交付物、正式记忆、主动触发器和下一项最值得委托的工作 | 已随 `v0.6.0-rc.1` 发布并部署于生产提交 `6b30c22`：本机控制台与只读 Codex 工具按本人确认的历史结果形成“本周工作返还队列”；只规划，不执行，未验证配方基线不冒充返还时间 |
 | 时间返还仪表盘 | 只统计有执行证据且经本人确认的返还时间与自动化率 | 先展示有界交付正文，再填写 AI 交付后的真实审阅/修改耗时；北极星按本机时区周一开始计算本周进度，模型估算和未登记工作不计入 |
-| 主动工作模式 | 定时或事件触发日报、跟进与风险提醒 | 已实现；触发器创建后默认停用，并受每日次数与冷却限制 |
+| 主动工作模式 | 定时或事件触发日报、跟进与风险提醒 | 同一工作委托单会先展示配方输入、首次时间、间隔、每日次数、冷却和计划策略；触发器创建后仍默认停用，已审计划哈希过期时拒绝保存 |
 | 会议到执行 | 会议记录→文档→决策记忆候选→待办→跟进日程 | 已实现为审批绑定配方 |
 | GitHub 开发闭环 | 需求→改代码→分支→测试→推送→PR 草稿→结果回报 | 已实现；仅限已授权仓库和固定测试命令 |
 
@@ -145,9 +146,13 @@ npm run projects:shadow -- --bundle /绝对路径/导入包.json \
 # 阅读交付物后，使用运行结果给出的 SHA 和 REVIEW 口令确认真实审阅分钟。
 npm run projects:shadow -- --review /绝对路径/新证据目录 \
   --evidence-sha256 64位摘要 --human-minutes 10 --confirm REVIEW-前12位
+
+# RC 后候选：默认只预览把这份确认证据纳入正式时间返还。
+npm run projects:shadow:admit -- --evidence-directory /绝对路径/新证据目录 \
+  --evidence-sha256 64位摘要
 ```
 
-该入口只接受研究和文档草稿步骤。模型运行时可能访问其模型服务，但不会连接生产数据库、触碰业务系统、发送消息、写 Git、记忆或生产时间返还。审阅确认只更新隔离账本，并生成绑定证据 SHA 的受保护本地确认记录。详见[能力清单与正式记忆](./docs/能力清单与正式记忆.md#42-项目配方影子验证)。
+该入口只接受确定性的仓库活动读取、同项目受治理工作历史读取、研究和文档草稿步骤。日报图把同一日期窗口内的精确 Git 活动、终态计划和步骤回读摘要通过两条显式证据边传给研究步骤；影子工作历史只来自隔离账本，不会写 Git 或读取生产库。模型运行时可能访问其模型服务，但不会触碰业务系统、发送消息、写 Git、记忆或生产时间返还。审阅确认只更新隔离账本，并生成绑定证据 SHA 的受保护本地确认记录。RC 后的纳入命令会重新核对证据、隔离账本、本人确认、项目授权和配方基线；默认仍是零写预览。未来只有显式增加 `--apply --confirmation ADMIT-前12位` 且第 022 号迁移已部署时，才能把这一份确认证据计入生产时间返还；它不会导入记忆，也不会伪造生产工作计划。详见[能力清单与正式记忆](./docs/能力清单与正式记忆.md#42-项目配方影子验证)。
 
 仓库同时提供 Slack、Teams、Gmail 和 Google Workspace 的可验证适配器契约与安全示例清单。它们是社区扩展边界，不代表这些生产连接器已经交付。
 
@@ -163,20 +168,22 @@ Loop Engineering 继续负责“一个任务如何反复做到有证据地完成
 | 知识图 | 项目↔消息、文档、决策、交付物与正式记忆 | 这项工作知道什么，事实由哪个来源支持？ |
 | 治理图 | 人↔项目、能力、策略、预算、审批与审计 | 谁基于哪个授权版本允许了这次状态转换？ |
 
-生产版本 `ca43e02d8e6790404cdccfb9d007c02f890e29b7` 已在现有事务存储上实现稳定节点身份、带版本的关系契约、SQLite/PostgreSQL 加密投影、“设计上允许怎样运行”和“实际怎样运行”的分层采集，以及个人项目驾驶舱中的四类有界解释。这不代表已经引入图数据库，也不代表项目、配方或主动工作已经获得生产权限；领域服务仍是权威事实，图上可达永远不能产生权限。只有生产形态基准证明 PostgreSQL 已超过合理边界时，才评估专用图数据库。
+生产版本 `6b30c22f97b19c6cfd30bf162b3f85000fa2bde9` 已在现有事务存储上实现稳定节点身份、带版本的关系契约、SQLite/PostgreSQL 加密投影、“设计上允许怎样运行”和“实际怎样运行”的分层采集，以及个人项目驾驶舱中的四类有界解释。这不代表已经引入图数据库，也不代表项目、配方或主动工作已经获得生产权限；领域服务仍是权威事实，图上可达永远不能产生权限。只有生产形态基准证明 PostgreSQL 已超过合理边界时，才评估专用图数据库。
 
 现状审计、Graph Contract v1、允许关系、安全约束和验收证据统一记录在[设计总览](docs/设计总览.md#受治理工作图graph-engineering-生产已部署业务未放量)中；为什么继续使用 PostgreSQL 记录在[架构决策 001](docs/架构决策受治理工作图存储.md)中。
+
+计划内部的数据流也必须是一条显式图边：下游产物通过 `evidenceStepIds` 指向更早的只读证据。仅仅“排在后面”不会自动继承上下文；证据缺失、类型不符或越界时，执行器会在调用模型前拒绝。
 
 ## 快速开始
 
 ### 1. 用一条命令启动 Web 接入与真实体验
 
-安装 Node.js 22 或 24 后，可以直接启动经过审核的 `v0.5.0-rc.1` Web 体验。[预发布页面](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)与下方完整提交指向同一个候选，并提供源码归档、75 秒演示和摘要清单；启动命令继续使用约束更强的完整 SHA：
+安装 Node.js 22 或 24 后，可以直接启动经过审核的 `v0.6.0-rc.1` Web 体验。[预发布页面](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1)与下方完整提交指向同一个候选，并提供源码归档；启动命令继续使用约束更强的完整 SHA：
 
 接入页默认跟随浏览器语言，也可以随时通过右上角的 `EN / 中文` 切换。两种语言共用同一套安全检查、审批状态机与本机零副作用默认值。
 
 ```bash
-npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#e272f92dcebd10abbc599f32fed3e7db4428f9b7" foursday start --pilot-sha e272f92dcebd10abbc599f32fed3e7db4428f9b7
+npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#6b30c22f97b19c6cfd30bf162b3f85000fa2bde9" foursday start --pilot-sha 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
 ```
 
 打开命令输出的回环地址。启动本身只下载并运行上述精确公开提交，同时禁用包生命周期脚本；它不安装生产服务、不读取钉钉、不连接生产数据库，也不触碰外部系统；只看预览仅需 Node.js。在批准任何写入前，先点击 **Check pilot readiness**：这项只读检查只返回 GitHub CLI 登录和受支持 Agent 运行时是否可用，不会创建 fork、分支、推送或 PR。若被阻断，可以点击 **Copy privacy-safe readiness report** 并打开缺陷表单；报告只包含不可变候选、Node 主版本、readiness 布尔值和脱敏现象占位符，不包含路径、用户名、私有仓库信息、日志、模型输出或凭据。复制与打开表单是两个独立本机动作，Foursday 不会自动提交。完成后也可以点击 **Copy setup check-in**，复制用于 [Issue #50](https://github.com/ruiwang20010702/foursday/issues/50) 的有界可编辑签到模板；打开 Issue 是独立点击，Foursday 不会自动发布。开始准备 pilot 后，系统会禁用这份“尚未创建 fork”的签到入口。若要加入真实公开体验，再核对页面显示的固定提交，勾选独立确认并点击 **Prepare my pilot fork**。只有这次确认才允许 Foursday 创建或复用你的个人 fork，在 `~/FoursdayPilot/` 私有目录克隆精确提交、绑定无凭据的官方 upstream，并以禁用生命周期脚本的方式安装锁定依赖。它仍不会调用模型、创建交付分支、推送、创建 PR、合并或部署；这些交付副作用还需要选择已获授权的运行时，并再次批准完整计划哈希。
@@ -210,8 +217,8 @@ npm start
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
 git fetch upstream main
-git merge-base --is-ancestor e272f92dcebd10abbc599f32fed3e7db4428f9b7 FETCH_HEAD
-git switch --create pilot-v0.5-e272f92 e272f92dcebd10abbc599f32fed3e7db4428f9b7
+git merge-base --is-ancestor 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9 FETCH_HEAD
+git switch --create pilot-v0.6-6b30c22 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
 npm ci --ignore-scripts
 npm start
 ```
@@ -376,7 +383,7 @@ flowchart LR
 - 正文、草稿、审批理由、任务载荷和发送回执使用 AES-256-GCM 字段级加密。
 - Codex 和工具子进程只获得最小环境，不继承数据库、数据密钥和管理令牌。
 - 外部副作用在调用前登记执行意图，结果未知时禁止自动重试。
-- 管理台只监听本机，读写令牌分离，不提供扩权入口。
+- 管理台只监听本机；首次打开可在页面填写用户名或邮箱并两次确认密码，现有双令牌只用于一次所有权验证。注册成功后入口永久关闭，运维页与项目驾驶舱共享短期会话；密码只保存加盐 `scrypt` 校验值，会话写请求受 CSRF 保护，读写令牌继续作为 CLI/API 兼容通道，不提供扩权入口。
 - 生产发布固定仓库身份、完整提交、云端门禁和不可变版本目录。
 
 请通过 GitHub Security Advisory 私下报告漏洞，不要在公开 Issue 中提交凭据、真实联系人或消息正文。详见[安全策略](./SECURITY.md)。
@@ -390,7 +397,7 @@ flowchart LR
 - [x] 一条命令启动 Web 接入页，复用真实 GitHub 受治理配方且零外部写入
 - [x] 带版本的 MessageAdapter、AgentRuntime 和 ModelProvider 契约
 - [x] 个人项目接入、配方库、项目驾驶舱和时间返还账本
-- [x] 尚未公开发布的 0.6.0 开发线已实现本周工作返还队列，并部署于生产提交 `ca43e02`；按确认证据排序，不静默执行，也不把未验证估算计为返还
+- [x] `v0.6.0-rc.1` 已实现本周工作返还队列，并部署于生产提交 `6b30c22`；按确认证据排序，不静默执行，也不把未验证估算计为返还
 - [x] 主动触发、会议到执行和 GitHub PR 草稿交付闭环
 - [x] 工作空间/事件适配器契约与社区示例清单
 - [x] 受治理工作图 V1 生产实现：类型化节点、关系白名单、配方内容绑定、公开 Schema 和 SQLite/PostgreSQL 确定性投影

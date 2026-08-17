@@ -9,7 +9,10 @@ import { personalDashboardHtml } from "./personal-dashboard-ui.mjs";
 import { capabilityCatalog } from "./capability-policy.mjs";
 import { loadConfig } from "./config.mjs";
 import { evaluateHealth } from "./health-check.mjs";
-import { applyProductionConfigFile } from "./production-config-file.mjs";
+import {
+  applyProductionConfigFile,
+  defaultProductionConfigPath,
+} from "./production-config-file.mjs";
 import { createProductionStore } from "./production-store.mjs";
 import { loadProjectManifests } from "./project-manifests.mjs";
 import {
@@ -40,6 +43,26 @@ import { validateWorkEvent } from "./work-trigger.mjs";
 import { ingestProactiveEvent } from "./proactive-runtime.mjs";
 import { captureWorkPlanGraph } from "./governed-work-graph-runtime.mjs";
 import { buildWeeklyDelegationQueue } from "./weekly-delegation-queue.mjs";
+import { createStructuredArtifactRuntime } from "./artifact-runtime.mjs";
+import {
+  applyProjectMemorySync,
+  previewProjectMemorySync,
+} from "./project-memory-sync.mjs";
+import {
+  applyProjectMemorySettings,
+  previewProjectMemorySettings,
+} from "./project-memory-settings.mjs";
+import {
+  applyHistoricalProjectImport,
+  previewHistoricalProjectImport,
+} from "./historical-project-import-service.mjs";
+import {
+  adminSessionCookie,
+  clearAdminSessionCookie,
+  createAdminPasswordHash,
+  createAdminSessionManager,
+} from "./admin-session-auth.mjs";
+import { persistAdminLoginConfiguration } from "./admin-login-config.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -64,12 +87,32 @@ function equalToken(actual, expected) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-function json(response, status, value) {
+function json(response, status, value, headers = {}) {
   response.writeHead(status, {
     ...securityHeaders,
     "content-type": "application/json; charset=utf-8",
+    ...headers,
   });
   response.end(`${JSON.stringify(value)}\n`);
+}
+
+function safeBrowserOrigin(request, server) {
+  const address = server.address();
+  if (!address || typeof address === "string") return false;
+  const expectedPort = String(address.port);
+  try {
+    const origin = new URL(String(request.headers.origin ?? ""));
+    const host = new URL(`http://${String(request.headers.host ?? "")}`);
+    const originHostname = origin.hostname.replace(/^\[|\]$/gu, "");
+    const hostHostname = host.hostname.replace(/^\[|\]$/gu, "");
+    return origin.protocol === "http:" &&
+      loopbackHosts.has(originHostname) &&
+      loopbackHosts.has(hostHostname) &&
+      (origin.port || "80") === expectedPort &&
+      (host.port || "80") === expectedPort;
+  } catch {
+    return false;
+  }
 }
 
 function projectMemorySyncState(value) {
@@ -193,6 +236,140 @@ function planSummary(plan, stepRecords = []) {
       };
     }),
     updatedAt: plan.updated_at,
+  };
+}
+
+function prepareRecipePlan({ manifest, recipe, projectId, recipeId, body }) {
+  if (!manifest || !recipe) {
+    throw Object.assign(new Error("project_or_recipe_not_found"), { status: 404 });
+  }
+  if (!(manifest.profile?.selectedRecipeIds ?? []).includes(recipeId)) {
+    throw Object.assign(new Error("recipe_not_selected_for_project"), { status: 403 });
+  }
+  const requestedRequester = String(body.requesterId ?? "").trim();
+  const requesterId = manifest.requesters.length === 1
+    ? manifest.requesters[0]
+    : requestedRequester;
+  if (!requesterId || !manifest.requesters.includes(requesterId)) {
+    throw Object.assign(new Error("requester_not_authorized"), { status: 403 });
+  }
+  const instantiated = instantiateWorkRecipe(recipe, {
+    projectId,
+    requesterId,
+    projectRoot: manifest.rootDirectory,
+    values: body.values ?? {},
+  });
+  const policyAssessment = assessWorkPlan({ manifest, plan: instantiated.plan });
+  if (!["ALLOW", "REQUIRE_APPROVAL"].includes(policyAssessment.decision)) {
+    throw Object.assign(new Error("recipe_plan_denied_by_policy"), { status: 403 });
+  }
+  const assessment = policyAssessment.decision === "ALLOW"
+    ? {
+        ...policyAssessment,
+        decision: "REQUIRE_APPROVAL",
+        reason: "个人工作台登记的配方计划需要单次审批。",
+      }
+    : policyAssessment;
+  return { instantiated, assessment };
+}
+
+function recipePlanPreview({ manifest, recipe, assessment, executionEnabled }) {
+  return {
+    schema: "foursday-recipe-plan-preview/v1",
+    projectId: assessment.plan.projectId,
+    recipe: {
+      id: recipe.id,
+      name: recipe.name,
+      version: recipe.version,
+    },
+    planHash: assessment.planHash,
+    objective: assessment.plan.objective,
+    decision: assessment.decision,
+    reason: assessment.reason,
+    maxLevel: assessment.maxLevel,
+    approvalRequired: assessment.decision === "REQUIRE_APPROVAL",
+    steps: assessment.plan.steps.map((step, index) => ({
+      id: step.id,
+      capability: step.capability,
+      description: step.description,
+      expectedEvidence: step.expectedEvidence,
+      level: capabilityCatalog[step.capability]?.level ?? null,
+      mode: assessment.steps[index]?.mode ?? manifest.capabilities[step.capability]?.mode ?? null,
+      sideEffect: capabilityCatalog[step.capability]?.sideEffect === true,
+    })),
+    registration: { required: true, registered: false },
+    execution: { started: false, enabled: executionEnabled },
+  };
+}
+
+function historicalImportPreviewSummary(preview) {
+  return {
+    schema: preview.schema,
+    project: {
+      id: preview.manifest.projectId,
+      name: preview.manifest.name,
+      action: preview.projectAction,
+      rootLabel: basename(preview.manifest.rootDirectory),
+    },
+    sources: preview.sources.map((source) => ({
+      id: source.id,
+      path: source.path,
+      bytes: source.bytes,
+      sha256: source.sha256,
+    })),
+    candidates: preview.candidates.map((candidate) => ({
+      index: candidate.index,
+      type: candidate.type,
+      statement: candidate.statement,
+      factKey: candidate.factKey,
+      sensitivity: candidate.sensitivity,
+      confidence: candidate.confidence,
+      retentionDays: candidate.retentionDays,
+      sourcePath: candidate.source.path,
+      sourceSha256: candidate.source.sha256,
+      duplicate: Boolean(candidate.existing.duplicateId),
+      conflictCount: candidate.existing.conflictIds.length,
+    })),
+    skipped: preview.skipped.map((item) => ({
+      index: item.index,
+      reasons: item.reasons,
+    })),
+    counts: preview.counts,
+    digest: preview.digest,
+    confirmation: preview.confirmation,
+    checklist: preview.checklist,
+    existingStateChecked: preview.existingStateChecked,
+    externalSystemsTouched: false,
+    databaseWrite: false,
+    memoriesConfirmed: 0,
+  };
+}
+
+function projectMemorySyncPreviewSummary(generated, {
+  previewId,
+  expiresAt,
+  project,
+}) {
+  const summary = historicalImportPreviewSummary(generated.preview);
+  return {
+    ...summary,
+    schema: generated.preview.syncSchema,
+    previewId,
+    expiresAt: expiresAt.toISOString(),
+    generatedBy: generated.preview.generatedBy,
+    generatedArtifactSha256: generated.preview.generatedArtifactSha256,
+    modelInvoked: true,
+    externalSystemsTouched: true,
+    databaseWrite: false,
+    autoConfirmEligible: generated.preview.autoConfirmEligible,
+    reviewRequired: generated.preview.reviewRequired,
+    confirmationRequired: project.capabilities.project_memory_proposal.mode !== "automatic",
+    confirmation: project.capabilities.project_memory_proposal.mode === "automatic"
+      ? null
+      : generated.preview.confirmation,
+    automaticConfirmationAuthorized:
+      project.capabilities.project_memory_proposal.mode === "automatic" &&
+      project.capabilities.project_memory_proposal.autoConfirm === true,
   };
 }
 
@@ -423,6 +600,9 @@ export async function startAdminServer({
   store = null,
   manifestLoader = loadProjectManifests,
   recipeLoader = loadWorkRecipes,
+  artifactRuntimeFactory = null,
+  adminLoginConfigPath = process.env.AI_EMPLOYEE_CONFIG_FILE ??
+    defaultProductionConfigPath(),
 } = {}) {
   if (!loopbackHosts.has(config.adminHost)) {
     throw new Error("Admin server must remain loopback-only");
@@ -432,6 +612,20 @@ export async function startAdminServer({
   }
   store = store ?? (await createProductionStore(config));
   const readChallenges = new Map();
+  const memorySyncPreviews = new Map();
+  const sessionTtlMs = config.adminSessionTtlMs ?? 28_800_000;
+  let sessionManager = createAdminSessionManager({
+    identifiers: config.adminLoginIdentifiers ?? [],
+    passwordHash: config.adminPasswordHash ?? null,
+    sessionTtlMs,
+  });
+  let registrationInFlight = false;
+  const buildArtifactRuntime = artifactRuntimeFactory ?? (() =>
+    createStructuredArtifactRuntime({
+      runtime: config.agentRuntime,
+      codexPath: config.codexPath,
+      claudeCodePath: config.claudeCodePath,
+    }));
   const bearerAuthorized = (request) =>
     equalToken(
       request.headers.authorization?.replace(/^Bearer\s+/iu, ""),
@@ -456,7 +650,7 @@ export async function startAdminServer({
       .digest("hex");
     return equalToken(proof, expected);
   };
-  const writeAuthorized = (request) =>
+  const tokenWriteAuthorized = (request) =>
     bearerAuthorized(request) &&
     equalToken(
       request.headers["x-foursday-write-token"] ??
@@ -527,6 +721,173 @@ export async function startAdminServer({
       json(response, 404, { error: "not_found" });
       return;
     }
+    if (request.method === "GET" && url.pathname === "/api/auth/methods") {
+      json(response, 200, {
+        passwordLogin: sessionManager.configured,
+        registrationAvailable: !sessionManager.configured,
+        registrationRequiresTokens: true,
+        legacyTokenLogin: true,
+        sessionTtlMs,
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/auth/register") {
+      if (!safeBrowserOrigin(request, server)) {
+        json(response, 403, { error: "browser_origin_required" });
+        return;
+      }
+      if (sessionManager.configured) {
+        json(response, 409, { error: "registration_closed" });
+        return;
+      }
+      if (!tokenWriteAuthorized(request)) {
+        json(response, 403, { error: "bootstrap_authorization_failed" });
+        return;
+      }
+      if (registrationInFlight) {
+        json(response, 409, { error: "registration_in_progress" });
+        return;
+      }
+      registrationInFlight = true;
+      try {
+        const body = await readJson(request, 8_192);
+        const loginIdentifier = String(body.identifier ?? "").trim();
+        const email = String(body.email ?? "").trim();
+        if (!loginIdentifier) {
+          json(response, 400, { error: "login_identifier_required" });
+          return;
+        }
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
+          json(response, 400, { error: "invalid_email" });
+          return;
+        }
+        if (body.password !== body.passwordConfirmation) {
+          json(response, 400, { error: "password_confirmation_mismatch" });
+          return;
+        }
+        const identifiers = [loginIdentifier, email].filter(Boolean);
+        let passwordHash;
+        try {
+          passwordHash = await createAdminPasswordHash(body.password, { identifiers });
+        } catch {
+          json(response, 400, { error: "password_policy_failed" });
+          return;
+        }
+        try {
+          await persistAdminLoginConfiguration({
+            configPath: adminLoginConfigPath,
+            identifiers,
+            passwordHash,
+            sessionTtlMs,
+          });
+        } catch (error) {
+          if (error.message === "Admin login is already configured") {
+            json(response, 409, { error: "registration_closed" });
+            return;
+          }
+          json(response, 500, { error: "registration_failed" });
+          return;
+        }
+        sessionManager.clear();
+        sessionManager = createAdminSessionManager({
+          identifiers,
+          passwordHash,
+          sessionTtlMs,
+        });
+        const result = await sessionManager.login({
+          identifier: loginIdentifier,
+          password: body.password,
+        });
+        if (result.status !== "authenticated") {
+          json(response, 500, { error: "registration_session_failed" });
+          return;
+        }
+        json(response, 201, {
+          registered: true,
+          authenticated: true,
+          identifier: result.identifier,
+          csrfToken: result.csrfToken,
+          expiresAt: new Date(result.expiresAt).toISOString(),
+        }, {
+          "set-cookie": adminSessionCookie(result.token, sessionTtlMs),
+        });
+      } catch {
+        json(response, 400, { error: "registration_input_invalid" });
+      } finally {
+        registrationInFlight = false;
+      }
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/auth/login") {
+      if (!safeBrowserOrigin(request, server)) {
+        json(response, 403, { error: "browser_origin_required" });
+        return;
+      }
+      try {
+        const body = await readJson(request, 4_096);
+        const result = await sessionManager.login({
+          identifier: body.identifier,
+          password: body.password,
+        });
+        if (result.status === "unavailable") {
+          json(response, 503, { error: "password_login_unavailable" });
+          return;
+        }
+        if (result.status === "rate_limited") {
+          json(response, 429, { error: "too_many_login_attempts" }, {
+            "retry-after": String(result.retryAfterSeconds),
+          });
+          return;
+        }
+        if (result.status !== "authenticated") {
+          json(response, 401, { error: "invalid_credentials" });
+          return;
+        }
+        json(response, 200, {
+          authenticated: true,
+          identifier: result.identifier,
+          csrfToken: result.csrfToken,
+          expiresAt: new Date(result.expiresAt).toISOString(),
+        }, {
+          "set-cookie": adminSessionCookie(result.token, sessionTtlMs),
+        });
+      } catch (error) {
+        json(response, error.status ?? 400, { error: error.message ?? "login_failed" });
+      }
+      return;
+    }
+    const browserSession = sessionManager.authenticate(request.headers.cookie);
+    if (request.method === "GET" && url.pathname === "/api/auth/session") {
+      if (!browserSession) {
+        json(response, 401, { error: "unauthorized" });
+        return;
+      }
+      json(response, 200, {
+        authenticated: true,
+        identifier: browserSession.identifier,
+        csrfToken: browserSession.csrfToken,
+        expiresAt: new Date(browserSession.expiresAt).toISOString(),
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/auth/logout") {
+      if (
+        !browserSession ||
+        !safeBrowserOrigin(request, server) ||
+        !sessionManager.csrfAuthorized(
+          browserSession,
+          request.headers["x-foursday-csrf"] ?? request.headers["x-ai-employee-csrf"],
+        )
+      ) {
+        json(response, 403, { error: "csrf_or_session_invalid" });
+        return;
+      }
+      sessionManager.revoke(request.headers.cookie);
+      json(response, 200, { authenticated: false }, {
+        "set-cookie": clearAdminSessionCookie(),
+      });
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/api/auth/challenge") {
       const now = Date.now();
       for (const [nonce, expiresAt] of readChallenges) {
@@ -541,11 +902,37 @@ export async function startAdminServer({
       json(response, 200, { nonce, expiresAt: new Date(now + 30_000).toISOString() });
       return;
     }
-    if (!bearerAuthorized(request) && !challengeAuthorized(request, url)) {
+    if (
+      !bearerAuthorized(request) &&
+      !challengeAuthorized(request, url) &&
+      !browserSession
+    ) {
       json(response, 401, { error: "unauthorized" });
       return;
     }
-    if (request.method !== "GET" && !writeAuthorized(request)) {
+    const browserWriteAuthorized = Boolean(
+      browserSession &&
+      safeBrowserOrigin(request, server) &&
+      sessionManager.csrfAuthorized(
+        browserSession,
+        request.headers["x-foursday-csrf"] ?? request.headers["x-ai-employee-csrf"],
+      ),
+    );
+    if (browserSession && request.method !== "GET" && !browserWriteAuthorized) {
+      json(response, 403, { error: "csrf_required" });
+      return;
+    }
+    const readOnlyRecipePreview = request.method === "POST" &&
+      /^\/api\/projects\/[^/]+\/recipes\/[^/]+\/preview$/u.test(url.pathname);
+    const readOnlyHistoricalImportPreview = request.method === "POST" &&
+      url.pathname === "/api/projects/import/preview";
+    if (
+      request.method !== "GET" &&
+      !readOnlyRecipePreview &&
+      !readOnlyHistoricalImportPreview &&
+      !tokenWriteAuthorized(request) &&
+      !browserWriteAuthorized
+    ) {
       json(response, 403, { error: "write_token_required" });
       return;
     }
@@ -662,6 +1049,7 @@ export async function startAdminServer({
           planSteps,
           graph: graphByProject.get(manifest.projectId),
           memorySyncState: memorySyncByProject.get(manifest.projectId),
+          memoryGlobalEnabled: config.capabilities.has("project_memory_proposal"),
           now: dashboardNow,
         }));
         json(response, 200, {
@@ -930,41 +1318,165 @@ export async function startAdminServer({
         });
         return;
       }
-      const recipeInstantiation = url.pathname.match(
-        /^\/api\/projects\/([^/]+)\/recipes\/([^/]+)\/instantiate$/u,
+      if (
+        request.method === "POST" &&
+        ["/api/projects/import/preview", "/api/projects/import/apply"].includes(url.pathname)
+      ) {
+        const body = await readJson(request, 1024 * 1024);
+        if (!body.bundle || Array.isArray(body.bundle) || typeof body.bundle !== "object") {
+          throw Object.assign(new Error("historical_import_bundle_required"), { status: 400 });
+        }
+        if (url.pathname.endsWith("/preview")) {
+          const preview = await previewHistoricalProjectImport({
+            bundle: body.bundle,
+            projectsDirectory: config.projectsDirectory,
+            store,
+          });
+          json(response, 200, historicalImportPreviewSummary(preview));
+          return;
+        }
+        const result = await applyHistoricalProjectImport({
+          bundle: body.bundle,
+          projectsDirectory: config.projectsDirectory,
+          store,
+          confirmation: String(body.confirmation ?? "").trim(),
+          actor: config.approver,
+        });
+        json(response, 201, result);
+        return;
+      }
+      const memorySettingsAction = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/memory-settings\/(preview|apply)$/u,
       );
-      if (request.method === "POST" && recipeInstantiation) {
+      if (request.method === "POST" && memorySettingsAction) {
+        const body = await readJson(request, 32 * 1024);
+        const projectId = decodeURIComponent(memorySettingsAction[1]);
+        const action = memorySettingsAction[2];
+        const projects = await manifestLoader(config.projectsDirectory);
+        const project = projects.get(projectId);
+        if (!project) {
+          throw Object.assign(new Error("project_not_found"), { status: 404 });
+        }
+        if (action === "preview") {
+          json(response, 200, await previewProjectMemorySettings({
+            project,
+            settings: body.settings,
+            globalCapabilities: config.capabilities,
+          }));
+          return;
+        }
+        const result = await applyProjectMemorySettings({
+          projectId,
+          settings: body.settings,
+          digest: String(body.digest ?? "").trim(),
+          confirmation: String(body.confirmation ?? "").trim(),
+          projectsDirectory: config.projectsDirectory,
+          globalCapabilities: config.capabilities,
+          manifestLoader,
+        });
+        json(response, 200, result);
+        return;
+      }
+      const memorySyncAction = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/memory-sync\/(preview|apply)$/u,
+      );
+      if (request.method === "POST" && memorySyncAction) {
         const body = await readJson(request, 128 * 1024);
-        const projectId = decodeURIComponent(recipeInstantiation[1]);
-        const recipeId = decodeURIComponent(recipeInstantiation[2]);
+        const projectId = decodeURIComponent(memorySyncAction[1]);
+        const action = memorySyncAction[2];
+        const projects = await manifestLoader(config.projectsDirectory);
+        const project = projects.get(projectId);
+        if (!project) {
+          throw Object.assign(new Error("project_not_found"), { status: 404 });
+        }
+        if (action === "preview") {
+          const now = new Date();
+          for (const [id, entry] of memorySyncPreviews) {
+            if (entry.expiresAt <= now) memorySyncPreviews.delete(id);
+          }
+          if (memorySyncPreviews.size >= 100) {
+            throw Object.assign(new Error("too_many_memory_sync_previews"), { status: 429 });
+          }
+          const runtime = await buildArtifactRuntime({ config, project });
+          const generated = await previewProjectMemorySync({ project, store, runtime, now });
+          const previewId = randomBytes(24).toString("base64url");
+          const expiresAt = new Date(now.getTime() + 10 * 60_000);
+          const entry = { projectId, generated, expiresAt, applying: false };
+          memorySyncPreviews.set(previewId, entry);
+          const expiryTimer = setTimeout(() => {
+            if (memorySyncPreviews.get(previewId) === entry) {
+              memorySyncPreviews.delete(previewId);
+            }
+          }, expiresAt.getTime() - now.getTime());
+          expiryTimer.unref();
+          json(response, 200, projectMemorySyncPreviewSummary(generated, {
+            previewId,
+            expiresAt,
+            project,
+          }));
+          return;
+        }
+        const previewId = String(body.previewId ?? "").trim();
+        const entry = memorySyncPreviews.get(previewId);
+        if (!entry || entry.projectId !== projectId || entry.expiresAt <= new Date()) {
+          memorySyncPreviews.delete(previewId);
+          throw Object.assign(new Error("memory_sync_preview_expired"), { status: 409 });
+        }
+        if (entry.applying) {
+          throw Object.assign(new Error("memory_sync_preview_already_applying"), { status: 409 });
+        }
+        entry.applying = true;
+        try {
+          const result = await applyProjectMemorySync({
+            generated: entry.generated,
+            project,
+            store,
+            capabilities: config.capabilities,
+            confirmation: String(body.confirmation ?? "").trim() || null,
+            actor: config.approver,
+          });
+          json(response, 201, result);
+        } finally {
+          memorySyncPreviews.delete(previewId);
+        }
+        return;
+      }
+      const recipePlanAction = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/recipes\/([^/]+)\/(preview|instantiate)$/u,
+      );
+      if (request.method === "POST" && recipePlanAction) {
+        const body = await readJson(request, 128 * 1024);
+        const projectId = decodeURIComponent(recipePlanAction[1]);
+        const recipeId = decodeURIComponent(recipePlanAction[2]);
+        const action = recipePlanAction[3];
         const [projects, recipes] = await Promise.all([
           manifestLoader(config.projectsDirectory),
           recipeLoader(config.recipesDirectory),
         ]);
         const manifest = projects.get(projectId);
         const recipe = recipes.get(recipeId);
-        if (!manifest || !recipe) {
-          throw Object.assign(new Error("project_or_recipe_not_found"), { status: 404 });
-        }
-        if (!(manifest.profile?.selectedRecipeIds ?? []).includes(recipeId)) {
-          throw Object.assign(new Error("recipe_not_selected_for_project"), { status: 403 });
-        }
-        const requestedRequester = String(body.requesterId ?? "").trim();
-        const requesterId = manifest.requesters.length === 1
-          ? manifest.requesters[0]
-          : requestedRequester;
-        if (!requesterId || !manifest.requesters.includes(requesterId)) {
-          throw Object.assign(new Error("requester_not_authorized"), { status: 403 });
-        }
-        const instantiated = instantiateWorkRecipe(recipe, {
+        const { assessment } = prepareRecipePlan({
+          manifest,
+          recipe,
           projectId,
-          requesterId,
-          projectRoot: manifest.rootDirectory,
-          values: body.values ?? {},
+          recipeId,
+          body,
         });
-        const assessment = assessWorkPlan({ manifest, plan: instantiated.plan });
-        if (!["ALLOW", "REQUIRE_APPROVAL"].includes(assessment.decision)) {
-          throw Object.assign(new Error("recipe_plan_denied_by_policy"), { status: 403 });
+        if (action === "preview") {
+          json(response, 200, recipePlanPreview({
+            manifest,
+            recipe,
+            assessment,
+            executionEnabled: config.capabilities.has("work_plan_execution"),
+          }));
+          return;
+        }
+        const reviewedPlanHash = String(body.planHash ?? "").trim();
+        if (!/^[a-f0-9]{64}$/u.test(reviewedPlanHash)) {
+          throw Object.assign(new Error("reviewed_plan_hash_required"), { status: 400 });
+        }
+        if (reviewedPlanHash !== assessment.planHash) {
+          throw Object.assign(new Error("recipe_plan_changed_review_again"), { status: 409 });
         }
         const plan = await store.registerWorkPlan(assessment);
         await captureWorkPlanGraph({
@@ -1006,6 +1518,18 @@ export async function startAdminServer({
         }
         if (!(manifest.profile?.selectedRecipeIds ?? []).includes(recipe.id)) {
           throw Object.assign(new Error("recipe_not_selected_for_project"), { status: 403 });
+        }
+        if (body.kind === "schedule") {
+          const { assessment } = prepareRecipePlan({
+            manifest,
+            recipe,
+            projectId: manifest.projectId,
+            recipeId: recipe.id,
+            body,
+          });
+          if (body.planHash !== assessment.planHash) {
+            throw Object.assign(new Error("trigger_plan_changed_review_again"), { status: 409 });
+          }
         }
         const requesterId = manifest.requesters.length === 1
           ? manifest.requesters[0]
@@ -1373,6 +1897,8 @@ export async function startAdminServer({
       await new Promise((accept, reject) =>
         server.close((error) => (error ? reject(error) : accept())),
       );
+      memorySyncPreviews.clear();
+      sessionManager.clear();
       await store.close();
       console.log(JSON.stringify({ type: "admin.stopped", signal }));
     },

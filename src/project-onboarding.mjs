@@ -64,6 +64,18 @@ export async function buildProjectOnboardingDraft({
     profile: normalizedProfile,
     capabilities: {
       knowledge_read: { mode: "disabled" },
+      repository_activity_read: {
+        mode: "automatic",
+        maxCommits: 50,
+        maxOutputBytes: 128 * 1024,
+        timeoutMs: 30_000,
+      },
+      project_work_history_read: {
+        mode: "automatic",
+        maxPlans: 50,
+        maxOutputBytes: 128 * 1024,
+        timeoutMs: 30_000,
+      },
       research: { mode: "automatic", timeoutMs: 120_000 },
       document_draft: { mode: "automatic", timeoutMs: 120_000 },
       project_memory_proposal: { mode: "disabled" },

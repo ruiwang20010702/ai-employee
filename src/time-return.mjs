@@ -19,7 +19,7 @@ export function buildTimeReturnProposal({
   if (!String(projectId ?? "").trim() || !String(workPlanId ?? "").trim()) {
     throw new Error("Time return requires projectId and workPlanId");
   }
-  if (!['measured', 'user_confirmed'].includes(baselineMethod)) {
+  if (!["measured", "user_confirmed"].includes(baselineMethod)) {
     throw new Error("Time return baseline must be measured or user_confirmed");
   }
   if (!outcomeEvidence || typeof outcomeEvidence !== "object" || Array.isArray(outcomeEvidence)) {
@@ -38,6 +38,72 @@ export function buildTimeReturnProposal({
     baselineMethod,
     outcomeEvidence: structuredClone(outcomeEvidence),
     status: "proposed",
+  };
+}
+
+function sha256(value, name) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/u.test(normalized)) {
+    throw new Error(`${name} must be a SHA-256 digest`);
+  }
+  return normalized;
+}
+
+export function buildConfirmedShadowTimeReturn({
+  projectId,
+  recipeId,
+  evidenceSha256,
+  planHash,
+  repositoryCommit,
+  baselineMinutes,
+  humanActiveMinutes,
+  baselineMethod,
+  confirmedAt,
+  outcomeEvidence,
+}) {
+  const project = String(projectId ?? "").trim();
+  const recipe = String(recipeId ?? "").trim();
+  const commit = String(repositoryCommit ?? "").trim().toLowerCase();
+  if (!project || !recipe) {
+    throw new Error("Shadow time return requires projectId and recipeId");
+  }
+  if (!/^[a-f0-9]{40}$/u.test(commit)) {
+    throw new Error("repositoryCommit must be a full Git commit");
+  }
+  if (!["measured", "user_confirmed"].includes(baselineMethod)) {
+    throw new Error("Shadow time return baseline must be measured or user_confirmed");
+  }
+  if (!outcomeEvidence || typeof outcomeEvidence !== "object" || Array.isArray(outcomeEvidence)) {
+    throw new Error("Shadow time return requires verified outcome evidence");
+  }
+  const confirmationTime = new Date(confirmedAt);
+  if (!confirmedAt || Number.isNaN(confirmationTime.getTime())) {
+    throw new Error("Shadow time return requires a valid confirmation timestamp");
+  }
+  const baseline = minutes(baselineMinutes, "baselineMinutes");
+  if (baseline > 2_400) {
+    throw new Error("Shadow time return baselineMinutes cannot exceed 2400");
+  }
+  const human = minutes(humanActiveMinutes, "humanActiveMinutes", { allowZero: true });
+  if (human > baseline) throw new Error("humanActiveMinutes cannot exceed baselineMinutes");
+  const evidenceDigest = sha256(evidenceSha256, "evidenceSha256");
+  const normalizedPlanHash = sha256(planHash, "planHash");
+  return {
+    id: `shadow_time_${evidenceDigest}`,
+    workPlanId: null,
+    sourceType: "shadow_evidence",
+    sourceId: evidenceDigest,
+    projectId: project,
+    recipeId: recipe,
+    planHash: normalizedPlanHash,
+    repositoryCommit: commit,
+    baselineMinutes: baseline,
+    humanActiveMinutes: human,
+    returnedMinutes: baseline - human,
+    baselineMethod,
+    outcomeEvidence: structuredClone(outcomeEvidence),
+    status: "confirmed",
+    confirmedAt: confirmationTime.toISOString(),
   };
 }
 

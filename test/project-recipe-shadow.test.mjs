@@ -7,6 +7,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   symlink,
@@ -18,6 +19,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 import {
   confirmProjectRecipeShadowReview,
+  inspectConfirmedProjectRecipeShadowReview,
   previewProjectRecipeShadow,
   projectRecipeShadowReviewConfirmation,
   runProjectRecipeShadow,
@@ -74,12 +76,17 @@ async function fixture(t, { selectedRecipeIds = ["project-follow-up"] } = {}) {
 
 function artifactRuntime({ failAt = null } = {}) {
   let calls = 0;
+  const prompts = [];
   return {
     get calls() {
       return calls;
     },
+    get prompts() {
+      return [...prompts];
+    },
     async generateArtifact({ prompt }) {
       calls += 1;
+      prompts.push(prompt);
       if (calls === failAt) throw new Error("mock runtime failed");
       const output = calls === 1
         ? "# 研究结论\n\n- 已核对项目内 README。"
@@ -112,6 +119,7 @@ test("项目配方影子预览不写文件、不调用模型并仅允许已选�
   assert.equal(preview.modelInvoked, false);
   assert.equal(preview.databaseWrite, false);
   assert.equal(preview.authorityBoundary.productionDatabaseConnected, false);
+  assert.deepEqual(preview.sourcePaths, ["README.md"]);
   await assert.rejects(() => lstat(join(root, ".runtime")));
   await assert.rejects(
     () => previewProjectRecipeShadow({
@@ -139,8 +147,35 @@ test("项目配方影子拒绝代码、记忆和外部副作用能力", async (t
       },
       recipesDirectory,
     }),
-    /only permits research and document_draft/u,
+    /only permits repository activity, project work history, research, and document_draft/u,
   );
+});
+
+test("日报影子把仓库活动和受治理工作历史传给研究和文档", async (t) => {
+  const { sandbox, bundle } = await fixture(t, { selectedRecipeIds: ["daily-report"] });
+  const runtime = artifactRuntime();
+  const result = await runProjectRecipeShadow({
+    bundle,
+    recipeId: "daily-report",
+    values: { reportDate: "2026-08-13" },
+    recipesDirectory,
+    outputDirectory: join(sandbox, "daily-shadow-output"),
+    artifactRuntime: runtime,
+    now: () => new Date("2026-08-13T09:00:00.000Z"),
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(runtime.calls, 2);
+  const evidence = JSON.parse(await readFile(result.evidencePath, "utf8"));
+  assert.deepEqual(evidence.steps.map((step) => step.evidence.kind), [
+    "repository_activity",
+    "project_work_history",
+    "research_markdown",
+    "document_markdown",
+  ]);
+  assert.match(runtime.prompts[0], /foursday-repository-activity\/v1/u);
+  assert.match(runtime.prompts[0], /foursday-project-work-history\/v1/u);
+  assert.match(runtime.prompts[0], /exact_git_window_and_path_scope/u);
+  assert.match(runtime.prompts[1], /研究结论/u);
 });
 
 test("成功影子运行形成隔离账本、完整证据和待本人填写的时间返还", async (t) => {
@@ -246,11 +281,32 @@ test("本人审阅确认绑定证据摘要且只更新隔离账本", async (t) =
   assert.equal(record.evidenceSha256, run.evidenceSha256);
   assert.equal(record.localEvidenceLedgerUpdated, true);
   const store = await new Store(join(outputDirectory, "影子证据.sqlite")).open();
-  t.after(() => store.close());
   const entries = store.listTimeReturns({ projectId: "shadow_project" });
   assert.equal(entries.length, 1);
   assert.equal(entries[0].status, "confirmed");
   assert.equal(entries[0].humanActiveMinutes, 10);
+  store.close();
+  const beforeInspection = await Promise.all(
+    (await readdir(outputDirectory)).sort().map(async (name) => {
+      const metadata = await lstat(join(outputDirectory, name));
+      return [name, metadata.size, metadata.mode, metadata.mtimeMs, metadata.ctimeMs];
+    }),
+  );
+  const inspected = await inspectConfirmedProjectRecipeShadowReview({
+    evidenceDirectory: outputDirectory,
+    evidenceSha256: run.evidenceSha256,
+  });
+  assert.equal(inspected.evidenceSha256, run.evidenceSha256);
+  assert.equal(inspected.returnedMinutes, reviewed.returnedMinutes);
+  assert.equal(inspected.outcomeEvidence.kind, "confirmed_shadow_recipe_evidence");
+  assert.equal(inspected.outcomeEvidence.steps.length, 2);
+  const afterInspection = await Promise.all(
+    (await readdir(outputDirectory)).sort().map(async (name) => {
+      const metadata = await lstat(join(outputDirectory, name));
+      return [name, metadata.size, metadata.mode, metadata.mtimeMs, metadata.ctimeMs];
+    }),
+  );
+  assert.deepEqual(afterInspection, beforeInspection);
   const repeated = await confirmProjectRecipeShadowReview({
     evidenceDirectory: outputDirectory,
     evidenceSha256: run.evidenceSha256,
@@ -497,6 +553,7 @@ test("projects:shadow 命令默认只预览且不接受输出目录", async (t) 
   const preview = JSON.parse(stdout);
   assert.equal(preview.modelInvoked, false);
   assert.equal(preview.databaseWrite, false);
+  assert.equal(Object.hasOwn(preview, "sourcePaths"), false);
   await assert.rejects(() => lstat(outputDirectory));
   await assert.rejects(
     () => execFileAsync(process.execPath, [

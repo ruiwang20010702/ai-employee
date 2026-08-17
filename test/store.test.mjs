@@ -1620,6 +1620,64 @@ test("任务计划审批绑定哈希、有效期和单次消费", async (t) => {
   );
 });
 
+test("SQLite 项目工作历史在存储层绑定项目、时间窗口和当前计划", async (t) => {
+  const store = await fixture(t);
+  const complete = (assessment, hour) => {
+    const registered = store.registerWorkPlan(
+      assessment,
+      new Date(`2026-08-13T0${hour}:00:00.000Z`),
+    );
+    store.decideWorkPlan(registered.id, {
+      decision: "approved",
+      actor: "owner",
+      expiresAt: "2026-08-13T12:00:00.000Z",
+    }, new Date(`2026-08-13T0${hour}:01:00.000Z`));
+    store.consumeWorkPlanAuthorization(
+      registered.id,
+      new Date(`2026-08-13T0${hour}:02:00.000Z`),
+    );
+    store.updateWorkPlanStep(registered.id, "code", {
+      status: "completed",
+      evidence: {
+        kind: "unified_diff",
+        sha256: "d".repeat(64),
+        verification: "git_apply_check",
+      },
+    }, new Date(`2026-08-13T0${hour}:03:00.000Z`));
+    store.finishWorkPlan(
+      registered.id,
+      { success: true },
+      new Date(`2026-08-13T0${hour}:04:00.000Z`),
+    );
+    return registered;
+  };
+  const included = complete(assessedPlan("当日完成"), 1);
+  const excluded = complete(assessedPlan("当前日报计划"), 2);
+  const history = store.listProjectWorkHistory({
+    projectId: "test_project",
+    start: "2026-08-13T00:00:00.000Z",
+    end: "2026-08-14T00:00:00.000Z",
+    excludePlanHash: excluded.plan_hash,
+    limit: 10,
+  });
+  assert.deepEqual(history.map((plan) => plan.id), [included.id]);
+  assert.equal(history[0].steps[0].evidence.kind, "unified_diff");
+  assert.deepEqual(store.listProjectWorkHistory({
+    projectId: "other_project",
+    start: "2026-08-13T00:00:00.000Z",
+    end: "2026-08-14T00:00:00.000Z",
+    limit: 10,
+  }), []);
+  assert.throws(
+    () => store.listProjectWorkHistory({
+      projectId: "test_project",
+      start: "invalid",
+      end: "2026-08-14T00:00:00.000Z",
+    }),
+    /query is invalid/u,
+  );
+});
+
 test("计划变化会生成新任务且不能复用旧审批", async (t) => {
   const store = await fixture(t);
   const oldPlan = store.registerWorkPlan(assessedPlan("旧计划"));
@@ -1978,6 +2036,53 @@ test("时间返还只统计带完整证据且经本人确认的配方计划", as
     "owner",
   );
   assert.equal(store.listTimeReturns({ projectId: manifest.projectId }).length, 0);
+});
+
+test("已确认影子证据时间返还独立于生产计划、保持幂等并可按项目擦除", async (t) => {
+  const store = await fixture(t);
+  const proof = {
+    projectId: "shadow_project",
+    recipeId: "project-follow-up",
+    evidenceSha256: "a".repeat(64),
+    planHash: "b".repeat(64),
+    repositoryCommit: "c".repeat(40),
+    baselineMinutes: 45,
+    humanActiveMinutes: 5,
+    baselineMethod: "user_confirmed",
+    confirmedAt: "2026-08-13T10:00:00.000Z",
+    outcomeEvidence: {
+      kind: "confirmed_shadow_recipe_evidence",
+      steps: [{ stepId: "research", sha256: "d".repeat(64) }],
+    },
+  };
+  const first = store.importConfirmedShadowTimeReturn(
+    proof,
+    "owner",
+    new Date("2026-08-13T11:00:00.000Z"),
+  );
+  assert.equal(first.created, true);
+  assert.equal(first.entry.workPlanId, null);
+  assert.equal(first.entry.sourceType, "shadow_evidence");
+  assert.equal(first.entry.returnedMinutes, 40);
+  const repeated = store.importConfirmedShadowTimeReturn(proof, "owner");
+  assert.equal(repeated.created, false);
+  const reordered = store.importConfirmedShadowTimeReturn({
+    ...proof,
+    outcomeEvidence: {
+      steps: [{ sha256: "d".repeat(64), stepId: "research" }],
+      kind: "confirmed_shadow_recipe_evidence",
+    },
+  }, "owner");
+  assert.equal(reordered.created, false);
+  assert.equal(store.listTimeReturns({ projectId: "shadow_project" }).length, 1);
+  assert.throws(
+    () => store.importConfirmedShadowTimeReturn({ ...proof, humanActiveMinutes: 6 }, "owner"),
+    /different facts/u,
+  );
+  const preview = store.previewPrivacyErasure({ projectId: "shadow_project" });
+  assert.equal(preview.counts.timeReturns, 1);
+  store.erasePrivacyData({ projectId: "shadow_project" }, preview.confirmation, "owner");
+  assert.equal(store.listTimeReturns({ projectId: "shadow_project" }).length, 0);
 });
 
 test("项目记忆候选绑定计划哈希、保持幂等且必须人工确认", async (t) => {

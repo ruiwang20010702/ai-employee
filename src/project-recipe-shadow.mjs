@@ -9,8 +9,11 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { safeCommandEnvironment } from "./controlled-command-runner.mjs";
+import { DataCipher } from "./crypto.mjs";
 import { buildHistoricalProjectImportPreview } from "./historical-project-import.mjs";
 import { safeErrorCode } from "./logging.mjs";
 import { loadWorkRecipes } from "./recipe-library.mjs";
@@ -20,7 +23,12 @@ import { executeWorkPlan } from "./work-executor.mjs";
 import { assessWorkPlan } from "./work-plan.mjs";
 import { instantiateWorkRecipe } from "./work-recipe.mjs";
 
-const shadowCapabilities = new Set(["research", "document_draft"]);
+const shadowCapabilities = new Set([
+  "repository_activity_read",
+  "project_work_history_read",
+  "research",
+  "document_draft",
+]);
 const maximumReviewPreviewCharacters = 8_000;
 const maximumShadowEvidenceBytes = 4 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
@@ -65,7 +73,7 @@ function ensureShadowPlan(plan) {
   const unsafe = plan.steps.filter((step) => !shadowCapabilities.has(step.capability));
   if (unsafe.length > 0) {
     throw new Error(
-      `Project recipe shadow only permits research and document_draft; rejected: ${unsafe.map((step) => step.capability).join(", ")}`,
+      `Project recipe shadow only permits repository activity, project work history, research, and document_draft; rejected: ${unsafe.map((step) => step.capability).join(", ")}`,
     );
   }
 }
@@ -165,6 +173,7 @@ export async function previewProjectRecipeShadow({
     assessment,
     manifest: historicalPreview.manifest,
     recipeDefinition: recipe,
+    sourcePaths: historicalPreview.sources.map((source) => source.path),
   };
 }
 
@@ -315,6 +324,88 @@ async function inspectShadowEvidenceDirectory(evidenceDirectory) {
   };
 }
 
+async function openReadOnlyShadowLedger(databasePath) {
+  const encodedKey = (await readProtectedShadowFile(`${databasePath}.key`, 1_024))
+    .toString("utf8")
+    .trim();
+  const key = Buffer.from(encodedKey, "base64");
+  if (key.length !== 32 || key.toString("base64") !== encodedKey) {
+    throw new Error("Project recipe shadow ledger key is invalid");
+  }
+  const cipher = new DataCipher(key);
+  const immutableDatabaseUrl = pathToFileURL(databasePath);
+  immutableDatabaseUrl.searchParams.set("immutable", "1");
+  const database = new DatabaseSync(immutableDatabaseUrl, { readOnly: true });
+  database.exec("PRAGMA query_only = ON; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+  return {
+    listWorkPlans({ status, limit = 100 } = {}) {
+      const rows = status
+        ? database.prepare(
+            "SELECT * FROM work_plans WHERE privacy_erased_at IS NULL AND status = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+          ).all(status, limit)
+        : database.prepare(
+            "SELECT * FROM work_plans WHERE privacy_erased_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?",
+          ).all(limit);
+      return rows.map((row) => ({
+        ...row,
+        requester_id: cipher.decrypt(row.requester_ciphertext),
+        objective: cipher.decrypt(row.objective_ciphertext),
+        plan: JSON.parse(cipher.decrypt(row.plan_ciphertext)),
+      }));
+    },
+    listWorkPlanSteps(id) {
+      return database.prepare(
+        "SELECT * FROM work_plan_steps WHERE work_plan_id = ? ORDER BY position",
+      ).all(id).map((row) => ({
+        ...row,
+        evidence: row.evidence_ciphertext
+          ? JSON.parse(cipher.decrypt(row.evidence_ciphertext))
+          : null,
+        error: row.error_ciphertext ? cipher.decrypt(row.error_ciphertext) : null,
+      }));
+    },
+    getTimeReturn(id) {
+      const row = database.prepare(
+        "SELECT * FROM time_return_entries WHERE id = ?",
+      ).get(id);
+      if (!row) return null;
+      return {
+        id: row.id,
+        projectId: row.project_id,
+        recipeId: row.recipe_id,
+        baselineMinutes: row.baseline_minutes,
+        humanActiveMinutes: row.human_active_minutes,
+        returnedMinutes: row.returned_minutes,
+        baselineMethod: row.baseline_method,
+        status: row.status,
+        updatedAt: row.updated_at,
+      };
+    },
+    close() {
+      database.close();
+    },
+  };
+}
+
+function assertEligibleShadowEvidence(evidence) {
+  if (
+    evidence?.schema !== "foursday-project-recipe-shadow-evidence/v1" ||
+    evidence.status !== "completed" ||
+    evidence.modelInvoked !== true ||
+    evidence.timeReturn?.status !== "awaiting_user_review_time" ||
+    evidence.timeReturn?.humanActiveMinutes !== null ||
+    evidence.timeReturn?.returnedMinutes !== null ||
+    evidence.timeReturn?.writtenToDatabase !== false ||
+    evidence.authorityBoundary?.productionDatabaseConnected !== false ||
+    evidence.authorityBoundary?.externalBusinessSystemsTouched !== false ||
+    !Array.isArray(evidence.steps) ||
+    evidence.steps.length < 1 ||
+    evidence.steps.some((step) => step.status !== "completed" || !step.evidence)
+  ) {
+    throw new Error("Project recipe shadow evidence is not eligible for review confirmation");
+  }
+}
+
 export function projectRecipeShadowReviewConfirmation(evidenceSha256) {
   const normalized = String(evidenceSha256 ?? "").trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/u.test(normalized)) {
@@ -344,22 +435,7 @@ export async function confirmProjectRecipeShadowReview({
     throw new Error("Project recipe shadow evidence SHA-256 does not match");
   }
   const { evidence } = inspected;
-  if (
-    evidence?.schema !== "foursday-project-recipe-shadow-evidence/v1" ||
-    evidence.status !== "completed" ||
-    evidence.modelInvoked !== true ||
-    evidence.timeReturn?.status !== "awaiting_user_review_time" ||
-    evidence.timeReturn?.humanActiveMinutes !== null ||
-    evidence.timeReturn?.returnedMinutes !== null ||
-    evidence.timeReturn?.writtenToDatabase !== false ||
-    evidence.authorityBoundary?.productionDatabaseConnected !== false ||
-    evidence.authorityBoundary?.externalBusinessSystemsTouched !== false ||
-    !Array.isArray(evidence.steps) ||
-    evidence.steps.length < 1 ||
-    evidence.steps.some((step) => step.status !== "completed" || !step.evidence)
-  ) {
-    throw new Error("Project recipe shadow evidence is not eligible for review confirmation");
-  }
+  assertEligibleShadowEvidence(evidence);
   let existingConfirmation = null;
   const confirmationMetadata = await lstat(inspected.confirmationPath).catch((error) => {
     if (error?.code === "ENOENT") return null;
@@ -489,6 +565,114 @@ export async function confirmProjectRecipeShadowReview({
   }
 }
 
+export async function inspectConfirmedProjectRecipeShadowReview({
+  evidenceDirectory,
+  evidenceSha256,
+  storeFactory = openReadOnlyShadowLedger,
+} = {}) {
+  const expectedSha256 = String(evidenceSha256 ?? "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/u.test(expectedSha256)) {
+    throw new Error("Project recipe shadow evidence SHA-256 is invalid");
+  }
+  const inspected = await inspectShadowEvidenceDirectory(evidenceDirectory);
+  if (inspected.evidenceSha256 !== expectedSha256) {
+    throw new Error("Project recipe shadow evidence SHA-256 does not match");
+  }
+  assertEligibleShadowEvidence(inspected.evidence);
+  let confirmation;
+  try {
+    confirmation = JSON.parse((await readProtectedShadowFile(
+      inspected.confirmationPath,
+      256 * 1024,
+    )).toString("utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error("Project recipe shadow evidence has not been confirmed by its owner");
+    }
+    if (error instanceof SyntaxError) {
+      throw new Error("Project recipe shadow review confirmation is invalid");
+    }
+    throw error;
+  }
+  const { evidence } = inspected;
+  if (
+    confirmation?.schema !== "foursday-project-recipe-shadow-review/v1" ||
+    confirmation.status !== "confirmed" ||
+    confirmation.evidenceSha256 !== expectedSha256 ||
+    confirmation.projectId !== evidence.project?.id ||
+    confirmation.recipeId !== evidence.recipe?.id ||
+    confirmation.planHash !== evidence.plan?.planHash ||
+    confirmation.baselineMinutes !== evidence.timeReturn?.baselineMinutes ||
+    confirmation.returnedMinutes !==
+      confirmation.baselineMinutes - confirmation.humanActiveMinutes ||
+    confirmation.baselineMethod !== evidence.timeReturn?.baselineMethod ||
+    confirmation.localEvidenceLedgerUpdated !== true ||
+    confirmation.productionDatabaseConnected !== false ||
+    confirmation.productionTimeReturnWrittenOrConfirmed !== false
+  ) {
+    throw new Error("Project recipe shadow review confirmation does not match its evidence");
+  }
+  const store = await storeFactory(inspected.databasePath);
+  try {
+    const plans = await store.listWorkPlans({ status: "completed", limit: 10 });
+    const matchingPlans = plans.filter((plan) => plan.plan_hash === evidence.plan.planHash);
+    if (matchingPlans.length !== 1) {
+      throw new Error("Project recipe shadow ledger does not contain the exact completed plan");
+    }
+    const plan = matchingPlans[0];
+    const steps = evidenceForOutput(await store.listWorkPlanSteps(plan.id));
+    const entry = await store.getTimeReturn(`time_${plan.id}`);
+    if (
+      plan.project_id !== evidence.project.id ||
+      plan.plan?.recipe?.id !== evidence.recipe.id ||
+      !isDeepStrictEqual(steps, evidence.steps) ||
+      !entry ||
+      entry.status !== "confirmed" ||
+      entry.projectId !== confirmation.projectId ||
+      entry.recipeId !== confirmation.recipeId ||
+      entry.baselineMinutes !== confirmation.baselineMinutes ||
+      entry.humanActiveMinutes !== confirmation.humanActiveMinutes ||
+      entry.returnedMinutes !== confirmation.returnedMinutes ||
+      entry.baselineMethod !== confirmation.baselineMethod ||
+      entry.updatedAt !== confirmation.confirmedAt
+    ) {
+      throw new Error("Project recipe shadow confirmation does not match its isolated ledger");
+    }
+    const currentEvidence = await readProtectedShadowFile(inspected.evidencePath);
+    if (createHash("sha256").update(currentEvidence).digest("hex") !== expectedSha256) {
+      throw new Error("Project recipe shadow evidence changed during admission inspection");
+    }
+    return {
+      projectId: confirmation.projectId,
+      recipeId: confirmation.recipeId,
+      evidenceSha256: expectedSha256,
+      planHash: confirmation.planHash,
+      repositoryCommit: evidence.repository?.commit,
+      baselineMinutes: confirmation.baselineMinutes,
+      humanActiveMinutes: confirmation.humanActiveMinutes,
+      returnedMinutes: confirmation.returnedMinutes,
+      baselineMethod: confirmation.baselineMethod,
+      confirmedAt: confirmation.confirmedAt,
+      outcomeEvidence: {
+        kind: "confirmed_shadow_recipe_evidence",
+        evidenceSha256: expectedSha256,
+        planHash: confirmation.planHash,
+        repositoryCommit: evidence.repository?.commit,
+        projectSourceDigest: evidence.project?.sourceDigest,
+        steps: evidence.steps.map((step) => ({
+          stepId: step.stepId,
+          capability: step.capability,
+          kind: step.evidence?.kind ?? null,
+          sha256: step.evidence?.sha256 ?? null,
+          verification: step.evidence?.verification ?? null,
+        })),
+      },
+    };
+  } finally {
+    await store.close();
+  }
+}
+
 export async function runProjectRecipeShadow({
   bundle,
   recipeId,
@@ -527,7 +711,11 @@ export async function runProjectRecipeShadow({
       store,
       planId,
       manifest: preview.manifest,
-      adapters: adapterFactory({ artifactRuntime }),
+      adapters: adapterFactory({
+        artifactRuntime,
+        evidencePaths: preview.sourcePaths,
+        store,
+      }),
       now,
     });
     const steps = evidenceForOutput(await store.listWorkPlanSteps(planId));

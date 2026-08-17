@@ -187,6 +187,83 @@ test("知识证据只能被后续步骤按步骤编号显式引用", () => {
   assert.equal(denied.decision, "DENY");
 });
 
+test("研究与文档证据必须通过图边显式引用更早只读步骤", () => {
+  const value = manifest();
+  value.capabilities.document_draft = { mode: "automatic" };
+  value.capabilities.repository_activity_read = {
+    mode: "automatic",
+    maxCommits: 50,
+    maxOutputBytes: 131072,
+  };
+  value.capabilities.project_work_history_read = {
+    mode: "automatic",
+    maxPlans: 50,
+    maxOutputBytes: 131072,
+  };
+  const allowed = evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [
+      {
+        id: "activity-1",
+        capability: "repository_activity_read",
+        workingDirectory: "/workspace/vocab",
+        inputs: { reportDate: "2026-08-13", utcOffset: "+08:00" },
+      },
+      {
+        id: "history-1",
+        capability: "project_work_history_read",
+        inputs: { reportDate: "2026-08-13", utcOffset: "+08:00" },
+      },
+      {
+        id: "research-1",
+        capability: "research",
+        inputs: { evidenceStepIds: ["activity-1", "history-1"] },
+      },
+      {
+        id: "draft-1",
+        capability: "document_draft",
+        inputs: { evidenceStepIds: ["research-1"] },
+      },
+    ],
+  });
+  assert.equal(allowed.decision, "ALLOW");
+  assert.equal(evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [{
+      id: "activity-1",
+      capability: "repository_activity_read",
+      workingDirectory: "/workspace/vocab",
+      inputs: { reportDate: "2026-02-30", utcOffset: "+08:00" },
+    }],
+  }).decision, "DENY");
+  assert.equal(evaluatePlan({
+    manifest: value,
+    requesterId: "authorized-user",
+    steps: [{
+      id: "history-1",
+      capability: "project_work_history_read",
+      inputs: { reportDate: "2026-02-30", utcOffset: "+08:00" },
+    }],
+  }).decision, "DENY");
+  for (const evidenceStepIds of [["draft-1"], ["missing"], ["research-1", "research-1"]]) {
+    const denied = evaluatePlan({
+      manifest: value,
+      requesterId: "authorized-user",
+      steps: [
+        { id: "research-1", capability: "research", inputs: {} },
+        {
+          id: "draft-1",
+          capability: "document_draft",
+          inputs: { evidenceStepIds },
+        },
+      ],
+    });
+    assert.equal(denied.decision, "DENY");
+  }
+});
+
 test("L3 推送即使标记自动也必须单次审批并绑定远端", () => {
   const value = manifest();
   value.capabilities.git_push = {

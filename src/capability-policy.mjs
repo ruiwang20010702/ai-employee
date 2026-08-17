@@ -15,6 +15,8 @@ const weekdays = new Set([
 export const capabilityCatalog = Object.freeze({
   observe_messages: { level: "L0", sideEffect: false, runtime: "dws", probe: ["chat", "message", "list-by-sender"] },
   knowledge_read: { level: "L1", sideEffect: false, interruptible: true, runtime: "gbrain" },
+  repository_activity_read: { level: "L0", sideEffect: false, interruptible: true, requiresProjectRoot: true, runtime: "git" },
+  project_work_history_read: { level: "L0", sideEffect: false, interruptible: true, runtime: "builtin" },
   research: { level: "L1", sideEffect: false, interruptible: true, runtime: "codex" },
   work_plan_proposal: { level: "L1", sideEffect: false, runtime: "codex" },
   reply_draft: { level: "L1", sideEffect: false, runtime: "builtin" },
@@ -258,6 +260,34 @@ export function validateProjectManifest(input) {
         rule.maxContentBytes,
         "knowledge_read.maxContentBytes",
         64 * 1024,
+        256 * 1024,
+      );
+    }
+    if (name === "repository_activity_read") {
+      capabilities[name].maxCommits = boundedInteger(
+        rule.maxCommits,
+        "repository_activity_read.maxCommits",
+        50,
+        100,
+      );
+      capabilities[name].maxOutputBytes = boundedInteger(
+        rule.maxOutputBytes,
+        "repository_activity_read.maxOutputBytes",
+        128 * 1024,
+        256 * 1024,
+      );
+    }
+    if (name === "project_work_history_read") {
+      capabilities[name].maxPlans = boundedInteger(
+        rule.maxPlans,
+        "project_work_history_read.maxPlans",
+        50,
+        100,
+      );
+      capabilities[name].maxOutputBytes = boundedInteger(
+        rule.maxOutputBytes,
+        "project_work_history_read.maxOutputBytes",
+        128 * 1024,
         256 * 1024,
       );
     }
@@ -569,6 +599,7 @@ export function evaluatePlan({ manifest, requesterId, steps, now = new Date() })
     const knowledgeStepIds = step.inputs?.knowledgeStepIds;
     if (knowledgeStepIds != null) {
       if (
+        !["research", "document_draft", "code_patch"].includes(capability) ||
         !Array.isArray(knowledgeStepIds) ||
         knowledgeStepIds.length === 0 ||
         knowledgeStepIds.length > 10 ||
@@ -579,6 +610,72 @@ export function evaluatePlan({ manifest, requesterId, steps, now = new Date() })
         ))
       ) {
         return { decision: "DENY", reason: "知识证据必须引用更早的知识页读取步骤。" };
+      }
+    }
+    const evidenceStepIds = step.inputs?.evidenceStepIds;
+    if (evidenceStepIds != null) {
+      if (
+        !["research", "document_draft", "code_patch"].includes(capability) ||
+        !Array.isArray(evidenceStepIds) ||
+        evidenceStepIds.length === 0 ||
+        evidenceStepIds.length > 10 ||
+        new Set(evidenceStepIds).size !== evidenceStepIds.length ||
+        evidenceStepIds.some((id) => (
+          typeof id !== "string" || !id.trim() || id !== id.trim()
+        )) ||
+        evidenceStepIds.some((id) => !steps.slice(0, index).some(
+          (candidate) => (
+            candidate.id === id &&
+            [
+              "repository_activity_read",
+              "project_work_history_read",
+              "research",
+              "document_draft",
+            ].includes(candidate.capability)
+          ),
+        ))
+      ) {
+        return { decision: "DENY", reason: "步骤证据必须引用更早的只读研究或文档步骤。" };
+      }
+    }
+    if (capability === "repository_activity_read") {
+      const reportDate = String(step.inputs?.reportDate ?? "").trim();
+      const utcOffset = String(step.inputs?.utcOffset ?? "+00:00").trim();
+      if (
+        !onlyInputKeys(step.inputs, new Set(["reportDate", "utcOffset"])) ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(reportDate) ||
+        !/^(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/u.test(utcOffset)
+      ) {
+        return { decision: "DENY", reason: "仓库活动读取必须使用有效日期和 UTC 偏移。" };
+      }
+      const [year, month, day] = reportDate.split("-").map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (
+        date.getUTCFullYear() !== year ||
+        date.getUTCMonth() !== month - 1 ||
+        date.getUTCDate() !== day
+      ) {
+        return { decision: "DENY", reason: "仓库活动读取日期无效。" };
+      }
+    }
+    if (capability === "project_work_history_read") {
+      const reportDate = String(step.inputs?.reportDate ?? "").trim();
+      const utcOffset = String(step.inputs?.utcOffset ?? "+00:00").trim();
+      if (
+        !onlyInputKeys(step.inputs, new Set(["reportDate", "utcOffset"])) ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(reportDate) ||
+        !/^(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/u.test(utcOffset)
+      ) {
+        return { decision: "DENY", reason: "项目工作历史读取必须使用有效日期和 UTC 偏移。" };
+      }
+      const [year, month, day] = reportDate.split("-").map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (
+        date.getUTCFullYear() !== year ||
+        date.getUTCMonth() !== month - 1 ||
+        date.getUTCDate() !== day
+      ) {
+        return { decision: "DENY", reason: "项目工作历史读取日期无效。" };
       }
     }
     if (capability === "knowledge_read") {

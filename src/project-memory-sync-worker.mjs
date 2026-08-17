@@ -45,6 +45,7 @@ export async function syncAutomaticProjectMemoriesOnce({
       capabilities.has("project_memory_proposal"),
     projectsInspected: 0,
     automaticProjects: 0,
+    expiredProjects: 0,
     unchangedProjects: 0,
     syncedProjects: 0,
     candidatesCreated: 0,
@@ -58,6 +59,10 @@ export async function syncAutomaticProjectMemoriesOnce({
   for (const project of projects.values()) {
     const rule = project.capabilities?.project_memory_proposal;
     if (rule?.mode !== "automatic" || !Array.isArray(rule.sourcePaths) || rule.sourcePaths.length === 0) {
+      continue;
+    }
+    if (rule.expiresAt && new Date(rule.expiresAt) <= now) {
+      summary.expiredProjects += 1;
       continue;
     }
     summary.automaticProjects += 1;

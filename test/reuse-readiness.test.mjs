@@ -153,6 +153,31 @@ test("畸形外部引用和重复密钥不能通过本地配置检查", async (t
   assert.ok(result.config.requiredEdits.includes("数据密钥和备份密钥必须不同"));
 });
 
+test("管理台用户名密码配置必须成对有效且会话时长有界", async (t) => {
+  const { configPath } = await fixture(t);
+  await initializeProductionConfig({ outputPath: configPath });
+  const values = JSON.parse(await readFile(configPath, "utf8"));
+  Object.assign(values, {
+    DATABASE_URL: "env://AI_EMPLOYEE_DATABASE_URL",
+    AI_EMPLOYEE_TENANT_ID: "tenant-1",
+    AI_EMPLOYEE_APPROVER: "operator-1",
+    DINGTALK_TARGET_USER_IDS: "target-1",
+    DINGTALK_SELF_USER_ID: "self-1",
+    AI_EMPLOYEE_ADMIN_LOGIN_IDENTIFIERS: "owner@example.com",
+    AI_EMPLOYEE_ADMIN_PASSWORD_HASH: "",
+    AI_EMPLOYEE_ADMIN_SESSION_TTL_MS: 1000,
+  });
+  await writeFile(configPath, `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 });
+  const result = await inspectReuseReadiness({
+    configPath,
+    platform: "darwin",
+    nodeVersion: "v22.5.0",
+    executableChecker: async () => true,
+  });
+  assert.equal(result.readyForPreflight, false);
+  assert.ok(result.config.requiredEdits.includes("修复管理台用户名密码登录配置"));
+});
+
 test("初始化入口默认只预览，显式应用后创建配置且拒绝覆盖", async (t) => {
   const { directory, configPath } = await fixture(t);
   const preview = await runReuseGuide({ args: ["init"], cwd: directory });

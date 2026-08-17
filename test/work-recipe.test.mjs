@@ -25,6 +25,10 @@ test("五个官方工作配方均可加载并实例化", async () => {
   assert.match(result.plan.objective, /完成首个真实配方/u);
   assert.equal(result.plan.steps.every((step) => step.workingDirectory === "/workspace/project"), true);
   assert.equal(result.timeReturnProposal.status, "proposed");
+  assert.deepEqual(
+    result.plan.steps.find((step) => step.id === "draft-follow-up").inputs.evidenceStepIds,
+    ["research-status"],
+  );
   const meeting = instantiateWorkRecipe(recipes.get("meeting-follow-up"), {
     projectId: "project_1", requesterId: "owner_1", projectRoot: "/workspace/project",
     values: {
@@ -37,6 +41,10 @@ test("五个官方工作配方均可加载并实例化", async () => {
   });
   assert.deepEqual(meeting.plan.steps.find((step) => step.id === "create-todo").inputs.executorUserIds, ["user-1"]);
   assert.equal(meeting.plan.steps.some((step) => step.capability === "project_memory_proposal"), true);
+  assert.deepEqual(
+    meeting.plan.steps.find((step) => step.id === "draft-actions").inputs.evidenceStepIds,
+    ["research-meeting"],
+  );
   const memoryUpdate = instantiateWorkRecipe(recipes.get("project-memory-update"), {
     projectId: "project_1", requesterId: "owner_1", projectRoot: "/workspace/project",
     values: {
@@ -52,6 +60,28 @@ test("五个官方工作配方均可加载并实例化", async () => {
   assert.equal(
     memoryUpdate.plan.steps.at(-1).inputs.documentStepId,
     "draft-memory-review",
+  );
+  assert.deepEqual(
+    memoryUpdate.plan.steps.find((step) => step.id === "draft-memory-review").inputs.evidenceStepIds,
+    ["research-evidence"],
+  );
+  const daily = instantiateWorkRecipe(recipes.get("daily-report"), {
+    projectId: "project_1", requesterId: "owner_1", projectRoot: "/workspace/project",
+    values: { reportDate: "2026-08-13" },
+  });
+  assert.deepEqual(daily.plan.steps.map((step) => step.capability), [
+    "repository_activity_read",
+    "project_work_history_read",
+    "research",
+    "document_draft",
+  ]);
+  assert.deepEqual(
+    daily.plan.steps.find((step) => step.id === "research-evidence").inputs.evidenceStepIds,
+    ["read-repository-activity", "read-project-work-history"],
+  );
+  assert.deepEqual(
+    daily.plan.steps.find((step) => step.id === "draft-report").inputs.evidenceStepIds,
+    ["research-evidence"],
   );
   const code = instantiateWorkRecipe(recipes.get("code-delivery"), {
     projectId: "project_1", requesterId: "owner_1", projectRoot: "/workspace/project",

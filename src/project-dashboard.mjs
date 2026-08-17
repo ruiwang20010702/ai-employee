@@ -4,7 +4,12 @@ import { buildGovernedGraphExplanations } from "./governed-work-graph-query.mjs"
 const activePlanStatuses = new Set([
   "ready", "awaiting_approval", "approved", "executing", "verifying",
 ]);
-const reviewableEvidenceKinds = new Set(["research_markdown", "document_markdown"]);
+const reviewableEvidenceKinds = new Set([
+  "repository_activity",
+  "project_work_history",
+  "research_markdown",
+  "document_markdown",
+]);
 const evidencePreviewCharacters = 4_000;
 
 function evidencePreview(step) {
@@ -33,6 +38,7 @@ export function buildProjectDashboard({
   planSteps = new Map(),
   graph = null,
   memorySyncState = null,
+  memoryGlobalEnabled = false,
   now = new Date(),
 }) {
   if (!manifest?.projectId || !manifest?.name) {
@@ -49,13 +55,20 @@ export function buildProjectDashboard({
     (memory) => memory.status === "proposed",
   );
   const memoryRule = manifest.capabilities?.project_memory_proposal ?? null;
+  const memoryAuthorizationExpired = Boolean(
+    memoryRule?.expiresAt && new Date(memoryRule.expiresAt) <= now,
+  );
   const confirmedStatementsByFactKey = new Map();
+  const confirmedMemoriesByFactKey = new Map();
   for (const memory of projectMemories) {
     const factKey = memory.scope?.factKey;
     if (!factKey) continue;
     const statements = confirmedStatementsByFactKey.get(factKey) ?? new Set();
     statements.add(String(memory.statement ?? "").trim());
     confirmedStatementsByFactKey.set(factKey, statements);
+    const items = confirmedMemoriesByFactKey.get(factKey) ?? [];
+    items.push(memory);
+    confirmedMemoriesByFactKey.set(factKey, items);
   }
   const projectTimeReturns = timeReturns.filter(
     (entry) => entry.projectId === manifest.projectId,
@@ -127,6 +140,10 @@ export function buildProjectDashboard({
     successCriteria: manifest.profile?.successCriteria ?? [],
     milestones: manifest.profile?.milestones ?? [],
     collaborationObjects: manifest.profile?.collaborationObjects ?? [],
+    memoryScope: {
+      allowedTypes: manifest.profile?.memoryScope?.allowedTypes ?? [],
+      retentionDays: manifest.profile?.memoryScope?.retentionDays ?? 90,
+    },
     plans: {
       total: projectPlans.length,
       active: projectPlans.filter((plan) => activePlanStatuses.has(plan.status)).length,
@@ -154,9 +171,55 @@ export function buildProjectDashboard({
         statement: memory.statement,
         updatedAt: memory.updated_at,
       })),
+      reviewItems: [...proposedMemories]
+        .sort((left, right) => new Date(right.updated_at ?? 0) - new Date(left.updated_at ?? 0))
+        .slice(0, 20)
+        .map((memory) => {
+          const factKey = memory.scope?.factKey ?? null;
+          const statement = String(memory.statement ?? "").trim().slice(0, 1_000);
+          const conflicts = factKey
+            ? (confirmedMemoriesByFactKey.get(factKey) ?? []).filter(
+                (confirmed) => String(confirmed.statement ?? "").trim() !== statement,
+              )
+            : [];
+          const duplicates = factKey
+            ? (confirmedMemoriesByFactKey.get(factKey) ?? []).filter(
+                (confirmed) => String(confirmed.statement ?? "").trim() === statement,
+              )
+            : [];
+          return {
+            id: memory.id,
+            factKey: typeof factKey === "string" ? factKey.slice(0, 120) : null,
+            statement,
+            sensitivity: memory.sensitivity ?? null,
+            sourceType: typeof memory.source_type === "string"
+              ? memory.source_type.slice(0, 100)
+              : null,
+            sourcePath: typeof memory.scope?.sourcePath === "string"
+              ? memory.scope.sourcePath.slice(0, 2_000)
+              : null,
+            sourceDigestPrefix: /^[a-f0-9]{64}$/u.test(String(memory.source_id ?? ""))
+              ? memory.source_id.slice(0, 12)
+              : null,
+            updatedAt: memory.updated_at ?? null,
+            conflicts: conflicts.slice(0, 5).map((confirmed) => ({
+              id: confirmed.id,
+              statement: String(confirmed.statement ?? "").trim().slice(0, 1_000),
+            })),
+            duplicates: duplicates.slice(0, 5).map((confirmed) => ({
+              id: confirmed.id,
+              statement: String(confirmed.statement ?? "").trim().slice(0, 1_000),
+            })),
+          };
+        }),
     },
     memorySync: {
-      authorized: Boolean(memoryRule && memoryRule.mode !== "disabled"),
+      authorized: Boolean(
+        memoryRule && memoryRule.mode !== "disabled" && !memoryAuthorizationExpired,
+      ),
+      configured: Boolean(memoryRule && memoryRule.mode !== "disabled"),
+      expired: memoryAuthorizationExpired,
+      expiresAt: memoryRule?.expiresAt ?? null,
       mode: memoryRule?.mode ?? "disabled",
       autoConfirm: memoryRule?.autoConfirm === true,
       sourcePaths: memoryRule?.sourcePaths ?? [],
@@ -177,6 +240,7 @@ export function buildProjectDashboard({
         ).length,
       ),
       errorCode: memorySyncState?.errorCode ?? null,
+      globalGateEnabled: memoryGlobalEnabled === true,
     },
     deliverables,
     governedGraph: {
@@ -198,6 +262,14 @@ export function buildProjectDashboard({
       projectTimeReturns,
       { now },
     ),
+    timeReturnSources: {
+      workPlans: projectTimeReturns.filter((entry) =>
+        (entry.sourceType ?? "work_plan") === "work_plan"
+      ).length,
+      shadowEvidence: projectTimeReturns.filter((entry) =>
+        entry.sourceType === "shadow_evidence"
+      ).length,
+    },
     timeReturnCandidates: projectPlans
       .filter((plan) =>
         plan.status === "completed" &&

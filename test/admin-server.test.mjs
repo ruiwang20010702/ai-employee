@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHmac } from "node:crypto";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { startAdminServer } from "../src/admin-server.mjs";
 import { adminHtml } from "../src/admin-ui.mjs";
 import { personalDashboardHtml } from "../src/personal-dashboard-ui.mjs";
 import { draftSha256 } from "../src/decision-quality.mjs";
+import { Store } from "../src/store.mjs";
+import { validateProjectManifest } from "../src/capability-policy.mjs";
+import { createAdminPasswordHash } from "../src/admin-session-auth.mjs";
+
+const execFileAsync = promisify(execFile);
+const adminLoginPassword = "correct horse battery staple";
+const adminPasswordHash = await createAdminPasswordHash(adminLoginPassword, {
+  identifiers: ["ruiwang", "ruiwang@example.com"],
+  salt: Buffer.alloc(16, 13),
+});
 
 test("管理台内嵌脚本可以被浏览器解析", () => {
   const script = adminHtml.match(
@@ -22,6 +37,16 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.match(script, /candidate\?\.conflict\?\.conflicts\?\.find/u);
   assert.match(script, /historical_project_import:'历史项目导入'/u);
   assert.match(script, /sourceQuoteSha256/u);
+  assert.match(adminHtml, /用户名或邮箱/u);
+  assert.match(adminHtml, /再次输入密码/u);
+  assert.match(adminHtml, /首次设置验证（只需这一次）/u);
+  assert.match(script, /\/api\/auth\/register/u);
+  assert.match(script, /\/api\/auth\/login/u);
+  assert.match(script, /\/api\/auth\/session/u);
+  assert.match(script, /X-Foursday-CSRF/u);
+  assert.match(script, /foursday-read/u);
+  assert.doesNotMatch(script, /sessionStorage\.setItem\([^)]*password/iu);
+  assert.match(script, /clearBrowserTokens/u);
   assert.doesNotMatch(script, /\/api\/privacy\/delete/u);
 });
 
@@ -47,11 +72,518 @@ test("个人工作台脚本可解析并展示四项个人闭环", () => {
   assert.match(script, /\/api\/triggers/u);
   assert.match(personalDashboardHtml, /项目记忆自动同步/u);
   assert.match(personalDashboardHtml, /工作台不会替你扩大权限/u);
+  assert.match(personalDashboardHtml, /设置项目记忆范围/u);
+  assert.match(script, /\/memory-settings\/preview/u);
+  assert.match(script, /\/memory-settings\/apply/u);
+  assert.match(personalDashboardHtml, /memory-settings-confirmation/u);
+  assert.match(script, /全局能力仍关闭/u);
   assert.match(script, /sync\.sourcePaths/u);
   assert.match(script, /conflictsPendingReview/u);
   assert.match(script, /weeklyDelegationCard/u);
   assert.match(script, /只规划，不执行/u);
   assert.match(script, /未验证配方不计入预计返还/u);
+  assert.match(personalDashboardHtml, /审阅受控计划/u);
+  assert.match(personalDashboardHtml, /预览不会写入计划账本/u);
+  assert.match(script, /\/preview/u);
+  assert.match(personalDashboardHtml, /确认登记计划/u);
+  assert.match(script, /planHash:preview\.planHash/u);
+  assert.match(script, /登记不等于批准或执行/u);
+  assert.match(personalDashboardHtml, /导入历史项目/u);
+  assert.match(personalDashboardHtml, /确认导入待审候选/u);
+  assert.match(script, /\/api\/projects\/import\/preview/u);
+  assert.match(script, /\/api\/projects\/import\/apply/u);
+  assert.match(script, /正式记忆仍为 0/u);
+  assert.match(personalDashboardHtml, /用户名或邮箱/u);
+  assert.match(personalDashboardHtml, /先创建本机账户/u);
+  assert.match(script, /\/api\/auth\/login/u);
+  assert.match(script, /\/api\/auth\/session/u);
+  assert.match(script, /X-Foursday-CSRF/u);
+  assert.doesNotMatch(script, /sessionStorage\.setItem\([^)]*password/iu);
+  assert.match(personalDashboardHtml, /审阅项目记忆同步/u);
+  assert.match(script, /\/memory-sync\/preview/u);
+  assert.match(script, /\/memory-sync\/apply/u);
+  assert.match(script, /既有授权允许/u);
+  assert.match(script, /timeoutMs:610000/u);
+  assert.match(personalDashboardHtml, /待审项目记忆/u);
+  assert.match(script, /data-memory-decision/u);
+  assert.match(script, /decision==='replaced'/u);
+  assert.match(script, /明确用候选替代这条事实/u);
+  assert.match(personalDashboardHtml, /工作委托单/u);
+  assert.match(personalDashboardHtml, /首次运行时间（本机时间）/u);
+  assert.match(script, /recipeInputField/u);
+  assert.match(script, /readHandoffValues/u);
+  assert.match(script, /每天最多运行次数必须是 1～100/u);
+  assert.match(script, /保存为停用主动工作/u);
+  assert.match(script, /planHash:preview\.planHash/u);
+  assert.doesNotMatch(script, /prompt\(input\.description\)/u);
+});
+
+test("配方先只读预览，再按精确哈希登记且不自动执行", async () => {
+  const { store, config } = fixture();
+  const registered = [];
+  store.registerWorkPlan = async (assessment) => {
+    registered.push(assessment.planHash);
+    return {
+      id: `plan_${assessment.planHash.slice(0, 24)}`,
+      project_id: assessment.plan.projectId,
+      objective: assessment.plan.objective,
+      max_level: assessment.maxLevel,
+      status: assessment.decision === "ALLOW" ? "ready" : "awaiting_approval",
+      policy_decision: assessment.decision,
+      plan_hash: assessment.planHash,
+      plan: assessment.plan,
+      updated_at: "2026-08-13T08:00:00.000Z",
+    };
+  };
+  const manifest = {
+    version: 1,
+    projectId: "project_1",
+    name: "项目",
+    rootDirectory: "/tmp/project",
+    requesters: ["owner"],
+    profile: {
+      objective: "完成项目跟进",
+      successCriteria: [],
+      milestones: [],
+      collaborationObjects: [],
+      selectedRecipeIds: ["project-follow-up"],
+      memoryScope: { allowedTypes: ["project"], retentionDays: 90 },
+    },
+    capabilities: {
+      research: { mode: "automatic" },
+      document_draft: { mode: "automatic" },
+    },
+  };
+  const service = await startAdminServer({
+    store,
+    config,
+    manifestLoader: async () => new Map([[manifest.projectId, manifest]]),
+  });
+  const base = `http://127.0.0.1:${service.server.address().port}`;
+  const readHeaders = {
+    authorization: "Bearer read-secret",
+    "content-type": "application/json",
+  };
+  const writeHeaders = {
+    ...readHeaders,
+    "x-foursday-write-token": "write-secret",
+  };
+  const endpoint = `${base}/api/projects/project_1/recipes/project-follow-up`;
+  const requestBody = { values: { projectFocus: "本周交付" } };
+  try {
+    const previewResponse = await fetch(`${endpoint}/preview`, {
+      method: "POST",
+      headers: readHeaders,
+      body: JSON.stringify(requestBody),
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = await previewResponse.json();
+    assert.equal(preview.schema, "foursday-recipe-plan-preview/v1");
+    assert.match(preview.planHash, /^[a-f0-9]{64}$/u);
+    assert.equal(preview.registration.registered, false);
+    assert.equal(preview.execution.started, false);
+    assert.equal(preview.execution.enabled, false);
+    assert.equal(preview.approvalRequired, true);
+    assert.equal(preview.decision, "REQUIRE_APPROVAL");
+    assert.equal(preview.steps.length, 2);
+    assert.equal(preview.steps.every((step) => step.sideEffect === false), true);
+    assert.equal(registered.length, 0);
+
+    const missingWrite = await fetch(`${endpoint}/instantiate`, {
+      method: "POST",
+      headers: readHeaders,
+      body: JSON.stringify({ ...requestBody, planHash: preview.planHash }),
+    });
+    assert.equal(missingWrite.status, 403);
+    assert.equal(registered.length, 0);
+
+    const missingHash = await fetch(`${endpoint}/instantiate`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify(requestBody),
+    });
+    assert.equal(missingHash.status, 400);
+    assert.equal((await missingHash.json()).error, "reviewed_plan_hash_required");
+    assert.equal(registered.length, 0);
+
+    const stale = await fetch(`${endpoint}/instantiate`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ ...requestBody, planHash: "0".repeat(64) }),
+    });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).error, "recipe_plan_changed_review_again");
+    assert.equal(registered.length, 0);
+
+    const created = await fetch(`${endpoint}/instantiate`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ ...requestBody, planHash: preview.planHash }),
+    });
+    assert.equal(created.status, 201);
+    const createdBody = await created.json();
+    assert.equal(createdBody.plan.planHash, preview.planHash);
+    assert.equal(createdBody.plan.status, "awaiting_approval");
+    assert.deepEqual(registered, [preview.planHash]);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("个人工作台历史项目导入先只读预览，再按摘要创建待审候选", async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), "foursday-admin-history-"));
+  const root = await realpath(temporary);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("/usr/bin/git", ["init", "--quiet", root], {
+    env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+  });
+  await mkdir(join(root, "docs"));
+  await writeFile(
+    join(root, "docs", "history.md"),
+    "历史项目的发布必须完成目标系统回读。\n",
+  );
+  const projectsDirectory = join(root, ".runtime", "projects");
+  const bundle = {
+    schema: "foursday-historical-project-import/v1",
+    project: {
+      projectId: "legacy_project",
+      name: "历史项目",
+      rootDirectory: root,
+      requesterIds: ["owner-1"],
+      profile: {
+        objective: "恢复历史项目上下文",
+        successCriteria: ["历史事实可追溯"],
+        milestones: ["完成首次导入"],
+        collaborationObjects: ["repository"],
+        selectedRecipeIds: ["project-follow-up"],
+        memoryScope: { allowedTypes: ["project", "principle"], retentionDays: 180 },
+      },
+    },
+    sources: [{ id: "history", path: "docs/history.md" }],
+    memories: [{
+      type: "principle",
+      statement: "历史项目的发布必须完成目标系统回读。",
+      factKey: "delivery.readback_rule",
+      sourceId: "history",
+      sourceQuote: "历史项目的发布必须完成目标系统回读。",
+      sensitivity: "internal",
+      confidence: 1,
+      retentionDays: 180,
+    }],
+  };
+  const store = await new Store(join(root, ".runtime", "admin.sqlite")).open();
+  const { config } = fixture();
+  config.projectsDirectory = projectsDirectory;
+  const service = await startAdminServer({ store, config });
+  const base = `http://127.0.0.1:${service.server.address().port}`;
+  const readHeaders = {
+    authorization: "Bearer read-secret",
+    "content-type": "application/json",
+  };
+  const writeHeaders = {
+    ...readHeaders,
+    "x-foursday-write-token": "write-secret",
+  };
+  try {
+    const previewResponse = await fetch(`${base}/api/projects/import/preview`, {
+      method: "POST",
+      headers: readHeaders,
+      body: JSON.stringify({ bundle }),
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = await previewResponse.json();
+    assert.equal(preview.project.action, "create");
+    assert.equal(preview.counts.sources, 1);
+    assert.equal(preview.counts.candidates, 1);
+    assert.equal(preview.candidates[0].statement, bundle.memories[0].statement);
+    assert.equal(preview.databaseWrite, false);
+    assert.equal(preview.memoriesConfirmed, 0);
+    assert.equal(store.listMemories({ projectId: "legacy_project" }).length, 0);
+    await assert.rejects(() => lstat(projectsDirectory));
+
+    const missingWrite = await fetch(`${base}/api/projects/import/apply`, {
+      method: "POST",
+      headers: readHeaders,
+      body: JSON.stringify({ bundle, confirmation: preview.confirmation }),
+    });
+    assert.equal(missingWrite.status, 403);
+
+    const stale = await fetch(`${base}/api/projects/import/apply`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ bundle, confirmation: "IMPORT-WRONG" }),
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(store.listMemories({ projectId: "legacy_project" }).length, 0);
+    await assert.rejects(() => lstat(projectsDirectory));
+
+    const applied = await fetch(`${base}/api/projects/import/apply`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ bundle, confirmation: preview.confirmation }),
+    });
+    assert.equal(applied.status, 201);
+    const result = await applied.json();
+    assert.equal(result.manifestCreated, true);
+    assert.equal(result.candidatesCreated, 1);
+    assert.equal(result.memoriesConfirmed, 0);
+    assert.equal(result.externalSystemsTouched, false);
+    const manifest = JSON.parse(await readFile(
+      join(projectsDirectory, "legacy_project.json"),
+      "utf8",
+    ));
+    assert.equal(manifest.projectId, "legacy_project");
+    const memories = store.listMemories({ projectId: "legacy_project" });
+    assert.equal(memories.length, 1);
+    assert.equal(memories[0].status, "proposed");
+    assert.equal(store.searchMemories({ projectId: "legacy_project" }).length, 0);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("项目记忆同步预览由服务端短期绑定且应用不绕过现有授权", async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), "foursday-admin-memory-sync-"));
+  const root = await realpath(temporary);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await execFileAsync("/usr/bin/git", ["init", "--quiet", root], {
+    env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+  });
+  await mkdir(join(root, "docs"));
+  await writeFile(
+    join(root, "docs", "decisions.md"),
+    "The project must verify every external side effect by reading the target system.\n",
+  );
+  const project = validateProjectManifest({
+    version: 1,
+    projectId: "memory_sync_project",
+    name: "Memory sync project",
+    rootDirectory: root,
+    requesters: ["owner-1"],
+    profile: {
+      objective: "Keep stable project knowledge current",
+      successCriteria: ["Every formal fact has source evidence"],
+      milestones: [],
+      collaborationObjects: ["repository"],
+      selectedRecipeIds: [],
+      memoryScope: { allowedTypes: ["project", "principle"], retentionDays: 180 },
+    },
+    capabilities: {
+      project_memory_proposal: {
+        mode: "approval_required",
+        allowedFactKeyPrefixes: ["principle."],
+        maxRetentionDays: 180,
+        sourcePaths: ["docs/decisions.md"],
+        autoConfirm: false,
+      },
+    },
+  });
+  let modelCalls = 0;
+  const runtime = {
+    async generateArtifact() {
+      modelCalls += 1;
+      const output = JSON.stringify({ memories: [{
+        type: "principle",
+        statement: "Every external side effect requires target-system read-back.",
+        factKey: "principle.readback",
+        sourceId: "source_0",
+        sourceQuote: "The project must verify every external side effect by reading the target system.",
+        sensitivity: "internal",
+        confidence: 1,
+        retentionDays: 180,
+      }] });
+      return { output, runtimeId: "test-runtime", sha256: "a".repeat(64) };
+    },
+  };
+  const store = await new Store(join(root, "memory.sqlite")).open();
+  const { config } = fixture();
+  config.capabilities = new Set(["draft_reply", "project_memory_proposal"]);
+  const service = await startAdminServer({
+    store,
+    config,
+    manifestLoader: async () => new Map([[project.projectId, project]]),
+    artifactRuntimeFactory: async () => runtime,
+  });
+  const base = `http://127.0.0.1:${service.server.address().port}`;
+  const endpoint = `${base}/api/projects/${project.projectId}/memory-sync`;
+  const readHeaders = {
+    authorization: "Bearer read-secret",
+    "content-type": "application/json",
+  };
+  const writeHeaders = {
+    ...readHeaders,
+    "x-foursday-write-token": "write-secret",
+  };
+  const generatePreview = async () => {
+    const response = await fetch(`${endpoint}/preview`, {
+      method: "POST", headers: writeHeaders, body: "{}",
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  try {
+    const readOnlyAttempt = await fetch(`${endpoint}/preview`, {
+      method: "POST", headers: readHeaders, body: "{}",
+    });
+    assert.equal(readOnlyAttempt.status, 403);
+    assert.equal(modelCalls, 0);
+
+    const preview = await generatePreview();
+    assert.equal(modelCalls, 1);
+    assert.equal(preview.modelInvoked, true);
+    assert.equal(preview.externalSystemsTouched, true);
+    assert.equal(preview.databaseWrite, false);
+    assert.equal(preview.confirmationRequired, true);
+    assert.match(preview.previewId, /^[A-Za-z0-9_-]{32}$/u);
+    assert.match(preview.confirmation, /^SYNC-[A-F0-9]{12}$/u);
+    assert.equal(preview.candidates.length, 1);
+    assert.equal(JSON.stringify(preview).includes(root), false);
+    assert.equal(store.listMemories({ projectId: project.projectId }).length, 0);
+
+    const wrongConfirmation = await fetch(`${endpoint}/apply`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ previewId: preview.previewId, confirmation: "SYNC-WRONG" }),
+    });
+    assert.equal(wrongConfirmation.status, 409);
+    assert.equal(store.listMemories({ projectId: project.projectId }).length, 0);
+    const consumed = await fetch(`${endpoint}/apply`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ previewId: preview.previewId, confirmation: preview.confirmation }),
+    });
+    assert.equal(consumed.status, 409);
+
+    const current = await generatePreview();
+    const applied = await fetch(`${endpoint}/apply`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ previewId: current.previewId, confirmation: current.confirmation }),
+    });
+    assert.equal(applied.status, 201);
+    const result = await applied.json();
+    assert.equal(result.candidatesCreated, 1);
+    assert.equal(result.memoriesConfirmed, 0);
+    assert.equal(result.reviewRequired, 1);
+    const [memory] = store.listMemories({ projectId: project.projectId });
+    assert.equal(memory.status, "proposed");
+    assert.equal(store.searchMemories({ projectId: project.projectId }).length, 0);
+
+    const replay = await fetch(`${endpoint}/apply`, {
+      method: "POST",
+      headers: writeHeaders,
+      body: JSON.stringify({ previewId: current.previewId, confirmation: current.confirmation }),
+    });
+    assert.equal(replay.status, 409);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("项目记忆设置先只读绑定来源，再用双令牌和精确摘要更新清单", async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), "foursday-admin-memory-settings-"));
+  const root = await realpath(temporary);
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "docs"));
+  await writeFile(join(root, "docs", "decisions.md"), "# Decisions\nKeep evidence.\n");
+  const projectsDirectory = join(root, "projects");
+  await mkdir(projectsDirectory, { mode: 0o700 });
+  const project = validateProjectManifest({
+    version: 1,
+    projectId: "settings_project",
+    name: "Settings project",
+    rootDirectory: root,
+    requesters: ["owner-1"],
+    profile: {
+      objective: "Configure bounded project memory",
+      successCriteria: [], milestones: [], collaborationObjects: [],
+      selectedRecipeIds: [],
+      memoryScope: { allowedTypes: ["project", "principle"], retentionDays: 90 },
+    },
+    capabilities: {
+      project_memory_proposal: { mode: "disabled" },
+      research: { mode: "automatic", timeoutMs: 120_000 },
+    },
+  });
+  const manifestPath = join(projectsDirectory, `${project.projectId}.json`);
+  await writeFile(manifestPath, `${JSON.stringify(project, null, 2)}\n`, { mode: 0o600 });
+  const { store, config } = fixture();
+  config.projectsDirectory = projectsDirectory;
+  const service = await startAdminServer({ store, config });
+  const base = `http://127.0.0.1:${service.server.address().port}`;
+  const endpoint = `${base}/api/projects/${project.projectId}/memory-settings`;
+  const readHeaders = {
+    authorization: "Bearer read-secret",
+    "content-type": "application/json",
+  };
+  const writeHeaders = {
+    ...readHeaders,
+    "x-foursday-write-token": "write-secret",
+  };
+  const settings = {
+    mode: "approval_required",
+    sourcePaths: ["docs/decisions.md"],
+    allowedFactKeyPrefixes: ["decision."],
+    maxRetentionDays: 90,
+    autoConfirm: false,
+    expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  };
+  try {
+    const before = await readFile(manifestPath, "utf8");
+    const missingPreviewWrite = await fetch(`${endpoint}/preview`, {
+      method: "POST", headers: readHeaders, body: JSON.stringify({ settings }),
+    });
+    assert.equal(missingPreviewWrite.status, 403);
+    assert.equal(await readFile(manifestPath, "utf8"), before);
+    const previewResponse = await fetch(`${endpoint}/preview`, {
+      method: "POST", headers: writeHeaders, body: JSON.stringify({ settings }),
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = await previewResponse.json();
+    assert.equal(preview.databaseWrite, false);
+    assert.equal(preview.externalSystemsTouched, false);
+    assert.equal(preview.effectiveAutomaticSync, false);
+    assert.equal(preview.sources[0].path, "docs/decisions.md");
+    assert.equal(await readFile(manifestPath, "utf8"), before);
+
+    const missingWrite = await fetch(`${endpoint}/apply`, {
+      method: "POST", headers: readHeaders,
+      body: JSON.stringify({
+        settings, digest: preview.digest, confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(missingWrite.status, 403);
+    assert.equal(await readFile(manifestPath, "utf8"), before);
+
+    const stale = await fetch(`${endpoint}/apply`, {
+      method: "POST", headers: writeHeaders,
+      body: JSON.stringify({ settings, digest: preview.digest, confirmation: "wrong" }),
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(await readFile(manifestPath, "utf8"), before);
+
+    const applied = await fetch(`${endpoint}/apply`, {
+      method: "POST", headers: writeHeaders,
+      body: JSON.stringify({
+        settings, digest: preview.digest, confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(applied.status, 200);
+    const result = await applied.json();
+    assert.equal(result.projectManifestWrite, true);
+    assert.equal(result.databaseWrite, false);
+    assert.equal(result.effectiveAutomaticSync, false);
+    const current = JSON.parse(await readFile(manifestPath, "utf8"));
+    assert.equal(current.capabilities.project_memory_proposal.mode, "approval_required");
+    assert.deepEqual(
+      current.capabilities.project_memory_proposal.sourcePaths,
+      ["docs/decisions.md"],
+    );
+    assert.equal(current.capabilities.research.mode, "automatic");
+    assert.equal((await lstat(manifestPath)).mode & 0o777, 0o600);
+  } finally {
+    await service.stop("test");
+  }
 });
 
 test("项目接口只读展示自动记忆授权、同步状态和待审例外", async () => {
@@ -95,7 +627,7 @@ test("项目接口只读展示自动记忆授权、同步状态和待审例外",
     humanActiveMinutes: 10,
     returnedMinutes: 50,
     status: "confirmed",
-    confirmedAt: "2026-08-13T01:00:00.000Z",
+    confirmedAt: new Date().toISOString(),
   }];
   store.getCheckpoint = async (key) => key.endsWith(":status")
     ? JSON.stringify({
@@ -131,6 +663,8 @@ test("项目接口只读展示自动记忆授权、同步状态和待审例外",
     const body = await response.json();
     const [project] = body.items;
     assert.equal(project.memory.proposed, 1);
+    assert.equal(project.memory.reviewItems.length, 1);
+    assert.equal(project.memory.reviewItems[0].id, "memory-1");
     assert.equal(project.memorySync.mode, "automatic");
     assert.equal(project.memorySync.autoConfirm, true);
     assert.deepEqual(project.memorySync.sourcePaths, ["docs/decisions.md"]);
@@ -189,12 +723,24 @@ test("主动触发器默认停用、列表脱敏且启用受全局能力门禁",
     "content-type": "application/json",
   };
   try {
+    const triggerBody = {
+      id: "daily-follow-up", projectId: "project_1", recipeId: "project-follow-up",
+      requesterId: "owner", kind: "schedule", values: { projectFocus: "每日风险" },
+      schedule: { startsAt: "2026-08-13T01:00:00.000Z", intervalMinutes: 1_440 },
+    };
+    const previewResponse = await fetch(`${base}/api/projects/project_1/recipes/project-follow-up/preview`, {
+      method: "POST", headers, body: JSON.stringify({ values: triggerBody.values }),
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = await previewResponse.json();
+    const stale = await fetch(`${base}/api/triggers`, {
+      method: "POST", headers, body: JSON.stringify({ ...triggerBody, planHash: "0".repeat(64) }),
+    });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).error, "trigger_plan_changed_review_again");
+    assert.equal(triggers.length, 0);
     const created = await fetch(`${base}/api/triggers`, {
-      method: "POST", headers, body: JSON.stringify({
-        id: "daily-follow-up", projectId: "project_1", recipeId: "project-follow-up",
-        requesterId: "owner", kind: "schedule", values: { projectFocus: "每日风险" },
-        schedule: { startsAt: "2026-08-13T01:00:00.000Z", intervalMinutes: 1_440 },
-      }),
+      method: "POST", headers, body: JSON.stringify({ ...triggerBody, planHash: preview.planHash }),
     });
     assert.equal(created.status, 201);
     assert.equal((await created.json()).status, "disabled");
@@ -415,6 +961,9 @@ function fixture({ taskReply = "准备回复" } = {}) {
   const config = {
     adminHost: "127.0.0.1", adminPort: 0,
     adminReadToken: "read-secret", adminWriteToken: "write-secret",
+    adminLoginIdentifiers: ["ruiwang", "ruiwang@example.com"],
+    adminPasswordHash,
+    adminSessionTtlMs: 28_800_000,
     dwsPath: "/bin/sh", codexPath: "/bin/sh", capabilities: new Set(["draft_reply"]),
     requiredComponents: [], requiredOperationalChecks: [], heartbeatStaleMs: 90_000, externalCheckStaleMs: 60_000,
     shadowMinimumSamples: 100, shadowMinimumNoReplyAccuracy: 0.95,
@@ -564,6 +1113,221 @@ test("管理台强制读取和写入令牌，并返回安全页面", async () =>
     });
     assert.equal(paused.status, 200);
     assert.equal((await paused.json()).paused, true);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("用户名或邮箱密码登录签发跨页面会话且写操作要求同源 CSRF", async () => {
+  const { store, config } = fixture();
+  const service = await startAdminServer({ store, config });
+  const { port } = service.server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const originHeaders = {
+    origin: base,
+    "content-type": "application/json",
+  };
+  try {
+    const methods = await fetch(`${base}/api/auth/methods`);
+    assert.deepEqual(await methods.json(), {
+      passwordLogin: true,
+      registrationAvailable: false,
+      registrationRequiresTokens: true,
+      legacyTokenLogin: true,
+      sessionTtlMs: 28_800_000,
+    });
+
+    const wrongOrigin = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: { ...originHeaders, origin: "http://example.com" },
+      body: JSON.stringify({ identifier: "ruiwang", password: adminLoginPassword }),
+    });
+    assert.equal(wrongOrigin.status, 403);
+
+    const unknown = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: originHeaders,
+      body: JSON.stringify({ identifier: "unknown", password: adminLoginPassword }),
+    });
+    assert.equal(unknown.status, 401);
+    assert.equal((await unknown.json()).error, "invalid_credentials");
+
+    const login = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: originHeaders,
+      body: JSON.stringify({
+        identifier: "RUIWANG@example.com",
+        password: adminLoginPassword,
+      }),
+    });
+    assert.equal(login.status, 200);
+    const loginBody = await login.json();
+    assert.equal(loginBody.identifier, "ruiwang@example.com");
+    assert.match(loginBody.csrfToken, /^[A-Za-z0-9_-]{43}$/u);
+    const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+    assert.match(login.headers.get("set-cookie"), /HttpOnly; SameSite=Strict/u);
+
+    const session = await fetch(`${base}/api/auth/session`, {
+      headers: { cookie },
+    });
+    assert.equal(session.status, 200);
+    assert.equal((await session.json()).identifier, "ruiwang@example.com");
+    assert.equal((await fetch(`${base}/api/overview`, { headers: { cookie } })).status, 200);
+
+    const missingCsrf = await fetch(`${base}/api/system/pause`, {
+      method: "POST",
+      headers: { cookie, ...originHeaders },
+      body: "{}",
+    });
+    assert.equal(missingCsrf.status, 403);
+    assert.equal((await missingCsrf.json()).error, "csrf_required");
+
+    const pause = await fetch(`${base}/api/system/pause`, {
+      method: "POST",
+      headers: {
+        cookie,
+        ...originHeaders,
+        "x-foursday-csrf": loginBody.csrfToken,
+      },
+      body: "{}",
+    });
+    assert.equal(pause.status, 200);
+    assert.equal((await pause.json()).paused, true);
+
+    const logout = await fetch(`${base}/api/auth/logout`, {
+      method: "POST",
+      headers: {
+        cookie,
+        ...originHeaders,
+        "x-foursday-csrf": loginBody.csrfToken,
+      },
+      body: "{}",
+    });
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers.get("set-cookie"), /Max-Age=0/u);
+    assert.equal((await fetch(`${base}/api/overview`, { headers: { cookie } })).status, 401);
+  } finally {
+    await service.stop("test");
+  }
+});
+
+test("首次网页注册要求双令牌、两次密码一致且成功后永久关闭入口", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "foursday-admin-register-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = join(directory, "production.json");
+  const original = {
+    DATABASE_URL: "env://DATABASE_URL",
+    AI_EMPLOYEE_ADMIN_READ_TOKEN: "env://ADMIN_READ_TOKEN",
+    AI_EMPLOYEE_ADMIN_WRITE_TOKEN: "env://ADMIN_WRITE_TOKEN",
+  };
+  await writeFile(configPath, `${JSON.stringify(original)}\n`, { mode: 0o600 });
+  const { store, config } = fixture();
+  config.adminLoginIdentifiers = [];
+  config.adminPasswordHash = null;
+  const service = await startAdminServer({ store, config, adminLoginConfigPath: configPath });
+  const base = `http://127.0.0.1:${service.server.address().port}`;
+  const originHeaders = { origin: base, "content-type": "application/json" };
+  const body = {
+    identifier: "RuiWang",
+    email: "RuiWang@example.com",
+    password: adminLoginPassword,
+    passwordConfirmation: adminLoginPassword,
+  };
+  try {
+    assert.deepEqual(await (await fetch(`${base}/api/auth/methods`)).json(), {
+      passwordLogin: false,
+      registrationAvailable: true,
+      registrationRequiresTokens: true,
+      legacyTokenLogin: true,
+      sessionTtlMs: 28_800_000,
+    });
+
+    const wrongOrigin = await fetch(`${base}/api/auth/register`, {
+      method: "POST",
+      headers: {
+        ...originHeaders,
+        origin: "http://example.com",
+        authorization: "Bearer read-secret",
+        "x-foursday-write-token": "write-secret",
+      },
+      body: JSON.stringify(body),
+    });
+    assert.equal(wrongOrigin.status, 403);
+
+    const missingOwnership = await fetch(`${base}/api/auth/register`, {
+      method: "POST",
+      headers: originHeaders,
+      body: JSON.stringify(body),
+    });
+    assert.equal(missingOwnership.status, 403);
+    assert.equal((await missingOwnership.json()).error, "bootstrap_authorization_failed");
+    assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), original);
+
+    const mismatch = await fetch(`${base}/api/auth/register`, {
+      method: "POST",
+      headers: {
+        ...originHeaders,
+        authorization: "Bearer read-secret",
+        "x-foursday-write-token": "write-secret",
+      },
+      body: JSON.stringify({ ...body, passwordConfirmation: "different password value" }),
+    });
+    assert.equal(mismatch.status, 400);
+    assert.equal((await mismatch.json()).error, "password_confirmation_mismatch");
+    assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), original);
+
+    const registration = await fetch(`${base}/api/auth/register`, {
+      method: "POST",
+      headers: {
+        ...originHeaders,
+        authorization: "Bearer read-secret",
+        "x-foursday-write-token": "write-secret",
+      },
+      body: JSON.stringify(body),
+    });
+    assert.equal(registration.status, 201);
+    const result = await registration.json();
+    assert.equal(result.registered, true);
+    assert.equal(result.identifier, "ruiwang");
+    assert.match(result.csrfToken, /^[A-Za-z0-9_-]{43}$/u);
+    assert.match(registration.headers.get("set-cookie"), /HttpOnly; SameSite=Strict/u);
+    assert.doesNotMatch(JSON.stringify(result), /correct|horse|battery|staple|read-secret|write-secret|scrypt\$/u);
+
+    const saved = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(saved.AI_EMPLOYEE_ADMIN_LOGIN_IDENTIFIERS, "ruiwang,ruiwang@example.com");
+    assert.doesNotMatch(saved.AI_EMPLOYEE_ADMIN_PASSWORD_HASH, /correct|horse|battery|staple/u);
+    assert.equal(saved.AI_EMPLOYEE_ADMIN_READ_TOKEN, original.AI_EMPLOYEE_ADMIN_READ_TOKEN);
+    assert.equal(saved.AI_EMPLOYEE_ADMIN_WRITE_TOKEN, original.AI_EMPLOYEE_ADMIN_WRITE_TOKEN);
+    assert.equal((await lstat(configPath)).mode & 0o077, 0);
+
+    assert.deepEqual(await (await fetch(`${base}/api/auth/methods`)).json(), {
+      passwordLogin: true,
+      registrationAvailable: false,
+      registrationRequiresTokens: true,
+      legacyTokenLogin: true,
+      sessionTtlMs: 28_800_000,
+    });
+    const secondRegistration = await fetch(`${base}/api/auth/register`, {
+      method: "POST",
+      headers: {
+        ...originHeaders,
+        authorization: "Bearer read-secret",
+        "x-foursday-write-token": "write-secret",
+      },
+      body: JSON.stringify(body),
+    });
+    assert.equal(secondRegistration.status, 409);
+    assert.equal((await secondRegistration.json()).error, "registration_closed");
+
+    const login = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: originHeaders,
+      body: JSON.stringify({
+        identifier: "RUIWANG@example.com",
+        password: adminLoginPassword,
+      }),
+    });
+    assert.equal(login.status, 200);
   } finally {
     await service.stop("test");
   }

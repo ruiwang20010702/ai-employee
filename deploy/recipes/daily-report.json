@@ -17,11 +17,40 @@
   ],
   "steps": [
     {
+      "id": "read-repository-activity",
+      "capability": "repository_activity_read",
+      "description": "读取 {{reportDate}} 当天的精确 Git 提交活动",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {
+        "reportDate": "{{reportDate}}",
+        "utcOffset": "+08:00"
+      },
+      "expectedEvidence": "返回绑定提交、时间窗口、路径范围和内容摘要的结构化 Git 活动证据",
+      "rollback": null
+    },
+    {
+      "id": "read-project-work-history",
+      "capability": "project_work_history_read",
+      "description": "读取 {{reportDate}} 当天的受治理项目计划、执行状态和回读证据",
+      "workingDirectory": "{{projectRoot}}",
+      "inputs": {
+        "reportDate": "{{reportDate}}",
+        "utcOffset": "+08:00"
+      },
+      "expectedEvidence": "返回仅属于当前项目和日期窗口的终态计划与步骤证据摘要",
+      "rollback": null
+    },
+    {
       "id": "research-evidence",
       "capability": "research",
       "description": "整理 {{reportDate}} 的已授权项目证据，区分已完成、进行中和阻塞项",
       "workingDirectory": "{{projectRoot}}",
-      "inputs": {},
+      "inputs": {
+        "evidenceStepIds": [
+          "read-repository-activity",
+          "read-project-work-history"
+        ]
+      },
       "expectedEvidence": "返回包含来源路径、状态边界和未知项的研究证据",
       "rollback": null
     },
@@ -30,8 +59,10 @@
       "capability": "document_draft",
       "description": "根据研究证据起草 {{reportDate}} 工作总结",
       "workingDirectory": "{{projectRoot}}",
-      "inputs": {},
-      "expectedEvidence": "生成非空 Markdown 草稿及内容哈希",
+      "inputs": {
+        "evidenceStepIds": ["research-evidence"]
+      },
+      "expectedEvidence": "生成非空 Markdown 草稿，由执行器计算并绑定内容哈希",
       "rollback": null
     }
   ]

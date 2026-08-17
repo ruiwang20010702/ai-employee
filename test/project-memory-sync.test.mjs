@@ -350,3 +350,41 @@ test("全局能力关闭时后台同步不读取项目、不调用模型也不�
   assert.equal(runtimeCalls, 0);
   assert.equal(store.listMemories({ projectId: "memory_sync_project" }).length, 0);
 });
+
+test("项目授权过期后手动和后台同步都停止且不调用模型", async (t) => {
+  const { root, project, store, runtime } = await fixture(t);
+  const expired = structuredClone(project);
+  expired.capabilities.project_memory_proposal.expiresAt =
+    new Date(now.getTime() - 1_000).toISOString();
+  let runtimeCalls = 0;
+  await assert.rejects(
+    () => previewProjectMemorySync({
+      project: expired,
+      store,
+      runtime: {
+        async generateArtifact(...args) {
+          runtimeCalls += 1;
+          return runtime.generateArtifact(...args);
+        },
+      },
+      now,
+    }),
+    /authorization has expired/u,
+  );
+  const summary = await syncAutomaticProjectMemoriesOnce({
+    store,
+    projectsDirectory: join(root, "unused"),
+    runtimeFactory: async () => {
+      runtimeCalls += 1;
+      return runtime;
+    },
+    capabilities: memoryCapabilities,
+    manifestLoader: async () => new Map([[expired.projectId, expired]]),
+    now,
+  });
+  assert.equal(summary.expiredProjects, 1);
+  assert.equal(summary.automaticProjects, 0);
+  assert.equal(summary.failures.length, 0);
+  assert.equal(runtimeCalls, 0);
+  assert.equal(store.listMemories({ projectId: project.projectId }).length, 0);
+});

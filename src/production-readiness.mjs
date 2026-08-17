@@ -8,6 +8,7 @@ import {
   assertMigrationStatus,
   inspectMigrationStatus,
 } from "./migration-status.mjs";
+import { createAdminSessionManager } from "./admin-session-auth.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -55,14 +56,19 @@ export async function checkCodexRuntime(
   const checks = parsed?.checks && !Array.isArray(parsed.checks)
     ? Object.entries(parsed.checks)
     : [];
-  const advisories = checks
-    .filter(([, check]) => check?.status === "warning")
-    .map(([name]) => name);
+  const warningChecks = checks.filter(([, check]) => check?.status === "warning");
+  const advisories = warningChecks.map(([name]) => name);
+  const allowedAdvisory = ([name, check]) =>
+    name === "updates.status" ||
+    (
+      name === "mcp.config" &&
+      check?.summary === "MCP configuration has optional issues"
+    );
   const onlyAllowedAdvisories =
     parsed?.overallStatus === "warning" &&
     checks.length > 0 &&
     advisories.length > 0 &&
-    advisories.every((name) => name === "updates.status") &&
+    warningChecks.every(allowedAdvisory) &&
     checks.every(([, check]) => ["ok", "warning"].includes(check?.status));
   if (parsed?.overallStatus !== "ok" && !onlyAllowedAdvisories) {
     throw new Error("Codex runtime doctor reported a non-ok status");
@@ -168,6 +174,11 @@ export function validateProductionReadinessConfig(
   if (!["127.0.0.1", "::1", "localhost"].includes(config.adminHost)) {
     throw new Error("AI_EMPLOYEE_ADMIN_HOST must remain loopback-only");
   }
+  createAdminSessionManager({
+    identifiers: config.adminLoginIdentifiers ?? [],
+    passwordHash: config.adminPasswordHash ?? null,
+    sessionTtlMs: config.adminSessionTtlMs ?? 28_800_000,
+  });
   if (config.alertWebhookUrl) {
     const alertUrl = new URL(config.alertWebhookUrl);
     if (alertUrl.protocol !== "https:") {

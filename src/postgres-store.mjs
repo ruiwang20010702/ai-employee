@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { DataCipher } from "./crypto.mjs";
 import {
   capabilityBudgetSnapshot,
@@ -38,7 +39,10 @@ import {
   scopedPauseKey,
 } from "./scoped-pause.mjs";
 import { validateWorkPlanRevision } from "./work-plan.mjs";
-import { buildTimeReturnProposal } from "./time-return.mjs";
+import {
+  buildConfirmedShadowTimeReturn,
+  buildTimeReturnProposal,
+} from "./time-return.mjs";
 import { nextScheduledRun, validateWorkTrigger } from "./work-trigger.mjs";
 import { buildGraphProjection } from "./governed-work-graph.mjs";
 import {
@@ -129,6 +133,8 @@ function timeReturnFromRow(row, cipher) {
   return {
     id: row.id,
     workPlanId: row.work_plan_id,
+    sourceType: "work_plan",
+    sourceId: row.work_plan_id,
     projectId: row.project_id,
     recipeId: row.recipe_id,
     baselineMinutes: row.baseline_minutes,
@@ -141,6 +147,32 @@ function timeReturnFromRow(row, cipher) {
     confirmedBy: row.confirmed_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    confirmedAt: row.status === "confirmed" ? row.updated_at : null,
+  };
+}
+
+function shadowTimeReturnFromRow(row, cipher) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    workPlanId: null,
+    sourceType: "shadow_evidence",
+    sourceId: row.evidence_sha256,
+    projectId: row.project_id,
+    recipeId: row.recipe_id,
+    planHash: row.plan_hash,
+    repositoryCommit: row.repository_commit,
+    baselineMinutes: row.baseline_minutes,
+    humanActiveMinutes: row.human_active_minutes,
+    returnedMinutes: row.returned_minutes,
+    baselineMethod: row.baseline_method,
+    outcomeEvidence: JSON.parse(cipher.decrypt(row.outcome_evidence_ciphertext)),
+    status: "confirmed",
+    proposedBy: row.confirmed_by,
+    confirmedBy: row.confirmed_by,
+    createdAt: row.imported_at,
+    updatedAt: row.confirmed_at,
+    confirmedAt: row.confirmed_at,
   };
 }
 
@@ -2593,6 +2625,46 @@ export class PostgresStore {
     return result.rows.map((row) => workPlanFromRow(row, this.cipher));
   }
 
+  async listProjectWorkHistory({
+    projectId,
+    start,
+    end,
+    excludePlanHash = null,
+    limit = 50,
+  }) {
+    const from = new Date(start);
+    const to = new Date(end);
+    if (
+      typeof projectId !== "string" || !projectId.trim() ||
+      Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to ||
+      !Number.isSafeInteger(limit) || limit < 1 || limit > 101 ||
+      (excludePlanHash != null && !/^[a-f0-9]{64}$/u.test(excludePlanHash))
+    ) {
+      throw new Error("Project work history query is invalid");
+    }
+    const result = await this.pool.query(
+      `SELECT * FROM work_plans
+       WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+         AND project_id = $2
+         AND status IN ('completed','failed','cancelled')
+         AND updated_at >= $3 AND updated_at < $4
+         AND ($5::text IS NULL OR plan_hash <> $5)
+       ORDER BY updated_at DESC, id DESC LIMIT $6`,
+      [
+        this.tenantId,
+        projectId.trim(),
+        from.toISOString(),
+        to.toISOString(),
+        excludePlanHash,
+        limit,
+      ],
+    );
+    return Promise.all(result.rows.map(async (row) => ({
+      ...workPlanFromRow(row, this.cipher),
+      steps: await this.listWorkPlanSteps(row.id),
+    })));
+  }
+
   async getWorkPlanApproval(id) {
     const result = await this.pool.query(
       `SELECT a.* FROM work_plan_approvals a
@@ -3220,13 +3292,86 @@ export class PostgresStore {
     return this.getTimeReturn(entryId);
   }
 
+  async importConfirmedShadowTimeReturn(input, actor, now = new Date()) {
+    const confirmedBy = String(actor ?? "").trim();
+    if (!confirmedBy) throw new Error("Shadow time return importer is required");
+    const proof = buildConfirmedShadowTimeReturn(input);
+    let result;
+    await this.transaction(async (client) => {
+      const inserted = await client.query(
+        `INSERT INTO shadow_time_return_entries(
+           id, tenant_id, evidence_sha256, project_id, recipe_id, plan_hash,
+           repository_commit, baseline_minutes, human_active_minutes,
+           returned_minutes, baseline_method, outcome_evidence_ciphertext,
+           confirmed_by, confirmed_at, imported_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ON CONFLICT DO NOTHING
+         RETURNING *`,
+        [
+          proof.id,
+          this.tenantId,
+          proof.sourceId,
+          proof.projectId,
+          proof.recipeId,
+          proof.planHash,
+          proof.repositoryCommit,
+          proof.baselineMinutes,
+          proof.humanActiveMinutes,
+          proof.returnedMinutes,
+          proof.baselineMethod,
+          this.cipher.encrypt(JSON.stringify(proof.outcomeEvidence)),
+          confirmedBy,
+          proof.confirmedAt,
+          now,
+        ],
+      );
+      if (inserted.rowCount === 0) {
+        const selected = await client.query(
+          `SELECT * FROM shadow_time_return_entries
+           WHERE tenant_id = $1 AND evidence_sha256 = $2 FOR UPDATE`,
+          [this.tenantId, proof.sourceId],
+        );
+        const existing = shadowTimeReturnFromRow(selected.rows[0], this.cipher);
+        const comparable = [
+          "projectId", "recipeId", "planHash", "repositoryCommit",
+          "baselineMinutes", "humanActiveMinutes", "returnedMinutes",
+          "baselineMethod",
+        ];
+        if (
+          !existing ||
+          comparable.some((key) => existing[key] !== proof[key]) ||
+          new Date(existing.confirmedAt).toISOString() !== proof.confirmedAt ||
+          !isDeepStrictEqual(existing.outcomeEvidence, proof.outcomeEvidence)
+        ) {
+          throw new Error("Shadow time return evidence already exists with different facts");
+        }
+        result = { entry: existing, created: false };
+        return;
+      }
+      const entry = shadowTimeReturnFromRow(inserted.rows[0], this.cipher);
+      await this.audit(client, {
+        eventType: "time_return.shadow_imported",
+        actor: confirmedBy,
+        details: { timeReturnId: entry.id, evidenceSha256: proof.sourceId },
+      });
+      result = { entry, created: true };
+    });
+    return result;
+  }
+
   async getTimeReturn(id) {
     const result = await this.pool.query(
       `SELECT * FROM time_return_entries
        WHERE tenant_id = $1 AND id = $2`,
       [this.tenantId, id],
     );
-    return timeReturnFromRow(result.rows[0], this.cipher);
+    if (result.rows[0]) return timeReturnFromRow(result.rows[0], this.cipher);
+    const shadow = await this.pool.query(
+      `SELECT * FROM shadow_time_return_entries
+       WHERE tenant_id = $1 AND id = $2`,
+      [this.tenantId, id],
+    );
+    return shadowTimeReturnFromRow(shadow.rows[0], this.cipher);
   }
 
   async listTimeReturns({ projectId = null, status = null, limit = 500 } = {}) {
@@ -3253,7 +3398,29 @@ export class PostgresStore {
        ORDER BY updated_at DESC, id DESC LIMIT $${values.length}`,
       values,
     );
-    return result.rows.map((row) => timeReturnFromRow(row, this.cipher));
+    const regular = result.rows.map((row) => timeReturnFromRow(row, this.cipher));
+    if (status && status !== "confirmed") return regular;
+    const shadowValues = [this.tenantId];
+    const shadowClauses = ["tenant_id = $1"];
+    if (projectId) {
+      shadowValues.push(projectId);
+      shadowClauses.push(`project_id = $${shadowValues.length}`);
+    }
+    shadowValues.push(limit);
+    const shadow = await this.pool.query(
+      `SELECT * FROM shadow_time_return_entries
+       WHERE ${shadowClauses.join(" AND ")}
+       ORDER BY confirmed_at DESC, id DESC LIMIT $${shadowValues.length}`,
+      shadowValues,
+    );
+    return [
+      ...regular,
+      ...shadow.rows.map((row) => shadowTimeReturnFromRow(row, this.cipher)),
+    ]
+      .sort((left, right) =>
+        new Date(right.updatedAt) - new Date(left.updatedAt) || right.id.localeCompare(left.id)
+      )
+      .slice(0, limit);
   }
 
   async decideTimeReturn(id, decision, actor, now = new Date()) {
@@ -4220,6 +4387,27 @@ export class PostgresStore {
         );
     }
     const timeReturnRows = timeReturnResult.rows;
+    let shadowTimeReturnResult;
+    if (selector.type === "project") {
+      shadowTimeReturnResult = await client.query(
+        `SELECT * FROM shadow_time_return_entries
+         WHERE tenant_id = $1 AND project_id = $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    } else if (selector.type === "time") {
+      shadowTimeReturnResult = await client.query(
+        `SELECT * FROM shadow_time_return_entries
+         WHERE tenant_id = $1 AND confirmed_at < $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    } else {
+      shadowTimeReturnResult = await client.query(
+        `SELECT * FROM shadow_time_return_entries
+         WHERE tenant_id = $1 AND confirmed_by = $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    }
+    const shadowTimeReturnRows = shadowTimeReturnResult.rows;
     let workTriggerResult = { rows: [] };
     if (selector.type === "project") {
       workTriggerResult = await client.query(
@@ -4335,6 +4523,7 @@ export class PostgresStore {
       ...planRows.map((row) => row.id),
       ...memoryRows.map((row) => row.id),
       ...timeReturnRows.map((row) => row.id),
+      ...shadowTimeReturnRows.map((row) => row.id),
       ...workTriggerRows.map((row) => row.id),
     ]);
     if (selector.type !== "time") relatedValues.add(selector.value);
@@ -4353,6 +4542,7 @@ export class PostgresStore {
       ...(selector.type === "project" ? [selector.value] : []),
       ...planRows.map((row) => row.project_id),
       ...memoryRows.map((row) => row.project_id),
+      ...shadowTimeReturnRows.map((row) => row.project_id),
     ].filter((value) => value && value !== "deleted"));
     const graphNodeResult = graphProjectIds.size === 0
       ? { rows: [] }
@@ -4384,7 +4574,14 @@ export class PostgresStore {
         row,
         `${row.project_key}:${row.authorization_hash}:${row.capability}`,
       )),
-      timeReturns: timeReturnRows.map(token),
+      timeReturns: [
+        ...timeReturnRows,
+        ...shadowTimeReturnRows.map((row) => ({
+          ...row,
+          status: "confirmed",
+          updated_at: row.confirmed_at,
+        })),
+      ].map(token),
       workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map(token),
       auditEvents: auditRows.map(token),
       graphNodes: graphNodeResult.rows.map(token),
@@ -4417,6 +4614,7 @@ export class PostgresStore {
           capability: row.capability,
         })),
         timeReturns: timeReturnRows.map((row) => row.id),
+        shadowTimeReturns: shadowTimeReturnRows.map((row) => row.id),
         workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map((row) => row.id),
         auditEvents: auditRows.map((row) => row.id),
         graphProjects: [...graphProjectIds].sort(),
@@ -4437,6 +4635,7 @@ export class PostgresStore {
         `LOCK TABLE tasks, messages, privacy_erased_messages, approvals, side_effects, decision_reviews,
            decision_review_events, work_plans, work_plan_approvals,
            work_plan_steps, capability_budget_usage, time_return_entries,
+           shadow_time_return_entries,
            work_trigger_runs, work_triggers,
            memory_items, checkpoints, audit_events,
            governed_graph_edges, governed_graph_nodes
@@ -4562,6 +4761,13 @@ export class PostgresStore {
           `DELETE FROM time_return_entries
            WHERE tenant_id = $1 AND id = ANY($2::text[])`,
           [this.tenantId, candidates.ids.timeReturns],
+        );
+      }
+      if (candidates.ids.shadowTimeReturns.length > 0) {
+        await client.query(
+          `DELETE FROM shadow_time_return_entries
+           WHERE tenant_id = $1 AND id = ANY($2::text[])`,
+          [this.tenantId, candidates.ids.shadowTimeReturns],
         );
       }
       if (candidates.ids.workTriggers.length > 0) {

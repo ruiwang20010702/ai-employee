@@ -132,6 +132,7 @@ test("Foursday 影子闭环把主动项目记忆和本人确认的时间返还�
     timeReturns: store.listTimeReturns({ projectId: manifest.projectId }),
     recipes: [...recipes.values()],
     planSteps: new Map([[plan.id, store.listWorkPlanSteps(plan.id)]]),
+    now,
   });
   assert.equal(dashboard.memory.confirmed, 1);
   assert.equal(dashboard.plans.completed, 1);

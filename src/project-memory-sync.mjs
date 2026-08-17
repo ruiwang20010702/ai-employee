@@ -17,10 +17,13 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function memoryRule(project) {
+function memoryRule(project, now = new Date()) {
   const rule = project?.capabilities?.project_memory_proposal;
   if (!rule || rule.mode === "disabled") {
     throw new Error("Project memory automation is not authorized for this project");
+  }
+  if (rule.expiresAt && new Date(rule.expiresAt) <= now) {
+    throw new Error("Project memory automation authorization has expired");
   }
   if (!Array.isArray(rule.sourcePaths) || rule.sourcePaths.length === 0) {
     throw new Error("Project memory automation requires fixed sourcePaths");
@@ -133,7 +136,7 @@ export async function previewProjectMemorySync({
   if (!runtime?.generateArtifact) {
     throw new Error("Project memory sync requires a structured agent runtime");
   }
-  const rule = memoryRule(project);
+  const rule = memoryRule(project, now);
   const sources = sourceDeclarations(rule.sourcePaths);
   const sourceOnlyBundle = {
     schema: historicalProjectImportSchema,
@@ -232,7 +235,7 @@ export async function applyProjectMemorySync({
   if (!(capabilities instanceof Set) || !capabilities.has("project_memory_proposal")) {
     throw new Error("Project memory sync is disabled by the global capability gate");
   }
-  const rule = memoryRule(project);
+  const rule = memoryRule(project, now);
   assertGeneratedBundleAuthorization(generated?.bundle, rule);
   const current = await buildPreview({
     project,

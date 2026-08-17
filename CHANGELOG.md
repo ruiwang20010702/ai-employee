@@ -6,23 +6,50 @@ Notable changes to this project are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-Target package version: `0.6.0`. This section has not been published as a
-GitHub release; the latest tagged public preview remains `v0.5.0-rc.1`.
+Post-`v0.6.0-rc.1` candidates. Nothing in this section is part of the tagged
+preview or production until a later exact-commit release.
+
+### Added
+
+- A one-time local owner registration page collects a login identifier, optional email alias, and matching password confirmation. Existing read/write tokens prove ownership once; success atomically persists the verifier, signs the owner in, and permanently closes registration.
+- The operations console and personal cockpit now share one local username-or-email and password session, while the existing read/write tokens remain available as an API and recovery compatibility path.
+- A dry-run-first `config:set-admin-login` command creates the owner login with a salted `scrypt` verifier without accepting a password on the command line or storing plaintext.
+- An explicit, default-zero-write admission flow for an owner-confirmed project-recipe shadow proof. It rechecks the evidence SHA, isolated ledger, project authorization, recipe baseline, and local confirmation before an idempotent production time-return import.
+- Migration 022 stores confirmed shadow time returns separately from production work plans, while the personal cockpit reports both sources in one north-star total.
+- Read-only recipe steps now declare artifact data flow through `evidenceStepIds`; downstream document generation consumes the exact earlier research evidence instead of inferring context from step order.
+- The daily-report recipe starts with a deterministic, date-bounded repository-activity node so reports can cite exact commits and changed files within the authorized path scope instead of inferring daily work from README status.
+- Daily reports also consume a project-scoped, date-bounded summary of terminal governed plans and step read-back metadata; historical evidence bodies are not recopied into the prompt, and shadow runs read only their isolated ledger.
+- Personal-cockpit recipes now require a read-only plan preview before registration. The second action must submit the exact reviewed plan hash; registration still does not approve or execute the plan.
+- The personal cockpit can now preview a local historical-project JSON bundle, show source-bound candidates, skips, duplicates, and conflicts, and apply only the exact typed `IMPORT-...` digest. Application creates proposed memory only and touches no external system.
+- Project-memory sync is now reviewable from the cockpit: an explicit write-token action invokes the configured agent against isolated authorized files, keeps the generated bundle server-side for ten minutes, and applies it once without exposing a mutable payload to the browser.
+- The cockpit can now configure project-memory authorization without hand-editing JSON. A dual-token, zero-write preview binds the current manifest, regular non-symlink source files, fact prefixes, project-bounded retention, a maximum 365-day authorization expiry, and auto-confirm policy to an exact `MEMORY-AUTH-...` confirmation. Apply atomically updates only the `0600` project manifest and does not enable the global capability gate.
+- Proposed project memories are now reviewable in the owning project card. The cockpit exposes at most 20 project-scoped candidates, never cross-project candidates; confirmation and rejection still require the write token, conflicts expose the existing formal fact and require an explicit replacement action, and existing duplicates cannot be reconfirmed.
+- A single cockpit work-handoff form now replaces one-prompt-at-a-time recipe entry for project, meeting, daily-report, memory, and GitHub work. It renders typed inputs together, previews the governed plan before registration, and reviews schedule time, interval, daily limit, and cooldown before saving a disabled trigger. Scheduled trigger creation must submit the same reviewed plan hash or fail closed.
+
+### Security
+
+- Registration is same-origin and loopback-only, requires both existing admin tokens, rejects config symlinks and existing accounts, and never persists the password or bootstrap tokens in the browser. Password sessions are memory-only, bounded to 5 minutes–24 hours, rate limited after repeated failures, issued as `HttpOnly; SameSite=Strict` loopback cookies, and require a separate CSRF token for every non-GET request. Login does not remove content-level plan/hash confirmations.
+- Shadow admission never fabricates a production work plan or imports memory. The apply path requires a digest-derived confirmation and remains subject to project privacy erasure.
+- Shadow research is limited to the historical-import paths already verified for that project, and downstream artifact evidence is type checked, size bounded, and treated as untrusted data.
+- Expired project-memory authorization now blocks both manual model preview and the automatic sync worker before either invokes a model.
+
+### Planned
+
+- Easier desktop distribution and production community connectors.
+
+## [0.6.0-rc.1] - 2026-08-13
 
 ### Added
 
 - A zero-write project-recipe shadow preview, explicit local run, and evidence-SHA-bound human review confirmation that keep a selected research/document recipe inside one clean Git snapshot and isolated evidence ledger.
 - An evidence-ranked weekly delegation queue in the personal cockpit and a read-only Codex tool that reports the remaining eight-hour goal without creating or executing plans.
-- Bounded research and document previews before a completed recipe can become a time-return proposal; the entered human time is the user's actual review, verification, correction, and editing after the AI delivery.
+- Bounded research and document previews before a completed recipe can become a time-return proposal; entered human time means actual review, verification, correction, and editing after the AI delivery.
+- Historical-project import, fixed-source project-memory synchronization, five versioned recipes, and a governed work graph projected into SQLite and PostgreSQL.
 
 ### Security
 
 - Project-recipe shadow runs reject code, memory, office, messaging, Git, and deployment capabilities; recheck the source digest and commit after model execution; and keep local review confirmation idempotent without creating production memory or time-return records.
 - Weekly recommendations count only user-confirmed outcomes, fail closed on unknown capability modes or an older service without the weekly API, exclude active duplicates, and use a dedicated bounded endpoint so project objectives, memory statements, graph data, plan payloads, and blocked-capability details never enter the Codex plugin.
-
-### Planned
-
-- Easier desktop distribution and production community connectors.
 
 ## [0.5.0-rc.1] - 2026-08-13
 
@@ -89,7 +116,8 @@ GitHub release; the latest tagged public preview remains `v0.5.0-rc.1`.
 - A local admin console, read-only Codex plugin, and macOS background services.
 - SQLite development storage and the initial production diagnostic workflow.
 
-[Unreleased]: https://github.com/ruiwang20010702/foursday/compare/v0.5.0-rc.1...HEAD
+[Unreleased]: https://github.com/ruiwang20010702/foursday/compare/v0.6.0-rc.1...HEAD
+[0.6.0-rc.1]: https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1
 [0.5.0-rc.1]: https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1
 [0.4.0]: https://github.com/ruiwang20010702/foursday/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ruiwang20010702/foursday/compare/v0.2.0...v0.3.0

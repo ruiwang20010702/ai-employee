@@ -48,7 +48,9 @@
       "capability": "document_draft",
       "description": "形成 {{projectFocus}} 的证据摘要，并核对候选事实是否被来源支持",
       "workingDirectory": "{{projectRoot}}",
-      "inputs": {},
+      "inputs": {
+        "evidenceStepIds": ["research-evidence"]
+      },
       "expectedEvidence": "非空 Markdown 证据摘要及内容哈希",
       "rollback": null
     },

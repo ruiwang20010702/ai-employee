@@ -38,6 +38,11 @@
       "backwardCompatible": true,
       "rollback": "service_only",
       "evidence": "只增加独立且加密的图节点、关系投影表与索引；图层不授予能力，旧服务不读写这些表，既有领域状态、审批、预算、记忆和隐私语义不变"
+    },
+    "022_影子证据时间返还.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only",
+      "evidence": "只增加独立且加密的已确认影子证据时间返还表与索引；旧服务不读写新表，既有生产计划、审批、预算、记忆和时间返还语义不变"
     }
   }
 }

@@ -18,6 +18,10 @@ test("项目接入草案默认只开放低风险草稿能力", async () => {
     gitRootFn: async (value) => value,
   });
   assert.equal(result.externalSideEffectsEnabled, false);
+  assert.equal(result.manifest.capabilities.repository_activity_read.mode, "automatic");
+  assert.equal(result.manifest.capabilities.repository_activity_read.maxCommits, 50);
+  assert.equal(result.manifest.capabilities.project_work_history_read.mode, "automatic");
+  assert.equal(result.manifest.capabilities.project_work_history_read.maxPlans, 50);
   assert.equal(result.manifest.capabilities.research.mode, "automatic");
   assert.equal(result.manifest.capabilities.code_patch.mode, "approval_required");
   assert.equal(result.manifest.capabilities.local_branch.mode, "approval_required");

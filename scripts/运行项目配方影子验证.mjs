@@ -166,6 +166,7 @@ export async function runProjectRecipeShadowCli(args = process.argv.slice(2), {
       assessment: _assessment,
       manifest: _manifest,
       recipeDefinition: _recipeDefinition,
+      sourcePaths: _sourcePaths,
       ...publicPreview
     } = preview;
     output.write(`${JSON.stringify(publicPreview, null, 2)}\n`);

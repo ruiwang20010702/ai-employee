@@ -4,6 +4,8 @@ import { loadProjectManifests } from "./project-manifests.mjs";
 const capabilityLabels = Object.freeze({
   observe_messages: "读取授权消息",
   knowledge_read: "读取项目授权的精确知识页",
+  repository_activity_read: "读取指定日期的仓库活动",
+  project_work_history_read: "读取指定日期的受治理项目工作历史",
   research: "研究与方案分析",
   work_plan_proposal: "生成工作计划提案",
   reply_draft: "生成回复草稿",

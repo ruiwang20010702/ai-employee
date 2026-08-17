@@ -15,20 +15,21 @@ sending and plan execution are disabled by default, and chat content can never
 grant new permissions. Foursday should work like another you without silently
 impersonating you.
 
-**English** · [简体中文](./README_ZH.md) · [Quick Start](#quick-start) · [Public preview v0.5.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [Architecture](#architecture) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+**English** · [简体中文](./README_ZH.md) · [Quick Start](#quick-start) · [Public preview v0.6.0-rc.1](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1) · [Architecture](#architecture) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 [![Checks](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![Security](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
-[![Public preview: v0.5.0-rc.1](https://img.shields.io/badge/public_preview-v0.5.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
-[![Development: v0.6.0](https://img.shields.io/badge/development-v0.6.0-6f7bf7)](./CHANGELOG.md)
+[![Public preview: v0.6.0-rc.1](https://img.shields.io/badge/public_preview-v0.6.0--rc.1-f2a65a)](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1)
+[![Development: post-RC](https://img.shields.io/badge/development-post--RC-6f7bf7)](./CHANGELOG.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-3c873a)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
-[Start in 10 minutes](#quick-start) · [Open the v0.5.0-rc.1 pre-release](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1) · [Report a successful install](https://github.com/ruiwang20010702/foursday/issues/50) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Join the v0.5 pilot](https://github.com/ruiwang20010702/foursday/issues/49) · [Track the 90-day launch](./docs/en/growth-scorecard.md) · [Review the public launch playbook](./docs/en/public-launch-playbook.md) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
+[Start in 10 minutes](#quick-start) · [Open the v0.6.0-rc.1 pre-release](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1) · [Report a successful install](https://github.com/ruiwang20010702/foursday/issues/50) · [Watch the 75-second demo](./assets/foursday-v0.5-demo.mp4) · [Join the pilot](https://github.com/ruiwang20010702/foursday/issues/49) · [Track the 90-day launch](./docs/en/growth-scorecard.md) · [Review the public launch playbook](./docs/en/public-launch-playbook.md) · [Pick a first contribution](./docs/en/first-contributions.md) · [Read the safety model](./SECURITY.md)
 
-**Version status:** `v0.5.0-rc.1` is the latest tagged public preview. The
-repository and `package.json` currently target **v0.6.0, unreleased**. The
+**Version status:** `v0.6.0-rc.1` is the latest tagged public preview, bound to
+commit `6b30c22f97b19c6cfd30bf162b3f85000fa2bde9`. The repository may contain
+post-RC candidates that are not part of that release or production. The
 package remains `private: true` to prevent accidental npm publication; it does
 not restrict cloning or reuse under the MIT license.
 
@@ -98,13 +99,13 @@ and sees whether time was actually returned.
 | Capability | What the user gets | Current implementation |
 |---|---|---|
 | Project onboarding | Project goal, milestones, people, memory scope, recipes, and risk budgets in one safe draft | Implemented; external effects start disabled and local preparation requires approval |
-| Historical project import | Bind existing project files to deduplicated, reviewable memory candidates | Preview first; exact confirmation creates candidates only, never confirmed facts |
+| Historical project import | Bind existing project files to deduplicated, reviewable memory candidates | The cockpit accepts a local JSON bundle, previews source evidence, skips, duplicates, and conflicts with the read token, then requires the exact typed `IMPORT-...` digest plus the write token; application creates proposed facts only |
 | Project recipe shadow | Run a selected research/document recipe against a clean, exact Git snapshot before production execution | Preview is zero-write; explicit local run creates only a protected isolated ledger, review pack, and unconfirmed time-return question |
-| Project memory sync | Re-scan authorized files with Codex or Claude Code and keep durable facts current | Global capability plus bounded project authorization; only source-bound, conflict-free facts may auto-confirm |
-| Recipe library | Repeatable workflows instead of planning the same work from every message | Five versioned built-in recipes; durable project-memory updates use a separate evidence-bound recipe |
-| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, triggers, and the next best work to delegate | Implemented on the unreleased 0.6.0 development line and deployed at production commit `ca43e02`: the local console and read-only Codex tool rank a weekly delegation queue by confirmed outcomes; they plan only and never treat an unverified recipe baseline as time returned |
+| Project memory sync | Re-scan authorized files with Codex or Claude Code and keep durable facts current | The cockpit first uses a dual-token, zero-write preview for fixed sources, fact prefixes, retention, expiry, and auto-confirm under an exact `MEMORY-AUTH-...` digest; applying it updates only the project manifest and never opens the global gate. A separate explicit write-token action invokes the model against a single-use server-held snapshot. Proposed facts are reviewed in the same project card; conflicts require an explicit replacement of the old fact, and only already-authorized low-risk, source-stable, conflict-free facts may auto-confirm |
+| Recipe library | Repeatable workflows instead of planning the same work from every message | Five versioned built-in recipes; one cockpit handoff form collects typed inputs for project, meeting, daily-report, memory, and GitHub work, then previews steps, risk, evidence, and the exact plan hash before separate registration; registration always enters approval and cannot auto-execute |
+| Project cockpit | Goals, milestones, plans, evidence, deliverables, formal memory, triggers, and the next best work to delegate | Shipped in `v0.6.0-rc.1` and deployed at production commit `6b30c22`; the local console and read-only Codex tool rank a weekly delegation queue by confirmed outcomes; they plan only and never treat an unverified recipe baseline as time returned |
 | Time-return dashboard | Evidence-backed minutes saved and automation coverage, confirmed by the user | The cockpit shows bounded delivery content before asking for actual post-AI review/edit time; north-star progress counts only confirmed recipe outcomes in the current local week |
-| Proactive mode | Scheduled or event-triggered work with daily limits, cooldowns, and idempotency | Implemented; every trigger is created disabled |
+| Proactive mode | Scheduled or event-triggered work with daily limits, cooldowns, and idempotency | The same handoff form previews recipe inputs and policy before saving a schedule; every trigger is still created disabled, and a stale reviewed plan hash is rejected |
 | Meeting to execution | Notes → document → proposed decision memory → task → follow-up calendar | Implemented as an approval-bound recipe |
 | GitHub delivery | Change request → patch → branch → tests → push → draft PR → report | Implemented for approved repositories and commands |
 
@@ -123,13 +124,26 @@ npm run projects:shadow -- --bundle /absolute/import.json \
 # After reviewing the delivery, use the SHA and REVIEW code printed by the run.
 npm run projects:shadow -- --review /absolute/new-evidence-directory \
   --evidence-sha256 64_HEX --human-minutes 10 --confirm REVIEW-FIRST12
+
+# Post-RC candidate: preview admission of that exact confirmed proof.
+npm run projects:shadow:admit -- --evidence-directory /absolute/new-evidence-directory \
+  --evidence-sha256 64_HEX
 ```
 
-Only research and document-draft steps are accepted. The model runtime may use
+Only deterministic repository-activity reads, same-project governed-work-history
+reads, research, and document-draft steps are accepted. The daily-report graph
+binds one date window to exact Git activity and terminal plan/read-back metadata,
+then passes both through explicit evidence edges. Shadow history comes only from
+the isolated ledger. The model runtime may use
 its configured model service, but production data, business systems, messages,
 Git writes, memory, and production time-return records remain untouched. Review
 confirmation updates only the isolated ledger and creates a protected local
-confirmation record bound to the evidence SHA. See the
+confirmation record bound to the evidence SHA. The post-RC admission command
+rechecks the evidence, isolated ledger, owner confirmation, project manifest,
+and recipe baseline. Its default is still zero-write; a later explicit
+`--apply --confirmation ADMIT-FIRST12` can add only that confirmed proof to the
+production time-return total after migration 022 is deployed. It never imports
+memory or fabricates a production work plan. See the
 [capability and memory guide](./docs/en/capabilities.md#project-recipe-shadow-validation).
 
 The adapter SDK also defines verifiable contracts and safe example manifests
@@ -152,7 +166,7 @@ control plane that connects three bounded graphs:
 | Knowledge graph | Project ↔ message, document, decision, deliverable, and formal memory | What does this work know, and which source supports it? |
 | Governance graph | Person ↔ project, capability, policy, budget, approval, and audit record | Who authorized this transition, within which scope and version? |
 
-Production release `ca43e02d8e6790404cdccfb9d007c02f890e29b7` implements stable
+Production release `6b30c22f97b19c6cfd30bf162b3f85000fa2bde9` implements stable
 node identities, versioned edge contracts, encrypted SQLite/PostgreSQL
 projections, intended-versus-runtime capture, and four bounded explanations in
 the personal project cockpit. This does not add a graph database or grant
@@ -162,12 +176,17 @@ defines the contract and safety boundaries; [ADR 001](docs/en/adr-001-governed-w
 records why PostgreSQL remains the default until production-shaped evidence
 proves that a dedicated graph database is necessary.
 
+Inside each plan, data flow is an explicit graph edge too: downstream artifacts
+must name earlier read-only evidence through `evidenceStepIds`. Mere step order
+does not transfer context, and the executor rejects unavailable or mismatched
+evidence before invoking a model.
+
 ## Quick Start
 
 ### Start the Web onboarding and pilot with one command
 
-With Node.js 22 or 24 installed, launch the reviewed `v0.5.0-rc.1` Web flow
-directly from its immutable GitHub commit. The [pre-release page](https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1)
+With Node.js 22 or 24 installed, launch the reviewed `v0.6.0-rc.1` Web flow
+directly from its immutable GitHub commit. The [pre-release page](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1)
 is tagged at the same SHA and provides the source archives, 75-second demo, and
 digest manifest; the command keeps the stronger full-SHA binding:
 
@@ -176,7 +195,7 @@ switch in the upper-right corner at any time; both languages use the same safety
 checks, approval state machine, and local-only defaults.
 
 ```bash
-npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#e272f92dcebd10abbc599f32fed3e7db4428f9b7" foursday start --pilot-sha e272f92dcebd10abbc599f32fed3e7db4428f9b7
+npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#6b30c22f97b19c6cfd30bf162b3f85000fa2bde9" foursday start --pilot-sha 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
 ```
 
 Open the printed loopback URL. The command downloads and runs that exact public
@@ -272,8 +291,8 @@ The equivalent manual fallback is:
 gh repo fork ruiwang20010702/foursday --clone
 cd foursday
 git fetch upstream main
-git merge-base --is-ancestor e272f92dcebd10abbc599f32fed3e7db4428f9b7 FETCH_HEAD
-git switch --create pilot-v0.5-e272f92 e272f92dcebd10abbc599f32fed3e7db4428f9b7
+git merge-base --is-ancestor 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9 FETCH_HEAD
+git switch --create pilot-v0.6-6b30c22 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
 npm ci --ignore-scripts
 npm start
 ```
@@ -415,7 +434,7 @@ The system follows default-deny authorization, separates message ingestion from 
 - AES-256-GCM field encryption for sensitive business content.
 - Minimal child-process environments without database or admin secrets.
 - Side-effect intent is persisted before execution; unknown outcomes are never replayed automatically.
-- Local-only admin console with separate read and write tokens.
+- Local-only admin console with one-time owner registration, optional email alias, and matching password confirmation. Existing read/write tokens prove ownership once; registration then closes permanently and both dashboards share a short-lived, CSRF-protected session backed only by a salted scrypt verifier.
 - Immutable release directories, exact Git SHAs, cloud gates, encrypted backups, and forward-only migration controls.
 
 Report vulnerabilities privately through GitHub Security Advisories. Never include real messages, user identifiers, credentials, or internal company data in a public issue. See [SECURITY.md](./SECURITY.md).
@@ -449,7 +468,7 @@ Report vulnerabilities privately through GitHub Security Advisories. Never inclu
 - [x] Feishu Open Platform adapter without a DWS dependency
 - [x] Claude Code and direct model-provider runtime contracts
 - [x] Personal project onboarding, recipes, cockpit, and verified time-return ledger
-- [x] Weekly delegation queue on the unreleased 0.6.0 development line, deployed at production commit `ca43e02`, ranked by confirmed evidence without silently executing work or counting unverified estimates
+- [x] Weekly delegation queue in `v0.6.0-rc.1`, deployed at production commit `6b30c22`, ranked by confirmed evidence without silently executing work or counting unverified estimates
 - [x] Proactive triggers, meeting-to-execution, and GitHub draft-PR delivery loops
 - [x] Versioned workspace/event adapter contracts and community examples
 - [x] Governed Work Graph v1 production implementation: typed nodes, allowlisted edges, recipe content binding, public Schema, and deterministic SQLite/PostgreSQL projections

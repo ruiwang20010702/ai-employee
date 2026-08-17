@@ -120,6 +120,14 @@ Do not use the maintenance-forward mode unless you have read and accepted the co
 - Keep configuration files at mode `600` and deployment directories private to the login user.
 - Child processes receive minimal environments; release checks do not inherit GitHub, database, or admin tokens.
 
+## Local browser login
+
+The loopback console keeps independent read/write tokens for CLI and API compatibility, but a browser owner can use one username or email plus a password across both `/` and `/projects`. When no owner exists, `/` shows a one-time registration page with a login identifier, optional email alias, password confirmation, and one ownership check using the existing read/write tokens. Success atomically stores only a salted scrypt verifier in the mode-`600` production configuration, signs the owner in immediately, and permanently closes registration. The password and bootstrap tokens are not persisted by the page.
+
+For headless setup or recovery, run `npm run config:set-admin-login -- --identifier owner --identifier owner@example.com`, review the zero-write result, then repeat with `--apply`. Password input is hidden; this CLI path requires a service restart, while browser registration does not.
+
+Password login creates an in-memory session for up to eight hours using an `HttpOnly`, `SameSite=Strict` cookie. Session writes also require a CSRF token, five failed logins trigger a 15-minute limit, and restart/logout/expiry revokes the session. Exact plan hashes, import digests, and other content-bound confirmations remain mandatory.
+
 ## Verification levels
 
 | Command or result | What it proves |
@@ -136,7 +144,7 @@ A deployed release may be service-available while business readiness is false. D
 
 The personal cockpit, recipes, proactive worker, meeting loop, GitHub Draft PR
 adapter, migrations 019/020/021, governed graph projection, and community contracts were deployed in
-production commit `ca43e02d8e6790404cdccfb9d007c02f890e29b7` after both cloud gates and
+production commit `6b30c22f97b19c6cfd30bf162b3f85000fa2bde9` after both cloud gates and
 running-service read-back passed. Deployment never
 enables `proactive_work`, sending, or work-plan execution. Triggers remain
 disabled unless a separate business rollout explicitly enables them.

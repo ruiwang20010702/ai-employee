@@ -253,6 +253,15 @@ export function loadConfig({
   if (workerConcurrency > 4) {
     throw new Error("AI_EMPLOYEE_WORKER_CONCURRENCY must not exceed 4");
   }
+  const adminSessionTtlMs = positiveInteger(
+    "AI_EMPLOYEE_ADMIN_SESSION_TTL_MS",
+    28_800_000,
+  );
+  if (adminSessionTtlMs < 300_000 || adminSessionTtlMs > 86_400_000) {
+    throw new Error(
+      "AI_EMPLOYEE_ADMIN_SESSION_TTL_MS must be between 300000 and 86400000",
+    );
+  }
 
   return {
     targetUserIds,
@@ -346,6 +355,10 @@ export function loadConfig({
     adminPort: portNumber("AI_EMPLOYEE_ADMIN_PORT", 9465),
     adminReadToken: process.env.AI_EMPLOYEE_ADMIN_READ_TOKEN?.trim() || null,
     adminWriteToken: process.env.AI_EMPLOYEE_ADMIN_WRITE_TOKEN?.trim() || null,
+    adminLoginIdentifiers: commaSeparated("AI_EMPLOYEE_ADMIN_LOGIN_IDENTIFIERS"),
+    adminPasswordHash:
+      process.env.AI_EMPLOYEE_ADMIN_PASSWORD_HASH?.trim() || null,
+    adminSessionTtlMs,
     alertWebhookUrl: process.env.AI_EMPLOYEE_ALERT_WEBHOOK_URL?.trim() || null,
     alertWebhookSecret:
       process.env.AI_EMPLOYEE_ALERT_WEBHOOK_SECRET?.trim() || null,

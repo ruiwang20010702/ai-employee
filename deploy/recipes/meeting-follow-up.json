@@ -84,7 +84,9 @@
       "capability": "document_draft",
       "description": "生成 {{meetingTitle}} 的决策、行动项、负责人待确认项、项目记忆候选和跟进节奏草稿",
       "workingDirectory": "{{projectRoot}}",
-      "inputs": {},
+      "inputs": {
+        "evidenceStepIds": ["research-meeting"]
+      },
       "expectedEvidence": "生成非空 Markdown 行动草稿及内容哈希",
       "rollback": null
     },

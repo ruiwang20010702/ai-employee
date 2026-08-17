@@ -62,6 +62,7 @@ async function fixture(t) {
   t.after(async () => {
     await pool.query("DELETE FROM governed_graph_edges WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM governed_graph_nodes WHERE tenant_id = $1", [tenantId]);
+    await pool.query("DELETE FROM shadow_time_return_entries WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM time_return_entries WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM work_trigger_runs WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM work_triggers WHERE tenant_id = $1", [tenantId]);
@@ -1917,6 +1918,88 @@ integration("PostgreSQL 任务计划审批绑定哈希并只能消费一次", as
   );
 });
 
+integration("PostgreSQL 项目工作历史在存储层绑定项目、时间窗口和当前计划", async (t) => {
+  const store = await fixture(t);
+  const manifest = {
+    version: 1,
+    projectId: "history_project",
+    name: "历史项目",
+    rootDirectory: "/workspace/history",
+    requesters: ["user-1"],
+    capabilities: { code_patch: { mode: "approval_required" } },
+  };
+  const assessment = (objective) => assessWorkPlan({
+    manifest,
+    plan: {
+      version: 1,
+      projectId: "history_project",
+      requesterId: "user-1",
+      objective,
+      steps: [{
+        id: "code",
+        capability: "code_patch",
+        description: objective,
+        workingDirectory: "/workspace/history",
+        expectedEvidence: "差异",
+      }],
+    },
+  });
+  const complete = async (objective, hour) => {
+    const registered = await store.registerWorkPlan(
+      assessment(objective),
+      new Date(`2026-08-13T0${hour}:00:00.000Z`),
+    );
+    await store.decideWorkPlan(registered.id, {
+      decision: "approved",
+      actor: "owner",
+      expiresAt: "2026-08-13T12:00:00.000Z",
+    }, new Date(`2026-08-13T0${hour}:01:00.000Z`));
+    await store.consumeWorkPlanAuthorization(
+      registered.id,
+      new Date(`2026-08-13T0${hour}:02:00.000Z`),
+    );
+    await store.updateWorkPlanStep(registered.id, "code", {
+      status: "completed",
+      evidence: {
+        kind: "unified_diff",
+        sha256: "d".repeat(64),
+        verification: "git_apply_check",
+      },
+    }, new Date(`2026-08-13T0${hour}:03:00.000Z`));
+    await store.finishWorkPlan(
+      registered.id,
+      { success: true },
+      new Date(`2026-08-13T0${hour}:04:00.000Z`),
+    );
+    return registered;
+  };
+  const included = await complete("当日完成", 1);
+  const excluded = await complete("当前日报计划", 2);
+  const history = await store.listProjectWorkHistory({
+    projectId: "history_project",
+    start: "2026-08-13T00:00:00.000Z",
+    end: "2026-08-14T00:00:00.000Z",
+    excludePlanHash: excluded.plan_hash,
+    limit: 10,
+  });
+  assert.deepEqual(history.map((plan) => plan.id), [included.id]);
+  assert.equal(history[0].steps[0].evidence.kind, "unified_diff");
+  assert.deepEqual(await store.listProjectWorkHistory({
+    projectId: "other_project",
+    start: "2026-08-13T00:00:00.000Z",
+    end: "2026-08-14T00:00:00.000Z",
+    limit: 10,
+  }), []);
+  await assert.rejects(
+    store.listProjectWorkHistory({
+      projectId: "history_project",
+      start: "invalid",
+      end: "2026-08-14T00:00:00.000Z",
+    }),
+    /query is invalid/u,
+  );
+});
+
 integration("PostgreSQL 能力次数预算在并发计划间原子扣减", async (t) => {
   const store = await fixture(t);
   const manifest = {
@@ -2322,6 +2405,47 @@ integration("PostgreSQL 时间返还需要完整证据、人工确认并随项�
     "owner",
   );
   assert.equal((await store.listTimeReturns({ projectId: manifest.projectId })).length, 0);
+});
+
+integration("PostgreSQL 已确认影子时间返还并发导入幂等且随项目擦除", async (t) => {
+  const store = await fixture(t);
+  const proof = {
+    projectId: "shadow_project",
+    recipeId: "project-follow-up",
+    evidenceSha256: "a".repeat(64),
+    planHash: "b".repeat(64),
+    repositoryCommit: "c".repeat(40),
+    baselineMinutes: 45,
+    humanActiveMinutes: 5,
+    baselineMethod: "user_confirmed",
+    confirmedAt: "2026-08-13T10:00:00.000Z",
+    outcomeEvidence: {
+      kind: "confirmed_shadow_recipe_evidence",
+      steps: [{ stepId: "research", sha256: "d".repeat(64) }],
+    },
+  };
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () =>
+      store.importConfirmedShadowTimeReturn(proof, "owner")),
+  );
+  assert.equal(results.filter((result) => result.created).length, 1);
+  assert.equal((await store.listTimeReturns({ projectId: "shadow_project" })).length, 1);
+  const reordered = await store.importConfirmedShadowTimeReturn({
+    ...proof,
+    outcomeEvidence: {
+      steps: [{ sha256: "d".repeat(64), stepId: "research" }],
+      kind: "confirmed_shadow_recipe_evidence",
+    },
+  }, "owner");
+  assert.equal(reordered.created, false);
+  await assert.rejects(
+    store.importConfirmedShadowTimeReturn({ ...proof, humanActiveMinutes: 6 }, "owner"),
+    /different facts/u,
+  );
+  const preview = await store.previewPrivacyErasure({ projectId: "shadow_project" });
+  assert.equal(preview.counts.timeReturns, 1);
+  await store.erasePrivacyData({ projectId: "shadow_project" }, preview.confirmation, "owner");
+  assert.equal((await store.listTimeReturns({ projectId: "shadow_project" })).length, 0);
 });
 
 integration("PostgreSQL 主动触发运行绑定实例并在隐私删除前要求停用", async (t) => {

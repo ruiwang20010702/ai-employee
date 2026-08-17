@@ -398,3 +398,21 @@ test("开启计划执行时必须把执行器纳入健康组件", () => {
     else process.env.AI_EMPLOYEE_REQUIRED_COMPONENTS = previousComponents;
   }
 });
+
+test("管理台浏览器会话默认八小时且限制在五分钟到一天", () => {
+  const name = "AI_EMPLOYEE_ADMIN_SESSION_TTL_MS";
+  const previous = process.env[name];
+  try {
+    delete process.env[name];
+    assert.equal(loadConfig({ requireTargets: false }).adminSessionTtlMs, 28_800_000);
+    process.env[name] = "300000";
+    assert.equal(loadConfig({ requireTargets: false }).adminSessionTtlMs, 300_000);
+    process.env[name] = "299999";
+    assert.throws(() => loadConfig({ requireTargets: false }), /between 300000/u);
+    process.env[name] = "86400001";
+    assert.throws(() => loadConfig({ requireTargets: false }), /between 300000/u);
+  } finally {
+    if (previous == null) delete process.env[name];
+    else process.env[name] = previous;
+  }
+});

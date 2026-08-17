@@ -91,6 +91,104 @@ test("完成度矩阵明确区分目标能力、当前授权和已部署闭环",
   assert.doesNotMatch(matrix, /第 01[78] 号迁移尚未应用生产/u);
 });
 
+test("中英文文档都要求配方先预览再按精确哈希登记", async () => {
+  const [readme, readmeZh, requirements, capabilities] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/产品需求文档.md"),
+    projectText("docs/en/capabilities.md"),
+  ]);
+  assert.match(readme, /previews steps, risk, evidence, and the exact plan hash/u);
+  assert.match(readmeZh, /先预览步骤、风险、证据和精确计划哈希/u);
+  assert.match(requirements, /写入登记必须提交同一哈希/u);
+  assert.match(capabilities, /exact previewed 64-character plan hash/u);
+  assert.match(readme, /registration always enters approval and cannot auto-execute/u);
+  assert.match(readmeZh, /工作台登记一律进入待审批，不能自动执行/u);
+  assert.match(requirements, /工作台登记一律进入待审批，不能自动执行/u);
+  assert.match(capabilities, /registration always enters approval/u);
+});
+
+test("中英文文档都把历史项目导入约束为两阶段待审候选", async () => {
+  const [readme, readmeZh, requirements, capabilities, matrix] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/产品需求文档.md"),
+    projectText("docs/en/capabilities.md"),
+    projectText("docs/完成度矩阵.md"),
+  ]);
+  assert.match(readme, /exact typed `IMPORT-\.\.\.` digest plus the write token/u);
+  assert.match(readmeZh, /写入令牌加手工输入的当前 `IMPORT-\.\.\.` 摘要/u);
+  assert.match(requirements, /错误或过期摘要保持零写/u);
+  assert.match(capabilities, /creates proposed memory only/u);
+  assert.match(matrix, /历史导入、精确哈希登记.*仍是未部署本地候选/u);
+  for (const text of [readme, readmeZh, requirements, capabilities]) {
+    assert.match(text, /(?:proposed facts only|待审候选|`proposed` 候选|proposed memory only)/u);
+  }
+});
+
+test("项目记忆同步工作台口径绑定模型调用、服务端快照和既有授权", async () => {
+  const [readme, readmeZh, requirements, capabilities, matrix] = await Promise.all([
+    projectText("README.md"),
+    projectText("README_ZH.md"),
+    projectText("docs/产品需求文档.md"),
+    projectText("docs/en/capabilities.md"),
+    projectText("docs/完成度矩阵.md"),
+  ]);
+  assert.match(readme, /explicit write-token action invokes the model/u);
+  assert.match(readmeZh, /显式使用写入令牌才调用模型/u);
+  assert.match(requirements, /生成包只在服务端保存十分钟/u);
+  assert.match(capabilities, /generated bundle stays only in server memory for ten minutes/u);
+  assert.match(matrix, /工作台同步入口仍是未部署本地候选/u);
+  for (const text of [readme, readmeZh, requirements, capabilities]) {
+    assert.match(text, /(?:already authorized|既有授权|不能超出既有授权|already-authorized)/u);
+  }
+});
+
+test("项目记忆授权向导绑定精确摘要、期限和独立全局门禁", async () => {
+  const [readme, readmeZh, requirements, capabilities, capabilitiesZh, matrix] =
+    await Promise.all([
+      projectText("README.md"),
+      projectText("README_ZH.md"),
+      projectText("docs/产品需求文档.md"),
+      projectText("docs/en/capabilities.md"),
+      projectText("docs/能力清单与正式记忆.md"),
+      projectText("docs/完成度矩阵.md"),
+    ]);
+  for (const text of [readme, readmeZh, requirements, capabilities, capabilitiesZh, matrix]) {
+    assert.match(text, /MEMORY-AUTH-/u);
+  }
+  assert.match(readme, /never opens the global gate/u);
+  assert.match(readmeZh, /不会开启全局能力/u);
+  assert.match(requirements, /最长 365 天授权期限/u);
+  assert.match(requirements, /双令牌零写/u);
+  assert.match(capabilities, /no more than 365 days/u);
+  assert.match(capabilities, /dual-token, zero-write settings preview/u);
+  assert.match(capabilitiesZh, /最长 365 天/u);
+  assert.match(capabilities, /expired project authorization is skipped before/u);
+  assert.match(capabilitiesZh, /过期项目会在读取来源和调用模型前停止/u);
+});
+
+test("个人驾驶舱内的项目记忆审阅不跨项目且冲突必须明确替代", async () => {
+  const [readme, readmeZh, requirements, capabilities, capabilitiesZh, matrix] =
+    await Promise.all([
+      projectText("README.md"),
+      projectText("README_ZH.md"),
+      projectText("docs/产品需求文档.md"),
+      projectText("docs/en/capabilities.md"),
+      projectText("docs/能力清单与正式记忆.md"),
+      projectText("docs/完成度矩阵.md"),
+    ]);
+  assert.match(readme, /reviewed in the same project card/u);
+  assert.match(readmeZh, /同一项目卡片确认或拒绝/u);
+  assert.match(requirements, /候选不得跨项目/u);
+  assert.match(capabilities, /at most 20 candidates from that project/u);
+  assert.match(capabilitiesZh, /每个项目最多返回 20 条本项目候选/u);
+  assert.match(matrix, /项目卡片内候选审阅仍是未部署本地候选/u);
+  for (const text of [readme, readmeZh, requirements, capabilities, capabilitiesZh]) {
+    assert.match(text, /(?:explicit replacement|明确替代|显式选择替代)/u);
+  }
+});
+
 test("项目配方影子入口在中英文文档中保持默认零写与显式运行边界", async () => {
   const [readme, readmeZh, capabilities, capabilitiesZh] = await Promise.all([
     projectText("README.md"),
@@ -162,12 +260,15 @@ test("V2.3 个人工作闭环和社区扩展在中英文文档统一", async () 
     assert.match(readme, new RegExp(value, "u"));
   }
   assert.match(readme, /weekly delegation queue/u);
+  assert.match(readme, /one cockpit handoff form/u);
   for (const value of ["项目接入向导", "工作配方库", "项目驾驶舱", "时间返还仪表盘", "主动工作模式"]) {
     assert.match(chinese, new RegExp(value, "u"));
   }
   assert.match(chinese, /本周工作返还队列/u);
+  assert.match(chinese, /同一张工作委托单/u);
   assert.match(chinese, /AI 交付后的真实审阅\/修改耗时/u);
   assert.match(requirements, /未验证配方只标记为验证候选，不计入覆盖量/u);
+  assert.match(requirements, /同一份已审计划哈希/u);
   assert.match(overview, /evidence-ranked weekly delegation queue/u);
   for (const value of ["## 6.10", "## 6.11", "## 6.12", "## 6.13", "## 6.14", "## 6.15"]) {
     assert.ok(requirements.includes(value));
@@ -180,6 +281,7 @@ test("V2.3 个人工作闭环和社区扩展在中英文文档统一", async () 
   }
   assert.match(architecture, /WorkTrigger/u);
   assert.match(capabilities, /Draft PR/u);
+  assert.match(capabilities, /one work-handoff form/u);
   assert.match(deployment, /deployed-code rollout boundary/u);
 });
 
@@ -520,7 +622,7 @@ test("中英文项目首页提供产品定位、快速开始和双语开源治�
   assert.match(license, /MIT License/u);
 });
 
-test("版本口径区分公开预览版与尚未发布的开发版本", async () => {
+test("版本口径区分公开预览版与 RC 后候选", async () => {
   const [english, chinese, changelog, changelogChinese, packageText] =
     await Promise.all([
       projectText("README.md"),
@@ -532,16 +634,16 @@ test("版本口径区分公开预览版与尚未发布的开发版本", async ()
   const packageJson = JSON.parse(packageText);
   assert.equal(packageJson.version, "0.6.0");
   assert.equal(packageJson.private, true);
-  assert.match(english, /latest tagged public preview.+v0\.5\.0-rc\.1/su);
-  assert.match(english, /v0\.6\.0, unreleased/u);
+  assert.match(english, /v0\.6\.0-rc\.1.+latest tagged public preview/su);
+  assert.match(english, /post-RC candidates/u);
   assert.match(chinese, /最新带标签的公开预览版/u);
-  assert.match(chinese, /尚未公开发布的 v0\.6\.0 开发版本/u);
-  assert.match(changelog, /Target package version: `0\.6\.0`/u);
-  assert.match(changelogChinese, /目标包版本为 `0\.6\.0`/u);
+  assert.match(chinese, /RC 后候选改动/u);
+  assert.match(changelog, /Post-`v0\.6\.0-rc\.1` candidates/u);
+  assert.match(changelogChinese, /`v0\.6\.0-rc\.1` 之后的候选改动/u);
   for (const value of [changelog, changelogChinese]) {
     assert.doesNotMatch(value, /^## \[0\.6\.0\] - /mu);
-    assert.match(value, /compare\/v0\.5\.0-rc\.1\.\.\.HEAD/u);
-    assert.match(value, /releases\/tag\/v0\.5\.0-rc\.1/u);
+    assert.match(value, /compare\/v0\.6\.0-rc\.1\.\.\.HEAD/u);
+    assert.match(value, /releases\/tag\/v0\.6\.0-rc\.1/u);
   }
 });
 
@@ -618,10 +720,10 @@ test("公开发布手册区分定向体验、公开候选和大范围发布", as
   assert.match(english, /Foursday never posts it/u);
   assert.match(chinese, /Foursday 不会自动发帖/u);
   const preReleaseUrl =
-    "https://github.com/ruiwang20010702/foursday/releases/tag/v0.5.0-rc.1";
+    "https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1";
   for (const value of [readme, chineseReadme]) {
     assert.ok(value.includes(preReleaseUrl));
-    assert.match(value, /e272f92dcebd10abbc599f32fed3e7db4428f9b7/u);
+    assert.match(value, /6b30c22f97b19c6cfd30bf162b3f85000fa2bde9/u);
   }
   assert.match(english, /Immutable pre-release \| `v0\.5\.0-rc\.1`/u);
   assert.match(english, /10\/10 external loops.+promoted to a stable v0\.5 release/su);

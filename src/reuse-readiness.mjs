@@ -5,6 +5,7 @@ import {
   isSecretReference,
   secretConfigKeys,
 } from "./secret-provider.mjs";
+import { createAdminSessionManager } from "./admin-session-auth.mjs";
 
 const unsafeCapabilities = new Set([
   "send_message",
@@ -167,6 +168,22 @@ async function inspectConfig(configPath) {
     values.AI_EMPLOYEE_ADMIN_READ_TOKEN === values.AI_EMPLOYEE_ADMIN_WRITE_TOKEN
   ) {
     result.requiredEdits.push("管理只读令牌和写入令牌必须不同");
+  }
+  const loginIdentifiers = String(values.AI_EMPLOYEE_ADMIN_LOGIN_IDENTIFIERS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const passwordHash = String(values.AI_EMPLOYEE_ADMIN_PASSWORD_HASH ?? "").trim();
+  if (loginIdentifiers.length > 0 || passwordHash) {
+    try {
+      createAdminSessionManager({
+        identifiers: loginIdentifiers,
+        passwordHash,
+        sessionTtlMs: Number(values.AI_EMPLOYEE_ADMIN_SESSION_TTL_MS ?? 28_800_000),
+      });
+    } catch {
+      result.requiredEdits.push("修复管理台用户名密码登录配置");
+    }
   }
   const capabilities = String(values.AI_EMPLOYEE_ALLOWED_CAPABILITIES ?? "")
     .split(",")

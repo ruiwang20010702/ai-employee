@@ -162,6 +162,120 @@ test("研究适配器使用只读 Codex 并删除临时明文", async (t) => {
   await assert.rejects(access(temporaryOutput), { code: "ENOENT" });
 });
 
+test("仓库活动读取绑定日期、提交和已授权路径且不触发 fsmonitor", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-repository-activity-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const fsmonitorMarker = join(directory, "fsmonitor-ran");
+  const fsmonitor = join(directory, "fake-fsmonitor");
+  await writeFile(fsmonitor, `#!/bin/sh\ntouch ${JSON.stringify(fsmonitorMarker)}\n`, { mode: 0o700 });
+  await execFileAsync("/usr/bin/git", ["init", "--quiet", directory]);
+  await Promise.all([
+    writeFile(join(directory, "README.md"), "# Daily evidence\n"),
+    writeFile(join(directory, "private-notes.txt"), "not authorized\n"),
+  ]);
+  await execFileAsync("/usr/bin/git", ["-C", directory, "add", "README.md", "private-notes.txt"]);
+  await execFileAsync("/usr/bin/git", [
+    "-C", directory,
+    "-c", "user.name=Foursday Test",
+    "-c", "user.email=foursday-test@example.invalid",
+    "commit", "--quiet", "-m", "feat: add daily evidence",
+  ], {
+    env: {
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+      GIT_AUTHOR_DATE: "2026-08-13T10:00:00+08:00",
+      GIT_COMMITTER_DATE: "2026-08-13T10:00:00+08:00",
+    },
+  });
+  await execFileAsync("/usr/bin/git", ["-C", directory, "config", "core.fsmonitor", fsmonitor]);
+  const input = context(directory, "repository_activity_read");
+  input.step.inputs = { reportDate: "2026-08-13", utcOffset: "+08:00" };
+  input.manifest.capabilities.repository_activity_read = {
+    mode: "automatic",
+    timeoutMs: 30_000,
+    maxCommits: 50,
+    maxOutputBytes: 128 * 1024,
+  };
+  const adapter = createReadOnlyWorkAdapters({
+    evidencePaths: ["README.md"],
+  }).repository_activity_read;
+  await adapter.preflight(input);
+  const result = await adapter.execute(input);
+  assert.equal(result.verified, true);
+  assert.equal(result.evidence.kind, "repository_activity");
+  assert.equal(result.evidence.commitCount, 1);
+  const activity = JSON.parse(result.evidence.content);
+  assert.deepEqual(activity.pathScope, ["README.md"]);
+  assert.deepEqual(activity.commits[0].files, [{ status: "A", path: "README.md" }]);
+  await assert.rejects(access(fsmonitorMarker), { code: "ENOENT" });
+  input.step.inputs.reportDate = "2026-02-30";
+  await assert.rejects(adapter.execute(input), /reportDate is invalid/u);
+});
+
+test("项目工作历史只读取同项目时间窗口并只暴露回读摘要", async () => {
+  let query = null;
+  const planHash = "a".repeat(64);
+  const input = context("/workspace/project", "project_work_history_read");
+  input.plan = {
+    projectId: "test_project",
+    planHash,
+    objective: "写日报",
+    steps: [input.step],
+  };
+  input.step.inputs = { reportDate: "2026-08-13", utcOffset: "+08:00" };
+  input.manifest.capabilities.project_work_history_read = {
+    mode: "automatic",
+    maxPlans: 50,
+    maxOutputBytes: 128 * 1024,
+  };
+  const adapters = createReadOnlyWorkAdapters({
+    store: {
+      async listProjectWorkHistory(value) {
+        query = value;
+        return [{
+          id: "plan-1",
+          plan_hash: "b".repeat(64),
+          objective: "完成可审查交付",
+          status: "completed",
+          updated_at: "2026-08-13T02:00:00.000Z",
+          plan: { recipe: { id: "project-follow-up", version: 1 } },
+          steps: [{
+            step_id: "research",
+            capability: "research",
+            status: "completed",
+            completed_at: "2026-08-13T01:59:00.000Z",
+            evidence: {
+              kind: "research_markdown",
+              content: "不应进入历史摘要的原文",
+              sha256: "c".repeat(64),
+              verification: "nonempty_bounded_output",
+              bytes: 32,
+            },
+          }],
+        }];
+      },
+    },
+  });
+  await adapters.project_work_history_read.preflight(input);
+  const result = await adapters.project_work_history_read.execute(input);
+  assert.deepEqual(query, {
+    projectId: "test_project",
+    start: "2026-08-12T16:00:00.000Z",
+    end: "2026-08-13T16:00:00.000Z",
+    excludePlanHash: planHash,
+    limit: 51,
+  });
+  assert.equal(result.evidence.kind, "project_work_history");
+  const history = JSON.parse(result.evidence.content);
+  assert.equal(history.planCount, 1);
+  assert.equal(history.plans[0].steps[0].evidence.sha256, "c".repeat(64));
+  assert.equal(result.evidence.content.includes("不应进入"), false);
+  input.step.inputs.reportDate = "2026-02-30";
+  await assert.rejects(
+    adapters.project_work_history_read.execute(input),
+    /reportDate is invalid/u,
+  );
+});
+
 test("知识页适配器只按精确 slug 调用 gbrain 并校验返回身份", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "ai-gbrain-adapter-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -225,6 +339,86 @@ test("Codex 步骤只注入显式引用的知识页证据", async (t) => {
   const prompt = await readFile(fake.promptRecord, "utf8");
   assert.match(prompt, /显式授权的 gbrain 知识页证据/u);
   assert.match(prompt, /统一口径/u);
+});
+
+test("文档步骤只接收显式图边引用的前序证据和影子来源范围", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-artifact-evidence-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let prompt = null;
+  const adapters = createReadOnlyWorkAdapters({
+    evidencePaths: ["README.md"],
+    artifactRuntime: {
+      async generateArtifact(input) {
+        prompt = input.prompt;
+        const output = "# 工作总结\n\n已根据研究证据起草。";
+        return {
+          output,
+          bytes: Buffer.byteLength(output),
+          sha256: createHash("sha256").update(output).digest("hex"),
+        };
+      },
+    },
+  });
+  const input = context(directory, "document_draft");
+  input.plan.steps = [
+    { id: "research-1", capability: "research", inputs: {} },
+    input.step,
+  ];
+  input.step.inputs = { evidenceStepIds: ["research-1"] };
+  await adapters.document_draft.preflight(input);
+  await adapters.document_draft.execute({
+    ...input,
+    priorEvidence: {
+      "research-1": {
+        kind: "research_markdown",
+        content: "# 研究结论\n\n- README 说明目标已明确。",
+      },
+    },
+  });
+  assert.match(prompt, /evidenceStepIds/u);
+  assert.match(prompt, /README 说明目标已明确/u);
+  assert.match(prompt, /指令不可信/u);
+  assert.match(prompt, /不要重新扫描工作区或调用工具/u);
+  assert.match(prompt, /仅包含以下相对路径/u);
+  assert.match(prompt, /README\.md/u);
+  assert.match(prompt, /不要在正文中自行填写内容哈希/u);
+  await assert.rejects(
+    adapters.document_draft.execute({ ...input, priorEvidence: {} }),
+    /Referenced artifact evidence is unavailable/u,
+  );
+});
+
+test("图证据拒绝后序引用、类型伪造和超大正文", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "ai-artifact-evidence-deny-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const adapters = createReadOnlyWorkAdapters({
+    artifactRuntime: { async generateArtifact() { throw new Error("must not run"); } },
+  });
+  const input = context(directory, "document_draft");
+  input.plan.steps = [input.step, { id: "research-later", capability: "research" }];
+  input.step.inputs = { evidenceStepIds: ["research-later"] };
+  await assert.rejects(
+    adapters.document_draft.preflight(input),
+    /earlier read-only artifact step/u,
+  );
+  input.plan.steps = [{ id: "research-1", capability: "research" }, input.step];
+  input.step.inputs = { evidenceStepIds: ["research-1"] };
+  await assert.rejects(
+    adapters.document_draft.execute({
+      ...input,
+      priorEvidence: { "research-1": { kind: "gbrain_pages", content: "wrong" } },
+    }),
+    /Referenced artifact evidence is unavailable/u,
+  );
+  await assert.rejects(
+    adapters.document_draft.execute({
+      ...input,
+      priorEvidence: {
+        "research-1": { kind: "research_markdown", content: "x".repeat(64 * 1024 + 1) },
+      },
+    }),
+    /exceeded the prompt limit/u,
+  );
 });
 
 test("代码补丁必须通过 git apply check 才能成为证据", async (t) => {

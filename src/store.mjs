@@ -4,6 +4,7 @@ import { chmod, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { DataCipher } from "./crypto.mjs";
 import {
   capabilityBudgetSnapshot,
@@ -42,7 +43,10 @@ import {
   scopedPauseKey,
 } from "./scoped-pause.mjs";
 import { validateWorkPlanRevision } from "./work-plan.mjs";
-import { buildTimeReturnProposal } from "./time-return.mjs";
+import {
+  buildConfirmedShadowTimeReturn,
+  buildTimeReturnProposal,
+} from "./time-return.mjs";
 import { nextScheduledRun, validateWorkTrigger } from "./work-trigger.mjs";
 import { buildGraphProjection } from "./governed-work-graph.mjs";
 import {
@@ -117,6 +121,8 @@ function timeReturnFromRow(row, cipher) {
   return {
     id: row.id,
     workPlanId: row.work_plan_id,
+    sourceType: "work_plan",
+    sourceId: row.work_plan_id,
     projectId: row.project_id,
     recipeId: row.recipe_id,
     baselineMinutes: row.baseline_minutes,
@@ -129,6 +135,32 @@ function timeReturnFromRow(row, cipher) {
     confirmedBy: row.confirmed_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    confirmedAt: row.status === "confirmed" ? row.updated_at : null,
+  };
+}
+
+function shadowTimeReturnFromRow(row, cipher) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    workPlanId: null,
+    sourceType: "shadow_evidence",
+    sourceId: row.evidence_sha256,
+    projectId: row.project_id,
+    recipeId: row.recipe_id,
+    planHash: row.plan_hash,
+    repositoryCommit: row.repository_commit,
+    baselineMinutes: row.baseline_minutes,
+    humanActiveMinutes: row.human_active_minutes,
+    returnedMinutes: row.returned_minutes,
+    baselineMethod: row.baseline_method,
+    outcomeEvidence: JSON.parse(cipher.decrypt(row.outcome_evidence_ciphertext)),
+    status: "confirmed",
+    proposedBy: row.confirmed_by,
+    confirmedBy: row.confirmed_by,
+    createdAt: row.imported_at,
+    updatedAt: row.confirmed_at,
+    confirmedAt: row.confirmed_at,
   };
 }
 
@@ -399,6 +431,24 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS time_return_entries_project
       ON time_return_entries(project_id, status, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS shadow_time_return_entries (
+        id TEXT PRIMARY KEY,
+        evidence_sha256 TEXT NOT NULL UNIQUE,
+        project_id TEXT NOT NULL,
+        recipe_id TEXT NOT NULL,
+        plan_hash TEXT NOT NULL,
+        repository_commit TEXT NOT NULL,
+        baseline_minutes INTEGER NOT NULL CHECK(baseline_minutes BETWEEN 1 AND 2400),
+        human_active_minutes INTEGER NOT NULL CHECK(human_active_minutes BETWEEN 0 AND baseline_minutes),
+        returned_minutes INTEGER NOT NULL CHECK(returned_minutes = baseline_minutes - human_active_minutes),
+        baseline_method TEXT NOT NULL CHECK(baseline_method IN ('measured','user_confirmed')),
+        outcome_evidence_ciphertext TEXT NOT NULL,
+        confirmed_by TEXT NOT NULL,
+        confirmed_at TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS shadow_time_return_entries_project
+      ON shadow_time_return_entries(project_id, confirmed_at DESC);
       CREATE TABLE IF NOT EXISTS work_triggers (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -2633,6 +2683,45 @@ export class Store {
     return rows.map((row) => workPlanFromRow(row, this.cipher));
   }
 
+  listProjectWorkHistory({
+    projectId,
+    start,
+    end,
+    excludePlanHash = null,
+    limit = 50,
+  }) {
+    const from = new Date(start);
+    const to = new Date(end);
+    if (
+      typeof projectId !== "string" || !projectId.trim() ||
+      Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to ||
+      !Number.isSafeInteger(limit) || limit < 1 || limit > 101 ||
+      (excludePlanHash != null && !/^[a-f0-9]{64}$/u.test(excludePlanHash))
+    ) {
+      throw new Error("Project work history query is invalid");
+    }
+    const rows = this.db.prepare(
+      `SELECT * FROM work_plans
+       WHERE privacy_erased_at IS NULL
+         AND project_id = ?
+         AND status IN ('completed','failed','cancelled')
+         AND updated_at >= ? AND updated_at < ?
+         AND (? IS NULL OR plan_hash <> ?)
+       ORDER BY updated_at DESC, id DESC LIMIT ?`,
+    ).all(
+      projectId.trim(),
+      from.toISOString(),
+      to.toISOString(),
+      excludePlanHash,
+      excludePlanHash,
+      limit,
+    );
+    return rows.map((row) => ({
+      ...workPlanFromRow(row, this.cipher),
+      steps: this.listWorkPlanSteps(row.id),
+    }));
+  }
+
   decideWorkPlan(
     id,
     { decision, actor, reason = "", expiresAt, maxConsumptions = 1 },
@@ -3099,9 +3188,67 @@ export class Store {
     });
   }
 
+  importConfirmedShadowTimeReturn(input, actor, now = new Date()) {
+    const confirmedBy = String(actor ?? "").trim();
+    if (!confirmedBy) throw new Error("Shadow time return importer is required");
+    const proof = buildConfirmedShadowTimeReturn(input);
+    return this.transaction(() => {
+      const existingRow = this.db.prepare(
+        "SELECT * FROM shadow_time_return_entries WHERE evidence_sha256 = ?",
+      ).get(proof.sourceId);
+      if (existingRow) {
+        const existing = shadowTimeReturnFromRow(existingRow, this.cipher);
+        const comparable = [
+          "projectId", "recipeId", "planHash", "repositoryCommit",
+          "baselineMinutes", "humanActiveMinutes", "returnedMinutes",
+          "baselineMethod", "confirmedAt",
+        ];
+        if (
+          comparable.some((key) => existing[key] !== proof[key]) ||
+          !isDeepStrictEqual(existing.outcomeEvidence, proof.outcomeEvidence)
+        ) {
+          throw new Error("Shadow time return evidence already exists with different facts");
+        }
+        return { entry: existing, created: false };
+      }
+      this.db.prepare(
+        `INSERT INTO shadow_time_return_entries(
+           id, evidence_sha256, project_id, recipe_id, plan_hash,
+           repository_commit, baseline_minutes, human_active_minutes,
+           returned_minutes, baseline_method, outcome_evidence_ciphertext,
+           confirmed_by, confirmed_at, imported_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ).run(
+        proof.id,
+        proof.sourceId,
+        proof.projectId,
+        proof.recipeId,
+        proof.planHash,
+        proof.repositoryCommit,
+        proof.baselineMinutes,
+        proof.humanActiveMinutes,
+        proof.returnedMinutes,
+        proof.baselineMethod,
+        this.cipher.encrypt(JSON.stringify(proof.outcomeEvidence)),
+        confirmedBy,
+        proof.confirmedAt,
+        nowIso(now),
+      );
+      return {
+        entry: shadowTimeReturnFromRow(
+          this.db.prepare("SELECT * FROM shadow_time_return_entries WHERE id = ?").get(proof.id),
+          this.cipher,
+        ),
+        created: true,
+      };
+    });
+  }
+
   getTimeReturn(id) {
-    return timeReturnFromRow(
-      this.db.prepare("SELECT * FROM time_return_entries WHERE id = ?").get(id),
+    const regular = this.db.prepare("SELECT * FROM time_return_entries WHERE id = ?").get(id);
+    if (regular) return timeReturnFromRow(regular, this.cipher);
+    return shadowTimeReturnFromRow(
+      this.db.prepare("SELECT * FROM shadow_time_return_entries WHERE id = ?").get(id),
       this.cipher,
     );
   }
@@ -3124,10 +3271,22 @@ export class Store {
       values.push(status);
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    return this.db.prepare(
+    const regular = this.db.prepare(
       `SELECT * FROM time_return_entries ${where}
        ORDER BY updated_at DESC, id DESC LIMIT ?`,
     ).all(...values, limit).map((row) => timeReturnFromRow(row, this.cipher));
+    if (status && status !== "confirmed") return regular;
+    const shadowClauses = projectId ? "WHERE project_id = ?" : "";
+    const shadowValues = projectId ? [projectId] : [];
+    const shadow = this.db.prepare(
+      `SELECT * FROM shadow_time_return_entries ${shadowClauses}
+       ORDER BY confirmed_at DESC, id DESC LIMIT ?`,
+    ).all(...shadowValues, limit).map((row) => shadowTimeReturnFromRow(row, this.cipher));
+    return [...regular, ...shadow]
+      .sort((left, right) =>
+        new Date(right.updatedAt) - new Date(left.updatedAt) || right.id.localeCompare(left.id)
+      )
+      .slice(0, limit);
   }
 
   decideTimeReturn(id, decision, actor, now = new Date()) {
@@ -3893,6 +4052,20 @@ export class Store {
       );
       timeReturnRows = planIds.flatMap((id) => selectTimeReturn.all(id));
     }
+    let shadowTimeReturnRows;
+    if (selector.type === "project") {
+      shadowTimeReturnRows = this.db.prepare(
+        "SELECT * FROM shadow_time_return_entries WHERE project_id = ?",
+      ).all(selector.value);
+    } else if (selector.type === "time") {
+      shadowTimeReturnRows = this.db.prepare(
+        "SELECT * FROM shadow_time_return_entries WHERE confirmed_at < ?",
+      ).all(selector.value.toISOString());
+    } else {
+      shadowTimeReturnRows = this.db.prepare(
+        "SELECT * FROM shadow_time_return_entries WHERE confirmed_by = ?",
+      ).all(selector.value);
+    }
     let workTriggerRows = [];
     if (selector.type === "project") {
       workTriggerRows = this.db.prepare(
@@ -3984,6 +4157,7 @@ export class Store {
       ...(selector.type === "project" ? [selector.value] : []),
       ...planRows.map((row) => row.project_id),
       ...memoryRows.map((row) => row.project_id),
+      ...shadowTimeReturnRows.map((row) => row.project_id),
     ].filter((value) => value && value !== "deleted"));
     const graphNodes = [];
     const graphEdges = [];
@@ -4008,7 +4182,14 @@ export class Store {
       memories: memoryRows.map(token),
       capabilityBudgets: capabilityBudgetRows.map((row) =>
         `${row.project_key}:${row.authorization_hash}:${row.capability}:${row.updated_at}`),
-      timeReturns: timeReturnRows.map(token),
+      timeReturns: [
+        ...timeReturnRows,
+        ...shadowTimeReturnRows.map((row) => ({
+          ...row,
+          status: "confirmed",
+          updated_at: row.confirmed_at,
+        })),
+      ].map(token),
       workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map(token),
       graphNodes: graphNodes.map(token),
       graphEdges: graphEdges.map(token),
@@ -4040,6 +4221,7 @@ export class Store {
           capability: row.capability,
         })),
         timeReturns: timeReturnRows.map((row) => row.id),
+        shadowTimeReturns: shadowTimeReturnRows.map((row) => row.id),
         workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map((row) => row.id),
         graphProjects: [...graphProjectIds].sort(),
         checkpointRewrites,
@@ -4135,6 +4317,10 @@ export class Store {
         "DELETE FROM time_return_entries WHERE id = ?",
       );
       for (const id of candidates.ids.timeReturns) deleteTimeReturn.run(id);
+      const deleteShadowTimeReturn = this.db.prepare(
+        "DELETE FROM shadow_time_return_entries WHERE id = ?",
+      );
+      for (const id of candidates.ids.shadowTimeReturns) deleteShadowTimeReturn.run(id);
       const deleteWorkTrigger = this.db.prepare("DELETE FROM work_triggers WHERE id = ?");
       for (const id of candidates.ids.workTriggers) deleteWorkTrigger.run(id);
       const eraseMemory = this.db.prepare(

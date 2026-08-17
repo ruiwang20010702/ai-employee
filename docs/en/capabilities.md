@@ -35,6 +35,13 @@ A project manifest binds authorization to a specific project rather than to the 
 
 Changes to relevant manifest data invalidate prior plan approval hashes.
 
+The personal cockpit separates inspection from mutation. Its recipe-preview
+endpoint needs only the read token and cannot register a plan. Registration
+requires the write token plus the exact previewed 64-character plan hash; any
+recipe, input, requester, or authorization change produces a mismatch and must
+be reviewed again. A successful cockpit registration always enters approval,
+so it cannot auto-execute even when global plan execution is enabled.
+
 ## Plan controls
 
 ```mermaid
@@ -44,7 +51,9 @@ flowchart TD
     B -->|"Yes"| D["Build complete normalized plan"]
     D --> E{"Every step within capability scope?"}
     E -->|"No"| F["Deny"]
-    E -->|"Yes"| G{"Risk policy"}
+    E -->|"Yes"| P["Read-only preview: steps, risk, evidence, exact hash"]
+    P --> Q["Confirm registration of the same hash"]
+    Q --> G{"Risk policy"}
     G -->|"Allow"| H["Register executable plan"]
     G -->|"Approval"| I["Bind reviewer decision to plan hash"]
     G -->|"Deny"| F
@@ -54,9 +63,27 @@ flowchart TD
 
 An executor checks global pause, capability pause, project authorization, human takeover, cancellation, lease ownership, and budget availability before work and again before each external effect.
 
+Step order does not imply data flow. A `research`, `document_draft`, or
+`code_patch` step must declare `inputs.knowledgeStepIds` for earlier exact-slug
+knowledge reads and `inputs.evidenceStepIds` for earlier repository activity,
+same-project governed work history, research, or document artifacts. The
+executor accepts only completed, type-matching evidence
+within bounded count and content limits. Missing, later, duplicate, forged, or
+oversized references fail closed. A project-recipe shadow also passes only the
+historical-import source paths that were already verified as its evidence scope.
+
 ## Formal memory
 
 Memory is governed data, not an automatically growing prompt transcript.
+
+The personal cockpit exposes historical-project import as the same two-phase
+contract as the CLI. A local JSON bundle is parsed in the browser, while the
+loopback service re-reads only its declared project-relative source files. The
+read-token preview shows candidates, skips, duplicates, conflicts, and the
+current digest without creating a project or memory. Apply requires the write
+token and the exact typed `IMPORT-...` value, rechecks source and database state,
+and creates proposed memory only. It never confirms memory or touches an
+external system.
 
 ### Candidate lifecycle
 
@@ -146,8 +173,13 @@ npm run projects:shadow -- \
   --runtime codex --run
 ```
 
-The shadow boundary permits only `research` and `document_draft`. Code, memory,
-messaging, office, Git, and deployment capabilities fail closed. It rechecks
+The shadow boundary permits only deterministic `repository_activity_read`,
+`project_work_history_read`, `research`, and `document_draft`. The daily-report
+graph binds one date window to exact Git activity and same-project terminal
+plan/read-back metadata before both explicit evidence edges reach research.
+Shadow work history is read only from its isolated ledger. Code, memory,
+messaging, office, Git writes, and deployment
+capabilities fail closed. It rechecks
 the exact clean Git commit and historical-source digest after execution. The
 mode-`600` isolated ledger, full evidence JSON, failure record, and review note
 never connect to the production database or write to a business system. The
@@ -173,6 +205,26 @@ reuses the same time-return calculation as production, and writes a mode-`600`
 local confirmation record. It remains idempotent and never connects to or
 updates the production time-return ledger.
 
+The post-RC candidate adds a separate admission boundary. Its default remains
+zero-write and rechecks the evidence JSON, isolated SQLite plan and steps,
+owner confirmation, authorized project, selected recipe, and unchanged recipe
+baseline:
+
+```bash
+npm run projects:shadow:admit -- \
+  --evidence-directory /absolute/path/new-shadow-evidence \
+  --evidence-sha256 64_HEX
+```
+
+Only after migration 022 is deployed can an operator explicitly add
+`--apply --confirmation ADMIT-FIRST12`. The evidence SHA makes retries
+idempotent. Admission creates one confirmed shadow-evidence time-return row;
+it does not copy the isolated plan into production, create memory, send a
+message, or invoke any office, Git, or deployment adapter. The cockpit combines
+confirmed production-plan and shadow-evidence minutes while reporting their
+source counts separately. This admission path is currently a local post-RC
+candidate, not part of `v0.6.0-rc.1` or production.
+
 ### Automatic project-memory sync
 
 Manual import is the bootstrap path, not the steady-state workflow. A project
@@ -183,6 +235,7 @@ confirmed automatically:
 ```json
 {
   "mode": "automatic",
+  "expiresAt": "2026-11-11T00:00:00.000Z",
   "allowedFactKeyPrefixes": ["decision.", "principle.", "milestone."],
   "maxRetentionDays": 90,
   "sourcePaths": ["README.md", "docs/decisions.md"],
@@ -215,6 +268,29 @@ changes, and policy violations fail closed or stay in the review queue. With
 preview confirmation. Scheduling this command is optional and never enables
 message sending, work-plan execution, or proactive work by itself.
 
+The personal cockpit uses the same policy with an additional anti-tampering
+boundary. Before invoking a model, the owner can configure this policy without
+editing JSON. The dual-token, zero-write settings preview binds the current manifest,
+regular non-symlink source files and their hashes, fact prefixes, retention,
+an authorization expiry no more than 365 days away, and auto-confirm policy to
+an exact `MEMORY-AUTH-...` confirmation. Apply requires the write token,
+recomputes the preview, and atomically replaces only the `0600` project
+manifest. It never adds `project_memory_proposal` to the global capability
+gate, so project configuration alone cannot start the worker.
+
+Generating a memory preview is a separate explicit write-token action because it
+invokes the configured model service, although it writes no database state.
+The generated bundle stays only in server memory for ten minutes; the browser
+receives a bounded summary and an opaque preview ID. Apply is single-use,
+rechecks the current project, sources, memories, and global gate, and then
+follows the already-authorized automatic-confirm or review-required policy.
+The resulting proposed memories are reviewed in the same project card. The
+dashboard returns at most 20 candidates from that project, never candidates
+from another project. Ordinary confirmation and rejection require the write
+token. A conflicting candidate shows the current formal statement and can be
+confirmed only through an explicit replacement action bound to that memory ID;
+an existing duplicate is shown as non-confirmable.
+
 For a continuous local loop, run the dedicated worker. It hashes authorized
 sources before invoking a model, skips unchanged projects, and advances its
 checkpoint only after a successful database update:
@@ -226,7 +302,9 @@ AI_EMPLOYEE_CONFIG_FILE=.runtime/production.json \
 
 The worker does not load project manifests or invoke a model while the global
 capability is disabled, and ignores projects whose project-level memory mode is
-not `automatic`.
+not `automatic`. An expired project authorization is skipped before source
+inspection or model invocation; the manual preview path enforces the same
+expiry boundary.
 
 ## Human takeover
 
@@ -238,6 +316,13 @@ Recipes are versioned plan templates, not permissions. The built-in library
 contains daily reporting, project follow-up, meeting follow-up, and code
 delivery. Inputs are schema-validated, secret-shaped values are rejected, and
 the recipe identity is bound into the plan hash.
+
+The personal cockpit renders every typed recipe input in one work-handoff form
+instead of collecting fields through sequential prompts. Manual work proceeds
+from a zero-write full-plan preview to a separate exact-hash registration.
+Scheduled work uses the same preview and also reviews its first run, interval,
+daily limit, and cooldown before saving; creation rejects a stale reviewed plan
+hash.
 
 Proactive triggers are always created disabled. Enabling requires the global
 capability, while every run still revalidates requester, project, recipe,

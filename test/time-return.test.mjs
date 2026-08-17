@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTimeReturnProposal, summarizeTimeReturns } from "../src/time-return.mjs";
+import {
+  buildConfirmedShadowTimeReturn,
+  buildTimeReturnProposal,
+  summarizeTimeReturns,
+} from "../src/time-return.mjs";
 
 test("时间返还必须绑定回读证据且只有确认记录计入", () => {
   const proposal = buildTimeReturnProposal({
@@ -97,5 +101,39 @@ test("时间返还拒绝无证据和人工耗时大于基线", () => {
       baselineMethod: "measured",
     }),
     /verified outcome evidence/u,
+  );
+});
+
+test("已确认影子时间返还绑定证据摘要、提交和本人确认时间", () => {
+  const proof = buildConfirmedShadowTimeReturn({
+    projectId: "project_1",
+    recipeId: "project-follow-up",
+    evidenceSha256: "a".repeat(64),
+    planHash: "b".repeat(64),
+    repositoryCommit: "c".repeat(40),
+    baselineMinutes: 45,
+    humanActiveMinutes: 5,
+    baselineMethod: "user_confirmed",
+    confirmedAt: "2026-08-13T10:00:00.000Z",
+    outcomeEvidence: { kind: "confirmed_shadow_recipe_evidence" },
+  });
+  assert.equal(proof.id, `shadow_time_${"a".repeat(64)}`);
+  assert.equal(proof.sourceType, "shadow_evidence");
+  assert.equal(proof.workPlanId, null);
+  assert.equal(proof.returnedMinutes, 40);
+  assert.equal(proof.status, "confirmed");
+  assert.throws(
+    () => buildConfirmedShadowTimeReturn({
+      ...proof,
+      evidenceSha256: "not-a-digest",
+    }),
+    /SHA-256/u,
+  );
+  assert.throws(
+    () => buildConfirmedShadowTimeReturn({
+      ...proof,
+      baselineMinutes: 2_401,
+    }),
+    /cannot exceed 2400/u,
   );
 });

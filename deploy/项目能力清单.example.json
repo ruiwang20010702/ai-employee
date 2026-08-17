@@ -19,6 +19,18 @@
     "knowledge_read": {
       "mode": "disabled"
     },
+    "repository_activity_read": {
+      "mode": "automatic",
+      "maxCommits": 50,
+      "maxOutputBytes": 131072,
+      "timeoutMs": 30000
+    },
+    "project_work_history_read": {
+      "mode": "automatic",
+      "maxPlans": 50,
+      "maxOutputBytes": 131072,
+      "timeoutMs": 30000
+    },
     "research": { "mode": "automatic", "timeoutMs": 120000 },
     "document_draft": { "mode": "automatic", "timeoutMs": 120000 },
     "project_memory_proposal": {

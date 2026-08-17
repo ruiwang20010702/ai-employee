@@ -35,10 +35,12 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
       { id: "memory-2", project_id: "project_1", status: "proposed", source_type: "historical_project_import", statement: "负责人未确认", scope: { factKey: "project.decision.owner" } },
       { id: "memory-3", project_id: "project_1", status: "proposed", source_type: "historical_project_import", statement: "供应商交付可能延期", scope: { factKey: "risk.vendor" } },
       { id: "memory-4", project_id: "project_1", status: "confirmed", statement: "供应商交付可能延期", scope: { factKey: "risk.vendor" } },
+      { id: "memory-other", project_id: "other", status: "proposed", statement: "不得跨项目显示", scope: { factKey: "risk.other" } },
     ],
     timeReturns: [{
       projectId: "project_1", baselineMinutes: 90, humanActiveMinutes: 30,
-      returnedMinutes: 60, status: "confirmed", updatedAt: "2026-08-12T02:30:00Z",
+      returnedMinutes: 60, status: "confirmed", sourceType: "shadow_evidence",
+      updatedAt: "2026-08-12T02:30:00Z",
     }],
     recipes: [{ id: "daily-report", name: "日报" }, { id: "code-delivery", name: "代码" }],
     planSteps: new Map([["plan-1", [{
@@ -58,6 +60,7 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
       reviewRequired: 1,
       errorCode: null,
     },
+    memoryGlobalEnabled: true,
     now: new Date("2026-08-13T06:00:00.000Z"),
   });
   assert.equal(dashboard.plans.total, 2);
@@ -71,17 +74,52 @@ test("项目驾驶舱聚合计划、记忆、配方和已确认返还时间", ()
   assert.equal(dashboard.timeReturn.automationCoverage, 0.6667);
   assert.equal(dashboard.timeReturn.weeklyReturnedHours, 1);
   assert.equal(dashboard.timeReturn.weeklyAutomationCoverage, 0.6667);
+  assert.deepEqual(dashboard.timeReturnSources, { workPlans: 0, shadowEvidence: 1 });
   assert.equal(dashboard.plans.items[0].id, "plan-2");
   assert.equal(dashboard.deliverables[0].reference, "a".repeat(64));
   assert.equal(dashboard.timeReturnCandidates[0].evidencePreviews[0].content, "# 已完成的交付草稿");
   assert.equal(dashboard.timeReturnCandidates[0].evidencePreviews[0].truncated, false);
   assert.equal(dashboard.memory.items[0].statement, "负责人已确认");
+  assert.equal(dashboard.memory.reviewItems.length, 2);
+  assert.equal(dashboard.memory.reviewItems.some((item) => item.id === "memory-other"), false);
+  assert.equal(dashboard.memory.reviewItems.find((item) => item.id === "memory-2").conflicts[0].id, "memory-1");
+  assert.equal(dashboard.memory.reviewItems.find((item) => item.id === "memory-3").conflicts.length, 0);
+  assert.equal(dashboard.memory.reviewItems.find((item) => item.id === "memory-3").duplicates[0].id, "memory-4");
   assert.equal(dashboard.governedGraph.available, false);
   assert.equal(dashboard.memorySync.authorized, true);
+  assert.equal(dashboard.memorySync.configured, true);
+  assert.equal(dashboard.memorySync.expired, false);
+  assert.equal(dashboard.memorySync.globalGateEnabled, true);
   assert.equal(dashboard.memorySync.autoConfirm, true);
   assert.equal(dashboard.memorySync.state, "review_required");
   assert.equal(dashboard.memorySync.sourceDigestPrefix, "aaaaaaaaaaaa");
   assert.deepEqual(dashboard.memorySync.sourcePaths, ["README.md", "docs/decisions.md"]);
+});
+
+test("项目驾驶舱把过期记忆授权显示为不可运行而不是继续授权", () => {
+  const dashboard = buildProjectDashboard({
+    manifest: {
+      projectId: "project_1",
+      name: "项目一",
+      profile: { selectedRecipeIds: [], memoryScope: { retentionDays: 90 } },
+      capabilities: {
+        project_memory_proposal: {
+          mode: "automatic",
+          expiresAt: "2026-08-13T05:59:59.000Z",
+          sourcePaths: ["README.md"],
+          allowedFactKeyPrefixes: ["decision."],
+          maxRetentionDays: 90,
+          autoConfirm: true,
+        },
+      },
+    },
+    memoryGlobalEnabled: true,
+    now: new Date("2026-08-13T06:00:00.000Z"),
+  });
+  assert.equal(dashboard.memorySync.configured, true);
+  assert.equal(dashboard.memorySync.expired, true);
+  assert.equal(dashboard.memorySync.authorized, false);
+  assert.equal(dashboard.memorySync.globalGateEnabled, true);
 });
 
 test("项目驾驶舱只给待核销工作返回有界可审阅交付物正文", () => {
