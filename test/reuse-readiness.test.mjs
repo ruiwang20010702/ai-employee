@@ -16,16 +16,6 @@ async function fixture(t) {
   return { directory, configPath: join(directory, ".runtime", "production.json") };
 }
 
-async function fakeMemorySourceInitializer({ configPath, root }) {
-  return {
-    sourceId: "foursday",
-    root: root ?? join(configPath, "..", "gbrain", "brain"),
-    federated: false,
-    created: true,
-    registered: true,
-  };
-}
-
 test("新环境向导默认使用当前工作目录而不是安装包目录", () => {
   assert.equal(
     reuseConfigPath(["check"], "/workspace/new-owner"),
@@ -57,7 +47,12 @@ test("完整安全配置通过本地复用门禁但不会执行联网预检", as
   const values = JSON.parse(await readFile(configPath, "utf8"));
   Object.assign(values, {
     DATABASE_URL: "env://AI_EMPLOYEE_DATABASE_URL",
-    AI_EMPLOYEE_GBRAIN_DATABASE_URL: "env://FOURSDAY_GBRAIN_DATABASE_URL",
+    AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED: true,
+    AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL: "https://memory.example.test/mcp",
+    AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL: "https://memory.example.test",
+    AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID: "foursday-reader",
+    AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET:
+      "env://FOURSDAY_PERSONAL_MEMORY_CLIENT_SECRET",
     AI_EMPLOYEE_TENANT_ID: "tenant-1",
     AI_EMPLOYEE_APPROVER: "operator-1",
     DINGTALK_TARGET_USER_IDS: "target-1",
@@ -90,7 +85,12 @@ test("复用检查按配置选择 Claude Code 而不再强制 Codex", async (t) 
   const values = JSON.parse(await readFile(configPath, "utf8"));
   Object.assign(values, {
     DATABASE_URL: "env://AI_EMPLOYEE_DATABASE_URL",
-    AI_EMPLOYEE_GBRAIN_DATABASE_URL: "env://FOURSDAY_GBRAIN_DATABASE_URL",
+    AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED: true,
+    AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL: "https://memory.example.test/mcp",
+    AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL: "https://memory.example.test",
+    AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID: "foursday-reader",
+    AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET:
+      "env://FOURSDAY_PERSONAL_MEMORY_CLIENT_SECRET",
     AI_EMPLOYEE_TENANT_ID: "tenant-1",
     AI_EMPLOYEE_APPROVER: "operator-1",
     DINGTALK_TARGET_USER_IDS: "target-1",
@@ -201,18 +201,21 @@ test("初始化入口默认只预览，显式应用后创建配置且拒绝覆�
   const result = await runReuseGuide({
     args: ["init", "--apply"],
     cwd: directory,
-    memorySourceInitializer: fakeMemorySourceInitializer,
   });
   assert.equal(result.path, configPath);
   assert.equal(result.mode, "600");
   assert.equal(result.executed, true);
   assert.equal(result.generatedSecrets.length, 0);
   assert.equal(result.externalSecretReferences.length, 4);
+  assert.equal(result.memorySource, undefined);
+  await assert.rejects(
+    readFile(join(directory, ".runtime", "gbrain", "brain", "README.md")),
+    (error) => error.code === "ENOENT",
+  );
   await assert.rejects(
     runReuseGuide({
       args: ["init", "--apply"],
       cwd: directory,
-      memorySourceInitializer: fakeMemorySourceInitializer,
     }),
     (error) => error.code === "EEXIST",
   );
@@ -258,7 +261,6 @@ test("新环境钥匙串命令默认预览且显式应用参数单独传递", as
   await runReuseGuide({
     args: ["init", "--apply"],
     cwd: directory,
-    memorySourceInitializer: fakeMemorySourceInitializer,
   });
   const calls = [];
   const keychainProvisioner = async (options) => {

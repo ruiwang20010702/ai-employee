@@ -13,6 +13,7 @@ import {
   gbrainCommandEnvironment,
   resolveGbrainPath,
 } from "./gbrain-page.mjs";
+import { createPersonalMemoryClient } from "./personal-memory-client.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -166,14 +167,28 @@ export function validateProductionReadinessConfig(
   config,
   environment = process.env,
 ) {
-  if ((config.memoryAuthorityMode ?? "gbrain") !== "gbrain") {
-    throw new Error("Production memory authority must use gbrain");
+  const legacyGbrainAuthority = config.memoryAuthorityMode === "gbrain";
+  if (!legacyGbrainAuthority && !config.personalMemoryEnabled) {
+    throw new Error("Production must configure the personal gbrain memory base");
+  }
+  if (legacyGbrainAuthority && config.personalMemoryEnabled) {
+    throw new Error("Production cannot enable personal memory and the legacy overlay together");
   }
   if (config.memoryAuthorityAutoConfirm && !config.memoryAuthorityWrite) {
     throw new Error("Memory authority auto-confirm requires authority writes");
   }
-  if (!config.gbrainHome || !config.gbrainDatabaseUrl) {
+  if (legacyGbrainAuthority && (!config.gbrainHome || !config.gbrainDatabaseUrl)) {
     throw new Error("Production Foursday gbrain must use an isolated home and database");
+  }
+  if (
+    config.personalMemoryEnabled &&
+    (config.memoryAuthorityWrite ||
+      config.memoryAuthorityAutoConfirm ||
+      config.memoryAuthorityRoot ||
+      config.gbrainHome ||
+      config.gbrainDatabaseUrl)
+  ) {
+    throw new Error("Personal memory mode must not retain the legacy overlay write configuration");
   }
   validateBase64Key("AI_EMPLOYEE_DATA_KEY", config.dataKey);
   validateBase64Key(
@@ -232,6 +247,7 @@ export async function checkProductionReadiness({
   claudeCodeChecker = checkClaudeCodeRuntime,
   dwsChecker = checkDwsRuntime,
   gbrainChecker = checkGbrainRuntime,
+  personalMemoryClientFactory = createPersonalMemoryClient,
   migrationInspector = inspectMigrationStatus,
   allowPendingMigrations = false,
 } = {}) {
@@ -247,10 +263,13 @@ export async function checkProductionReadiness({
       );
     }
   }
-  const gbrainRequired = (config.memoryAuthorityMode ?? "gbrain") === "gbrain" || [...projects.values()].some(
+  const projectKnowledgeRequired = [...projects.values()].some(
     (project) => project.capabilities.knowledge_read != null &&
       project.capabilities.knowledge_read.mode !== "disabled",
   );
+  const personalMemoryRequired = config.personalMemoryEnabled === true;
+  const gbrainRequired = config.memoryAuthorityMode === "gbrain" ||
+    (projectKnowledgeRequired && !personalMemoryRequired);
   const selectedAgentRuntime = config.agentRuntime ?? "codex";
   const agentExecutable = selectedAgentRuntime === "claude-code"
     ? ["Claude Code", config.claudeCodePath]
@@ -265,7 +284,13 @@ export async function checkProductionReadiness({
     executableChecks.push(executableChecker("gbrain", config.gbrainPath));
   }
   await Promise.all(executableChecks);
-  const [agentRuntime, dwsRuntime, gbrainRuntime] = await Promise.all([
+  const personalMemoryClient = personalMemoryRequired
+    ? personalMemoryClientFactory(config)
+    : null;
+  if (personalMemoryRequired && !personalMemoryClient) {
+    throw new Error("Personal memory client is unavailable");
+  }
+  const [agentRuntime, dwsRuntime, gbrainRuntime, personalMemoryRuntime] = await Promise.all([
     selectedAgentRuntime === "claude-code"
       ? claudeCodeChecker(config.claudeCodePath)
       : codexChecker(config.codexPath),
@@ -278,6 +303,9 @@ export async function checkProductionReadiness({
             gbrainDatabaseUrl: config.gbrainDatabaseUrl,
           })
         : gbrainChecker(config.gbrainPath)
+      : Promise.resolve({ required: false }),
+    personalMemoryClient
+      ? personalMemoryClient.probe()
       : Promise.resolve({ required: false }),
   ]);
 
@@ -296,14 +324,16 @@ export async function checkProductionReadiness({
       codexRuntime: selectedAgentRuntime === "codex" ? agentRuntime : null,
       dwsRuntime,
       gbrainRuntime,
+      personalMemoryRuntime,
       memoryAuthority: {
-        mode: config.memoryAuthorityMode ?? "gbrain",
+        mode: personalMemoryRequired ? "personal_gbrain" : config.memoryAuthorityMode,
         writeEnabled: config.memoryAuthorityWrite === true,
         autoConfirm: config.memoryAuthorityAutoConfirm === true,
-        durableStore: "gbrain_markdown",
+        durableStore: personalMemoryRequired ? "personal_private_git" : "gbrain_markdown",
         runtimeStore: "postgresql",
-        indexStore: "dedicated_postgresql",
-        isolatedHome: Boolean(config.gbrainHome),
+        candidateStore: "postgresql",
+        indexStore: personalMemoryRequired ? "personal_gbrain_postgresql" : "dedicated_postgresql",
+        isolatedHome: personalMemoryRequired ? false : Boolean(config.gbrainHome),
         databaseDistinctFromRuntime: true,
       },
     };

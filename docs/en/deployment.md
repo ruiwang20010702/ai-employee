@@ -152,10 +152,13 @@ gate plus separate group and clarification gates. Group auto-approval still
 requires an allowlisted explicit mention, and group clarifications remain
 approval-bound.
 
-Production gbrain must use a dedicated `AI_EMPLOYEE_GBRAIN_HOME` and an
-externally injected `AI_EMPLOYEE_GBRAIN_DATABASE_URL` that does not point to the
-Foursday transaction database or the operator's personal gbrain database. The
-database URL must not be persisted in gbrain's `config.json`.
+Production reads the operator's existing personal gbrain through a dedicated
+OAuth client. Configure `AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED=true`, credential-
+free HTTPS MCP and issuer URLs, a client ID, and an externally injected client
+secret. The server identity must read back as OAuth, source `default`, and
+scope `read` without `write` or `admin`. Do not configure the legacy Foursday
+`GBRAIN_HOME`, gbrain database URL, authority root, or overlay writes at the
+same time.
 
 ## V2.3 deployed-code rollout boundary
 

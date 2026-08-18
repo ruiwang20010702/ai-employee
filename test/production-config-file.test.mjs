@@ -56,7 +56,7 @@ test("生产运行拒绝内联密钥但迁移工具仍可只读识别旧配置",
   assert.equal(result.values.DATABASE_URL, "postgresql://legacy-inline-secret");
 });
 
-test("GitHub 生产示例的五项密钥统一使用正式钥匙串服务", async () => {
+test("GitHub 生产示例的六项密钥统一使用正式钥匙串服务", async () => {
   const examplePath = fileURLToPath(
     new URL("../deploy/GitHub生产配置.example.json", import.meta.url),
   );
@@ -67,6 +67,7 @@ test("GitHub 生产示例的五项密钥统一使用正式钥匙串服务", asyn
     AI_EMPLOYEE_BACKUP_KEY: "backup-key",
     AI_EMPLOYEE_ADMIN_READ_TOKEN: "admin-read-token",
     AI_EMPLOYEE_ADMIN_WRITE_TOKEN: "admin-write-token",
+    AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET: "personal-memory-client-secret",
   };
   for (const [key, account] of Object.entries(expectedAccounts)) {
     assert.equal(
@@ -481,6 +482,74 @@ test("生产默认使用 gbrain 记忆权威且自动确认必须先开放写入
       () => loadConfig({ requireTargets: false }),
       /requires gbrain authority mode/u,
     );
+  } finally {
+    for (const name of names) {
+      if (previous[name] == null) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
+test("个人记忆基座必须使用同源 HTTPS 和外部注入的只读 OAuth 凭据", async () => {
+  const names = [
+    "AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_TIMEOUT_MS",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_MAX_RESULTS",
+  ];
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    for (const name of names) delete process.env[name];
+    assert.equal(loadConfig({ requireTargets: false }).personalMemoryEnabled, false);
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED = "true";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /requires MCP URL, issuer, client id and client secret/u,
+    );
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL =
+      "https://memory.example.test/mcp";
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL =
+      "https://memory.example.test";
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID = "foursday-reader";
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET = "s".repeat(32);
+    const config = loadConfig({ requireTargets: false });
+    assert.equal(config.personalMemoryEnabled, true);
+    assert.equal(config.personalMemoryTimeoutMs, 10_000);
+    assert.equal(config.personalMemoryMaxResults, 8);
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL =
+      "https://issuer.example.test";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /share one HTTPS origin/u,
+    );
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL =
+      "https://memory.example.test";
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_MAX_RESULTS = "11";
+    assert.throws(
+      () => loadConfig({ requireTargets: false }),
+      /must be <= 10/u,
+    );
+
+    const path = await configFile({
+      AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED: true,
+      AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL: "https://memory.example.test/mcp",
+      AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL: "https://memory.example.test",
+      AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID: "foursday-reader",
+      AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET:
+        "keychain://foursday-production/personal-memory-client-secret",
+    });
+    const environment = {};
+    await applyProductionConfigFile({
+      path,
+      environment,
+      secretResolverOptions: {
+        keychainReader: async () => "x".repeat(32),
+      },
+    });
+    assert.equal(environment.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET, "x".repeat(32));
   } finally {
     for (const name of names) {
       if (previous[name] == null) delete process.env[name];

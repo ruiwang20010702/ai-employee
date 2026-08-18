@@ -528,24 +528,16 @@ export async function verifyReusableInstallation({
       "Independent workspace paths or permissions are not isolated",
     );
     assert(
-      /^foursday-[a-f0-9]{16}$/u.test(workspaceValuesA.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID) &&
-      /^foursday-[a-f0-9]{16}$/u.test(workspaceValuesB.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID) &&
-      workspaceValuesA.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID !==
-        workspaceValuesB.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID &&
-      workspaceValuesA.AI_EMPLOYEE_GBRAIN_HOME !==
-        workspaceValuesB.AI_EMPLOYEE_GBRAIN_HOME &&
-      initializedA.memorySource.registered === false &&
-      initializedB.memorySource.registered === false &&
-      initializedA.memorySource.registrationPending ===
-        "gbrain_database_unconfigured" &&
-      initializedB.memorySource.registrationPending ===
-        "gbrain_database_unconfigured",
-      "Independent workspaces reused a gbrain source or hid pending registration",
+      workspaceValuesA.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE === "disabled" &&
+      workspaceValuesB.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE === "disabled" &&
+      workspaceValuesA.AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED === false &&
+      workspaceValuesB.AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED === false &&
+      workspaceValuesA.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID == null &&
+      workspaceValuesB.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID == null &&
+      initializedA.memoryArchitecture === "personal_gbrain_plus_postgresql_runtime" &&
+      initializedB.memoryArchitecture === "personal_gbrain_plus_postgresql_runtime",
+      "Reusable initialization recreated a duplicate gbrain overlay",
     );
-    await Promise.all([
-      access(join(initializedA.memorySource.root, "projects", "README.md")),
-      access(join(initializedB.memorySource.root, "prospective", "README.md")),
-    ]);
     let workspaceOverwriteRefused = false;
     try {
       await run(installedGuide, ["init", "--apply"], { cwd: workspaceA, env: noGbrainEnvironment });
@@ -604,7 +596,13 @@ export async function verifyReusableInstallation({
       secretPreview.secretsPrinted === false,
       "Installed Keychain provisioning command is not safely previewable",
     );
-    assert(config.GBRAIN_PATH === "gbrain", "Generated production config is missing gbrain runtime path");
+    assert(
+      config.GBRAIN_PATH == null &&
+      config.AI_EMPLOYEE_GBRAIN_HOME == null &&
+      config.AI_EMPLOYEE_GBRAIN_DATABASE_URL == null &&
+      config.AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED === false,
+      "Generated production config recreated a duplicate gbrain overlay",
+    );
     for (const key of [
       "AI_EMPLOYEE_TENANT_ID",
       "AI_EMPLOYEE_APPROVER",
@@ -628,8 +626,12 @@ export async function verifyReusableInstallation({
 
     Object.assign(config, {
       DATABASE_URL: "env://AI_EMPLOYEE_REUSE_DATABASE_URL",
-      AI_EMPLOYEE_GBRAIN_DATABASE_URL:
-        "env://AI_EMPLOYEE_REUSE_GBRAIN_DATABASE_URL",
+      AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED: true,
+      AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL: "https://memory.example.test/mcp",
+      AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL: "https://memory.example.test",
+      AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID: "foursday-reader",
+      AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET:
+        "env://AI_EMPLOYEE_REUSE_PERSONAL_MEMORY_CLIENT_SECRET",
       AI_EMPLOYEE_DATA_KEY: "env://AI_EMPLOYEE_REUSE_DATA_KEY",
       AI_EMPLOYEE_BACKUP_KEY: "env://AI_EMPLOYEE_REUSE_BACKUP_KEY",
       AI_EMPLOYEE_ADMIN_READ_TOKEN: "env://AI_EMPLOYEE_REUSE_ADMIN_READ_TOKEN",
@@ -720,8 +722,7 @@ export async function verifyReusableInstallation({
     const runtimeEnvironment = {
       AI_EMPLOYEE_CONFIG_FILE: configPath,
       AI_EMPLOYEE_REUSE_DATABASE_URL: "postgresql://reuse:reuse@127.0.0.1:5432/reuse",
-      AI_EMPLOYEE_REUSE_GBRAIN_DATABASE_URL:
-        "postgresql://reuse_gbrain:reuse@127.0.0.1:5432/reuse_gbrain",
+      AI_EMPLOYEE_REUSE_PERSONAL_MEMORY_CLIENT_SECRET: "s".repeat(32),
       AI_EMPLOYEE_REUSE_DATA_KEY: Buffer.alloc(32, 1).toString("base64"),
       AI_EMPLOYEE_REUSE_BACKUP_KEY: Buffer.alloc(32, 2).toString("base64"),
       AI_EMPLOYEE_REUSE_ADMIN_READ_TOKEN: "r".repeat(64),

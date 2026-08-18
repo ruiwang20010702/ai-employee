@@ -88,31 +88,20 @@ memory. People, projects, principles, and knowledge are sibling semantic
 namespaces—not a ladder.
 
 ```text
-Foursday PostgreSQL  → work state, permissions, leases, encrypted projections
-gbrain Markdown      → reviewable long-term memory authority
-gbrain PostgreSQL    → rebuildable search / entity / graph index
+Personal PRIVATE gbrain Git → every durable, readable memory and source
+Personal gbrain PostgreSQL  → rebuildable search / entity / graph index
+Foursday PostgreSQL         → hidden runtime state and promotion candidates
 ```
 
-Personal knowledge stays in its own gbrain database and `default` source.
-Automated work memory uses a separate `GBRAIN_HOME`, PostgreSQL database, and
-non-federated `foursday` source; every read, write, and sync binds all three.
-New installations initialize:
-
-```text
-atoms/  conversations/  people/  preferences/
-projects/  concepts/  prospective/
-```
-
-Low-risk facts become usable only after Markdown write, a path-scoped Git
-commit, exact gbrain read-back, and PostgreSQL projection. Each project keeps
-at most 12 core authority facts by default, and a matched conversation loads
-at most those 12 facts for that project; detailed rules
-stay in project knowledge pages and are read only when needed. Revocation,
-replacement, deletion, and privacy erasure atomically enqueue cleanup; the
-worker commits the managed Markdown deletion, syncs, verifies that the original
-slug is unreadable, and removes the temporary file outside the source. Failures
-commit a restoration and retry. Conflicts stay quarantined. Credentials,
-PII, sensitive person material, and confidential candidates are rejected.
+Foursday reads the authorized personal `default` source in place; it does not
+copy personal pages into a second memory repository. A dedicated OAuth client
+is bound to `default` with `read` only, and startup fails if `write` or `admin`
+appears. Reply context uses bounded semantic retrieval, while `knowledge_read`
+still requires exact project-authorized slugs. Message bodies, drafts, leases,
+approvals, execution state, and unpromoted candidates stay in Foursday
+PostgreSQL and never become personal memory automatically. Credentials, PII,
+sensitive person material, and confidential results are filtered before model
+context assembly.
 
 ## Quick Start
 
@@ -154,19 +143,16 @@ and verified [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39)
 
 ```bash
 foursday init                 # zero-write plan
-foursday init --apply         # protected config + isolated gbrain source
+foursday init --apply         # protected config; no duplicate memory repository
 foursday secrets --apply      # generate Keychain secrets; never save them in config
 foursday check
 ```
 
-`init --apply` creates the seven-directory Markdown skeleton, an independent Git
-repository, and an isolated `GBRAIN_HOME`. It registers the non-federated
-`foursday` source only after a dedicated gbrain PostgreSQL database is
-configured. Memory writes and auto-confirm remain off.
-
-The memory Git repository has no remote by default and is never pushed to the
-public Foursday code repository. Off-device backup should use a separate
-private repository with secret and PII scanning before every push.
+`init --apply` creates only the protected Foursday runtime configuration. To
+use long-term memory, register a source-scoped, read-only OAuth client against
+your existing personal gbrain and inject its client secret from Keychain or an
+environment secret. The public Foursday repository never receives personal
+Markdown, tokens, or database URLs.
 
 ## Governed Work Graph
 

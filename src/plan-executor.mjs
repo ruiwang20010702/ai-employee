@@ -12,6 +12,7 @@ import { isMainModule } from "./main-module.mjs";
 import { pausedPlanScopes } from "./scoped-pause.mjs";
 import { loadWorkRecipes } from "./recipe-library.mjs";
 import { captureWorkPlanGraph } from "./governed-work-graph-runtime.mjs";
+import { createPersonalMemoryClient } from "./personal-memory-client.mjs";
 
 function log(type, fields = {}) {
   console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
@@ -187,12 +188,17 @@ export async function runPlanExecutor({
   config = loadConfig({ requireTargets: false, production: true }),
   store = null,
   adapters = null,
+  personalMemoryClient = undefined,
   once = process.argv.includes("--once"),
   executionOwner = `${hostname()}:${process.pid}:${randomUUID()}`,
 } = {}) {
   store = store ? await store.open() : await createProductionStore(config);
+  if (personalMemoryClient === undefined) {
+    personalMemoryClient = createPersonalMemoryClient(config);
+  }
   adapters = adapters ?? createControlledWorkAdapters({
     codexPath: config.codexPath,
+    personalMemoryClient,
     dwsPath: config.dwsPath,
     gbrainPath: config.gbrainPath,
     gbrainSourceId: config.memoryAuthoritySourceId,

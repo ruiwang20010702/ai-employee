@@ -154,28 +154,22 @@ parallel kinds. Person, project, principle, and knowledge facts are sibling
 semantic namespaces. Consolidation and retrieval are lifecycle services rather
 than additional tiers.
 
-Git-backed Markdown in gbrain is the durable semantic authority. gbrain's own
-PostgreSQL data is a rebuildable knowledge index. The Foursday PostgreSQL
-database stores encrypted runtime projections, original provenance, access
-leases, supersession, permissions, and audit. Production formal memory does not
-use SQLite; the SQLite adapter remains isolated to public-pilot sessions and
-tests.
+The user's PRIVATE Git-backed personal gbrain is the only durable readable
+authority. Personal gbrain PostgreSQL is a rebuildable knowledge index.
+Foursday PostgreSQL stores runtime state, original provenance, permissions,
+audit, project routing aliases, and unpromoted candidates. Production does not
+copy personal page content into a separate Foursday source or database.
 
-When `AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE=true`, eligible low-risk candidates
-are written to deterministic `atoms/foursday/` pages. The runtime then reads the
-exact page back and verifies its slug, statement block, digest, and version
-before creating a usable PostgreSQL projection. `AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM`
-is a separate gate, requires writes to be enabled, and also applies
-`AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM_MIN_CONFIDENCE`. Conflicts remain
-quarantined, while credentials, PII, sensitive person material, and confidential
-candidates never enter the authority page.
+Production enables `AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED` and disables the
+legacy authority writer. The OAuth client must identify as source `default`
+with `read` and without `write` or `admin`. Reply generation uses bounded
+semantic retrieval; plan-based `knowledge_read` still requires exact slugs and
+project-approved prefixes. Credentials, PII, sensitive person material, and
+confidential results are filtered before any model context is built.
 
-Migration 023 adds a transactional cleanup outbox. Revocation, explicit
-replacement, permanent deletion, and privacy erasure enqueue the encrypted
-managed slug, source, and digest. The five-minute memory service temporarily
-moves the digest-matched Markdown file outside the gbrain source, commits that
-single-path deletion, syncs the exact source, requires the original slug to be
-unreadable, and then removes the temporary file. A failed sync or read-back
+Migration 023 and the legacy cleanup outbox remain only for historical overlay
+records. New candidates stay in Foursday PostgreSQL until a separate promotion
+capability writes and reads them back through the personal gbrain authority.
 commits a restoration and leaves a retryable job.
 
 ### Project recipe shadow validation
@@ -341,8 +335,8 @@ expiry boundary.
 
 Exact project knowledge reads are independently bounded by
 `knowledge_read.allowedSlugPrefixes`, page and byte limits, and the configured
-Foursday gbrain source. The executor never falls back to the personal `default`
-source, and downstream steps must cite the read through `knowledgeStepIds`.
+personal `default` read-only OAuth identity. Downstream steps must cite the read
+through `knowledgeStepIds`; no read grants a write or execution capability.
 
 ## Human takeover
 

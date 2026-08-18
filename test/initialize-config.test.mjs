@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { initializeProductionConfig } from "../scripts/初始化生产配置.mjs";
 
-test("production config initializer writes protected isolated references and refuses overwrite", async () => {
+test("production config initializer uses personal gbrain base without creating an overlay", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ai-employee-config-"));
   const destination = join(directory, "nested", "production.json");
   const result = await initializeProductionConfig({ outputPath: destination });
@@ -25,23 +25,19 @@ test("production config initializer writes protected isolated references and ref
   assert.equal(config.CODEX_PATH, "codex");
   assert.equal(config.CLAUDE_CODE_PATH, "claude");
   assert.equal(config.AI_EMPLOYEE_AGENT_RUNTIME, "codex");
-  assert.equal(config.GBRAIN_PATH, "gbrain");
-  assert.equal(
-    config.AI_EMPLOYEE_GBRAIN_HOME,
-    join(directory, "nested", "gbrain-runtime"),
-  );
-  assert.equal(config.AI_EMPLOYEE_GBRAIN_DATABASE_URL, "");
-  assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE, "gbrain");
-  assert.match(
-    config.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID,
-    /^foursday-[a-f0-9]{16}$/u,
-  );
+  assert.equal(config.GBRAIN_PATH, undefined);
+  assert.equal(config.AI_EMPLOYEE_GBRAIN_HOME, undefined);
+  assert.equal(config.AI_EMPLOYEE_GBRAIN_DATABASE_URL, undefined);
+  assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE, "disabled");
+  assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID, undefined);
   assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE, false);
   assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM, false);
-  assert.equal(
-    config.AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT,
-    join(directory, "nested", "gbrain", "brain"),
-  );
+  assert.equal(config.AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT, undefined);
+  assert.equal(config.AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED, false);
+  assert.equal(config.AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL, "");
+  assert.equal(config.AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL, "");
+  assert.equal(config.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID, "");
+  assert.equal(config.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET, undefined);
   assert.equal(config.AI_EMPLOYEE_TENANT_ID, "");
   assert.equal(config.AI_EMPLOYEE_APPROVER, "");
   assert.equal(config.DINGTALK_TARGET_USER_IDS, "");
@@ -59,12 +55,20 @@ test("production config initializer writes protected isolated references and ref
   ]);
   assert.deepEqual(result.requiredEdits, [
     "DATABASE_URL",
-    "AI_EMPLOYEE_GBRAIN_DATABASE_URL",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET",
     "AI_EMPLOYEE_TENANT_ID",
     "DINGTALK_TARGET_USER_IDS or DINGTALK_TARGET_GROUP_IDS",
     "DINGTALK_SELF_USER_ID",
     "AI_EMPLOYEE_APPROVER",
   ]);
+  assert.equal(
+    result.memoryArchitecture,
+    "personal_gbrain_plus_postgresql_runtime",
+  );
 
   await assert.rejects(
     () => initializeProductionConfig({ outputPath: destination }),

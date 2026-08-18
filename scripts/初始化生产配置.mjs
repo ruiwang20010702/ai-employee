@@ -1,13 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultProductionConfigPath } from "../src/production-config-file.mjs";
 import { isMainModule } from "../src/main-module.mjs";
-import {
-  memorySourceBootstrapPlan,
-  memorySourceConfigValues,
-} from "../src/memory-source-bootstrap.mjs";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const examplePath = join(projectRoot, "deploy", "生产配置.example.json");
@@ -18,14 +14,6 @@ function keychainReference(service, account) {
 
 function uniqueKeychainService() {
   return `foursday-${randomBytes(8).toString("hex")}`;
-}
-
-function isolatedMemorySourceId(keychainService) {
-  if (/^foursday-[a-f0-9]{16}$/u.test(keychainService)) return keychainService;
-  return `foursday-${createHash("sha256")
-    .update(String(keychainService))
-    .digest("hex")
-    .slice(0, 16)}`;
 }
 
 export async function initializeProductionConfig({
@@ -56,13 +44,21 @@ export async function initializeProductionConfig({
   values.CODEX_PATH = "codex";
   values.CLAUDE_CODE_PATH = "claude";
   values.AI_EMPLOYEE_AGENT_RUNTIME = "codex";
-  values.GBRAIN_PATH = "gbrain";
-  const memorySource = memorySourceBootstrapPlan({
-    configPath: destination,
-    sourceId: isolatedMemorySourceId(keychainService),
-  });
-  Object.assign(values, memorySourceConfigValues(memorySource));
-  values.AI_EMPLOYEE_GBRAIN_DATABASE_URL = "";
+  for (const key of [
+    "GBRAIN_PATH",
+    "AI_EMPLOYEE_GBRAIN_HOME",
+    "AI_EMPLOYEE_GBRAIN_DATABASE_URL",
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT",
+    "AI_EMPLOYEE_MEMORY_AUTHORITY_SOURCE_ID",
+    "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET",
+  ]) delete values[key];
+  values.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE = "disabled";
+  values.AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE = false;
+  values.AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM = false;
+  values.AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED = false;
+  values.AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL = "";
+  values.AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL = "";
+  values.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID = "";
   values.GH_PATH = "";
   values.AI_EMPLOYEE_TENANT_ID = "";
   values.AI_EMPLOYEE_APPROVER = "";
@@ -86,13 +82,17 @@ export async function initializeProductionConfig({
     requiredSecretProvisioning: Object.keys(accounts),
     requiredEdits: [
       "DATABASE_URL",
-      "AI_EMPLOYEE_GBRAIN_DATABASE_URL",
+      "AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED",
+      "AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL",
+      "AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL",
+      "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID",
+      "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET",
       "AI_EMPLOYEE_TENANT_ID",
       "DINGTALK_TARGET_USER_IDS or DINGTALK_TARGET_GROUP_IDS",
       "DINGTALK_SELF_USER_ID",
       "AI_EMPLOYEE_APPROVER",
     ],
-    memorySource,
+    memoryArchitecture: "personal_gbrain_plus_postgresql_runtime",
   };
 }
 

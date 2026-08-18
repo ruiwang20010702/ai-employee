@@ -130,15 +130,23 @@ async function inspectConfig(configPath) {
     result.requiredEdits.push("填写数据库连接");
   }
   if (
-    !configured(values.AI_EMPLOYEE_GBRAIN_DATABASE_URL) ||
-    /replace|change_me|example/iu.test(
-      String(values.AI_EMPLOYEE_GBRAIN_DATABASE_URL),
-    )
+    values.AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED !== true ||
+    !configured(values.AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL) ||
+    !configured(values.AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL) ||
+    !configured(values.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID) ||
+    !configured(values.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET)
   ) {
-    result.requiredEdits.push("填写 Foursday gbrain 数据库连接");
+    result.requiredEdits.push("配置个人 gbrain 只读 OAuth");
   }
-  if (!isAbsolute(String(values.AI_EMPLOYEE_GBRAIN_HOME ?? ""))) {
-    result.requiredEdits.push("填写 Foursday 独立 GBRAIN_HOME");
+  if (
+    values.AI_EMPLOYEE_MEMORY_AUTHORITY_MODE !== "disabled" ||
+    values.AI_EMPLOYEE_MEMORY_AUTHORITY_WRITE === true ||
+    values.AI_EMPLOYEE_MEMORY_AUTHORITY_AUTO_CONFIRM === true ||
+    configured(values.AI_EMPLOYEE_GBRAIN_HOME) ||
+    configured(values.AI_EMPLOYEE_GBRAIN_DATABASE_URL) ||
+    configured(values.AI_EMPLOYEE_MEMORY_AUTHORITY_ROOT)
+  ) {
+    result.requiredEdits.push("关闭旧 Foursday gbrain overlay");
   }
   if (!configured(values.AI_EMPLOYEE_TENANT_ID)) result.requiredEdits.push("填写租户编号");
   if (!configured(values.AI_EMPLOYEE_APPROVER)) result.requiredEdits.push("填写操作人编号");

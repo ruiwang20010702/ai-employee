@@ -189,7 +189,7 @@ export function loadConfig({
   }
   const memoryAuthorityMode = choice(
     "AI_EMPLOYEE_MEMORY_AUTHORITY_MODE",
-    production ? "gbrain" : "disabled",
+    "disabled",
     ["disabled", "gbrain"],
   );
   const memoryAuthorityWrite = boolean(
@@ -264,6 +264,70 @@ export function loadConfig({
   }
   if (memoryAuthorityWrite && (!gbrainHome || !gbrainDatabaseUrl)) {
     throw new Error("Memory authority writes require an isolated Foursday gbrain home and database");
+  }
+  const personalMemoryEnabled = boolean(
+    "AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED",
+    false,
+  );
+  const personalMemoryMcpUrl =
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL?.trim() || null;
+  const personalMemoryIssuerUrl =
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL?.trim() || null;
+  const personalMemoryClientId =
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID?.trim() || null;
+  const personalMemoryClientSecret =
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET?.trim() || null;
+  const personalMemoryTimeoutMs = positiveInteger(
+    "AI_EMPLOYEE_PERSONAL_MEMORY_TIMEOUT_MS",
+    10_000,
+  );
+  const personalMemoryMaxResults = positiveInteger(
+    "AI_EMPLOYEE_PERSONAL_MEMORY_MAX_RESULTS",
+    8,
+  );
+  if (personalMemoryTimeoutMs < 1_000 || personalMemoryTimeoutMs > 60_000) {
+    throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_TIMEOUT_MS must be 1000-60000");
+  }
+  if (personalMemoryMaxResults > 10) {
+    throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_MAX_RESULTS must be <= 10");
+  }
+  if (personalMemoryEnabled) {
+    if (
+      !personalMemoryMcpUrl ||
+      !personalMemoryIssuerUrl ||
+      !personalMemoryClientId ||
+      !personalMemoryClientSecret
+    ) {
+      throw new Error("Personal memory requires MCP URL, issuer, client id and client secret");
+    }
+    let mcpUrl;
+    let issuerUrl;
+    try {
+      mcpUrl = new URL(personalMemoryMcpUrl);
+      issuerUrl = new URL(personalMemoryIssuerUrl);
+    } catch {
+      throw new Error("Personal memory URLs are invalid");
+    }
+    for (const url of [mcpUrl, issuerUrl]) {
+      if (
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
+      ) {
+        throw new Error("Personal memory URLs must be credential-free HTTPS URLs");
+      }
+    }
+    if (mcpUrl.origin !== issuerUrl.origin) {
+      throw new Error("Personal memory MCP and issuer must share one HTTPS origin");
+    }
+    if (!/^[A-Za-z0-9._:-]{8,200}$/u.test(personalMemoryClientId)) {
+      throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID is invalid");
+    }
+    if (personalMemoryClientSecret.length < 24) {
+      throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET is invalid");
+    }
   }
   const alertIntervalMs = positiveNumber(
     "AI_EMPLOYEE_ALERT_INTERVAL_MS",
@@ -498,6 +562,13 @@ export function loadConfig({
     memoryAuthoritySourceId,
     gbrainHome,
     gbrainDatabaseUrl,
+    personalMemoryEnabled,
+    personalMemoryMcpUrl,
+    personalMemoryIssuerUrl,
+    personalMemoryClientId,
+    personalMemoryClientSecret,
+    personalMemoryTimeoutMs,
+    personalMemoryMaxResults,
     requireMessageReconciliation: boolean(
       "AI_EMPLOYEE_REQUIRE_MESSAGE_RECONCILIATION",
       false,

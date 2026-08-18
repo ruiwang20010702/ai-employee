@@ -19,6 +19,7 @@ import { sanitizeDraftMemoryCandidates } from "./memory-candidate.mjs";
 import { proposeWorkPlanForTask } from "./plan-proposal.mjs";
 import { loadProjectManifests } from "./project-manifests.mjs";
 import { createProductionStore } from "./production-store.mjs";
+import { createPersonalMemoryClient } from "./personal-memory-client.mjs";
 import { isMainModule } from "./main-module.mjs";
 
 function log(type, fields = {}) {
@@ -558,6 +559,7 @@ export async function processDraftTask({
   config,
   generator,
   planProposer = proposeWorkPlanForTask,
+  personalMemoryClient = null,
 }) {
   if (!config.capabilities.has("draft_reply")) return false;
   const task = await store.claimTask();
@@ -666,32 +668,51 @@ export async function processDraftTask({
         );
       }
     }
-    let memories = [];
+    let projectIdentityMemories = [];
     try {
-      const [principles, person, projects] = await Promise.all([
-        store.searchMemories?.({ type: "principle" }) ?? [],
-        store.searchMemories?.({
-          type: "person",
-          subject: task.sender_user_id,
-        }) ?? [],
-        store.searchMemories?.({ type: "project", limit: 200 }) ?? [],
-      ]);
+      const projects = await (store.searchMemories?.({ type: "project", limit: 200 }) ?? []);
       const projectText = [
         ...conversation.map((message) => message.content),
         task.payload.content,
       ].join("\n");
-      const routedProjects = routeProjectMemories({
-        text: projectText,
-        memories: projects,
-      });
-      memories = [...principles, ...person, ...routedProjects].filter(
-        (memory) => memory.sensitivity !== "confidential",
+      const projectIndex = projects.filter((memory) =>
+        memory.source_type === "operator_confirmed_project_index" &&
+        memory.scope?.factKey === "identity.project_aliases"
       );
+      projectIdentityMemories = routeProjectMemories({
+        text: projectText,
+        memories: projectIndex,
+      });
     } catch (error) {
-      log("worker.memory_context_unavailable", {
+      log("worker.project_identity_context_unavailable", {
         taskId: task.id,
         errorCode: safeErrorCode(error),
       });
+    }
+    let personalMemory = [];
+    if (config.personalMemoryEnabled) {
+      if (!personalMemoryClient) {
+        throw new Error("personal memory client is unavailable");
+      }
+      const memoryQuery = [
+        ...conversation.slice(-20).map((message) => message.content),
+        task.payload.content,
+        ...projectIdentityMemories.flatMap((memory) => [
+          memory.scope?.canonicalName,
+          ...(Array.isArray(memory.scope?.aliases) ? memory.scope.aliases : []),
+        ]),
+      ].filter(Boolean).join("\n");
+      try {
+        personalMemory = await personalMemoryClient.searchContext(memoryQuery, {
+          limit: config.personalMemoryMaxResults ?? 8,
+        });
+      } catch (error) {
+        log("worker.personal_memory_unavailable", {
+          taskId: task.id,
+          errorCode: safeErrorCode(error),
+        });
+        throw new Error(`personal memory unavailable: ${safeErrorCode(error)}`);
+      }
     }
     const generatedDraft = await generator(
       {
@@ -706,7 +727,8 @@ export async function processDraftTask({
         codexPath: config.codexPath,
         runtime: runtimeForConfig(config),
         conversation,
-        memories,
+        memories: [],
+        personalMemory,
       },
     );
     if (config.selfUserId) {
@@ -1000,9 +1022,13 @@ export async function runWorker({
   store = null,
   dws = new DwsAdapter(config),
   generator = generateReplyDraft,
+  personalMemoryClient = undefined,
   once = process.argv.includes("--once"),
 } = {}) {
   store = store ? await store.open() : await createProductionStore(config);
+  if (personalMemoryClient === undefined) {
+    personalMemoryClient = createPersonalMemoryClient(config);
+  }
   let stopped = false;
   let lastHeartbeatAt = 0;
   let lastManualReplyCheckAt = 0;
@@ -1071,7 +1097,13 @@ export async function runWorker({
     const draftResults = await Promise.all(
       Array.from(
         { length: config.workerConcurrency ?? 1 },
-        () => processDraftTask({ store, dws, config, generator }),
+        () => processDraftTask({
+          store,
+          dws,
+          config,
+          generator,
+          personalMemoryClient,
+        }),
       ),
     );
     const drafted = draftResults.some(Boolean);

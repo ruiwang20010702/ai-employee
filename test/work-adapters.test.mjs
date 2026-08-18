@@ -319,6 +319,47 @@ test("知识页适配器只按精确 slug 调用 gbrain 并校验返回身份", 
   assert.match(await readFile(argumentsRecord, "utf8"), /^call get_page /u);
 });
 
+test("知识页适配器优先使用个人 default 的只读 MCP 端口", async () => {
+  const input = context("/tmp", "knowledge_read");
+  input.step.inputs = { slugs: ["projects/test/spec"] };
+  input.manifest.capabilities.knowledge_read = {
+    mode: "automatic",
+    timeoutMs: 10_000,
+    allowedSlugPrefixes: ["projects/test/"],
+    maxPages: 5,
+    maxContentBytes: 64 * 1024,
+  };
+  const calls = [];
+  const adapter = createReadOnlyWorkAdapters({
+    codexPath: "/bin/false",
+    gbrainPath: "/must/not/run",
+    personalMemoryClient: {
+      async probe() {
+        calls.push(["probe"]);
+        return { ready: true, sourceId: "default", readOnly: true };
+      },
+      async getPage(slug, options) {
+        calls.push(["getPage", slug, options.maxContentBytes]);
+        return {
+          slug,
+          title: "规范",
+          type: "project",
+          content: "个人 PRIVATE gbrain 中的正式知识。",
+        };
+      },
+    },
+  }).knowledge_read;
+  await adapter.preflight(input);
+  const result = await adapter.execute(input);
+  assert.deepEqual(calls, [
+    ["probe"],
+    ["getPage", "projects/test/spec", 64 * 1024],
+  ]);
+  assert.equal(result.evidence.source, "personal_default");
+  assert.deepEqual(result.evidence.slugs, ["projects/test/spec"]);
+  assert.match(result.evidence.content, /个人 PRIVATE gbrain/u);
+});
+
 test("Codex 步骤只注入显式引用的知识页证据", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "ai-knowledge-evidence-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

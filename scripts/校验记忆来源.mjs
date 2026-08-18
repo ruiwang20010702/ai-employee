@@ -66,15 +66,23 @@ try {
         failures: [],
         writeEnabled: false,
       };
-  const sources = await reconcileMemorySources({
-    store,
-    projects: await loadProjectManifests(config.projectsDirectory),
-    gbrainPath: config.gbrainPath,
-    leaseMs: config.memorySourceLeaseMs,
-    limit: config.memorySourceLimit,
-    gbrainHome: config.gbrainHome,
-    gbrainDatabaseUrl: config.gbrainDatabaseUrl,
-  });
+  const sources = config.personalMemoryEnabled
+    ? {
+        inspected: 0,
+        valid: 0,
+        unavailable: 0,
+        revoked: 0,
+        skipped: "personal_gbrain_read_through",
+      }
+    : await reconcileMemorySources({
+        store,
+        projects: await loadProjectManifests(config.projectsDirectory),
+        gbrainPath: config.gbrainPath,
+        leaseMs: config.memorySourceLeaseMs,
+        limit: config.memorySourceLimit,
+        gbrainHome: config.gbrainHome,
+        gbrainDatabaseUrl: config.gbrainDatabaseUrl,
+      });
   const report = { projectMemory, authority, cleanup, sources };
   await store.setCheckpoint("memory-source:last-report", JSON.stringify(report));
   if (

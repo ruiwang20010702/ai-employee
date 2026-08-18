@@ -221,7 +221,7 @@ test("权威文档区分当前技术部署与业务放量状态", async () => {
   const productionSha = acceptance.match(/当前生产精确绑定提交 `([0-9a-f]{40})`/u)?.[1];
   assert.ok(version);
   assert.ok(productionSha);
-  assert.equal(version, "V2.5");
+  assert.equal(version, "V2.6");
   assert.match(matrix, /具体生产提交、迁移数量、服务健康和开关必须以[^\n]*回读为准/u);
   assert.match(matrix, /代码通过不等于生产放量/u);
   assert.match(review, /V2\.4 发布后补充/u);

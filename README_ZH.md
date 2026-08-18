@@ -70,21 +70,17 @@ flowchart LR
 Foursday 使用工作、情景、语义和前瞻四类并列记忆。人物、项目、原则和知识是语义记忆的并列子域，不是上下级。
 
 ```text
-Foursday PostgreSQL  → 工作状态、权限、租约、加密投影
-gbrain Markdown      → 可审阅的长期记忆正文
-gbrain PostgreSQL    → 可重建的搜索、实体与图谱索引
+个人 PRIVATE gbrain Git → 全部长期可阅读记忆与 source
+个人 gbrain PostgreSQL  → 可重建的搜索、实体与图谱索引
+Foursday PostgreSQL     → 隐藏运行状态与待晋升候选
 ```
 
-个人知识继续使用自己的 gbrain 数据库与 `default` source；自动工作记忆
-强制使用独立 `GBRAIN_HOME`、独立 PostgreSQL 数据库和非联邦的
-`foursday` source，每次读写和同步都显式绑定这三项。新安装会初始化：
-
-```text
-atoms/  conversations/  people/  preferences/
-projects/  concepts/  prospective/
-```
-
-低风险事实只有完成 Markdown 写入、单文件 Git 提交、gbrain 精确回读和 PostgreSQL 投影后才可使用。每个项目默认最多保留 12 条核心权威事实；聊天命中该项目时也最多装配这 12 条，其余细节留在知识文档中按需读取。撤销、替代、永久删除或隐私擦除会先在 PostgreSQL 事务内登记回收作业，再提交受管理 Markdown 的删除、同步并验证原 slug 已不可读，最后删除 source 外临时文件；失败会提交恢复并重试。冲突保持隔离；凭据、PII、敏感人物材料和机密候选直接拒绝。
+Foursday 直接读取已授权的个人 `default`，不再复制第二套长期知识库。
+生产身份固定为 `default + read-only OAuth`；启动时发现 `write` 或 `admin`
+会立即拒绝。普通回复使用有界语义检索，计划内 `knowledge_read` 仍要求
+项目白名单中的精确 slug。消息原文、草稿、审批、租约、执行状态和未晋升
+候选只留在 Foursday PostgreSQL，不自动污染个人知识库。凭据、PII、敏感
+人物材料和机密内容在进入模型上下文前直接过滤。
 
 ## 与普通机器人的区别
 
@@ -128,16 +124,14 @@ npm run check
 
 ```bash
 foursday init                 # 零写预览
-foursday init --apply         # 受保护配置 + 隔离 gbrain source
+foursday init --apply         # 受保护配置，不创建重复记忆仓库
 foursday secrets --apply      # 在钥匙串生成密钥，不把生成的生产密钥写入配置
 foursday check
 ```
 
-`init --apply` 自动创建 7 类 Markdown 目录、独立 Git 仓库和独立
-`GBRAIN_HOME`；配置专用 gbrain PostgreSQL 后才注册非联邦 `foursday`
-source。记忆写入和自动确认仍关闭。
-
-记忆 Git 仓库默认不配置远端，绝不会推送到公开 Foursday 代码仓库；如需异地备份，应使用单独私有仓库并在推送前扫描秘密与 PII。
+`init --apply` 只创建 Foursday 运行配置。长期记忆需要为现有个人 gbrain
+登记绑定 `default` 的只读 OAuth 身份，并从钥匙串或环境密钥注入 client
+secret。公开 Foursday 仓库永远不会接收个人 Markdown、令牌或数据库地址。
 
 ## 首次部署
 

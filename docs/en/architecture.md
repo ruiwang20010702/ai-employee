@@ -40,40 +40,34 @@ flowchart LR
 The memory model has three orthogonal dimensions instead of a misleading L0-L7 ladder:
 
 - **Four parallel kinds:** working, episodic, semantic, and prospective memory.
-- **One lifecycle:** capture, extract, govern, write Markdown, exact read-back, project into PostgreSQL, consolidate, retrieve, supersede, and expire.
-- **Three storage responsibilities:** Git-backed Markdown is the long-term authority; gbrain is the write-through/entity/graph/retrieval adapter; Foursday PostgreSQL owns transactional state, authorization, leases, encrypted projections, and audit.
+- **One lifecycle:** capture, extract, govern, hold as a candidate, promote to personal Markdown, exact read-back, consolidate, retrieve, supersede, and expire.
+- **Three storage responsibilities:** the personal PRIVATE Git-backed gbrain vault is the only durable readable authority; personal gbrain PostgreSQL is a rebuildable index; Foursday PostgreSQL owns transactional state, authorization, leases, audit, and unpromoted candidates.
 
 Person, project, principle, and knowledge records are sibling namespaces within semantic memory. Dreaming/consolidation and retrieval operate across the four kinds; they are not additional memory tiers.
 
 ```mermaid
 flowchart LR
+    BASE["Personal PRIVATE gbrain Git"] --> INDEX["Personal gbrain PostgreSQL"]
+    INDEX --> READ["Read-only default-scoped MCP"]
+    READ --> CONTEXT["Bounded Foursday context"]
     INPUT["Messages / documents / verified outcomes"] --> GATE["Provenance, DLP, confidence, conflict"]
-    GATE --> MD["gbrain Markdown authority"]
-    MD --> VERIFY["Exact slug + statement + digest + version"]
-    VERIFY --> PG["Encrypted PostgreSQL projection and lease"]
-    PG --> USE["Scoped context assembly"]
-    MD --> USE
+    GATE --> CANDIDATE["Foursday PostgreSQL candidate"]
+    CANDIDATE -. "separate promotion gate" .-> BASE
 ```
 
-Managed low-risk semantic facts use deterministic `atoms/foursday/` pages. The source and subject identities are fingerprinted in Markdown while the original provenance stays encrypted in PostgreSQL. A write is not usable memory until exact gbrain read-back and PostgreSQL projection both succeed. Conflicts remain proposed; credentials, PII, sensitive person material, and confidential candidates are rejected.
+Production uses `AI_EMPLOYEE_MEMORY_AUTHORITY_MODE=disabled` together with
+`AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED=true`. The OAuth client must be bound to
+source `default`, include `read`, and exclude `write` and `admin`; readiness
+probes this identity rather than trusting configuration text. Reply context is
+retrieved ephemerally and is never copied into Foursday PostgreSQL or logs.
+Plan-based `knowledge_read` remains exact-slug and project-prefix bounded.
 
-Revocation is also cross-system: PostgreSQL commits a cleanup outbox entry in
-the same transaction as revocation, replacement, deletion, or privacy erasure.
-The memory service temporarily moves the digest-matched Markdown file outside
-the source, syncs, verifies that the original slug is absent, and removes the
-temporary file. Failure restores the file and keeps the job retryable.
-
-Production defaults to `AI_EMPLOYEE_MEMORY_AUTHORITY_MODE=gbrain`. Foursday
-also requires its own `GBRAIN_HOME` and authenticated PostgreSQL database;
-source IDs alone are not treated as physical isolation. Writes and safe
-auto-confirm are separate default-off gates. Enabling either does not enable
-message sending, plan execution, or proactive work. Production formal memory
-never loads the SQLite adapter.
-
-The personal brain keeps the `default` gbrain source. Automated work memory
-uses a separate non-federated `foursday` source, and every authority read,
-Markdown write, and sync explicitly binds that source ID. Production refuses
-authority writes through `default`.
+Foursday PostgreSQL retains message tasks, drafts, approvals, leases, work
+plans, evidence, project routing aliases, and promotion candidates. Existing
+legacy overlay modules remain migration-only compatibility code; the default
+initializer does not create a second Git repository, `GBRAIN_HOME`, source, or
+gbrain database. Promotion into personal Git is a separate write capability;
+until that gate succeeds, a candidate is not durable personal memory.
 
 ## Versioned integration contracts
 

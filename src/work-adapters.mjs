@@ -968,6 +968,7 @@ async function resolveIsolatedWorkspace({
 
 export function createReadOnlyWorkAdapters({
   codexPath,
+  personalMemoryClient = null,
   gbrainPath = "gbrain",
   gbrainSourceId = null,
   gbrainHome = null,
@@ -1126,6 +1127,10 @@ export function createReadOnlyWorkAdapters({
     knowledge_read: {
       interruptible: true,
       async preflight() {
+        if (personalMemoryClient) {
+          await personalMemoryClient.probe();
+          return;
+        }
         await execFileAsync(gbrainPath, ["version"], {
           timeout: 5_000,
           maxBuffer: 512 * 1024,
@@ -1162,14 +1167,18 @@ export function createReadOnlyWorkAdapters({
         }
         const pages = [];
         for (const slug of slugs) {
-          pages.push(await readGbrainPage(gbrainPath, slug, {
-            timeoutMs: rule.timeoutMs ?? 30_000,
-            maxBuffer: rule.maxContentBytes + 1024 * 1024,
-            signal,
-            sourceId: gbrainSourceId,
-            gbrainHome,
-            gbrainDatabaseUrl,
-          }));
+          pages.push(personalMemoryClient
+            ? await personalMemoryClient.getPage(slug, {
+                maxContentBytes: rule.maxContentBytes,
+              })
+            : await readGbrainPage(gbrainPath, slug, {
+                timeoutMs: rule.timeoutMs ?? 30_000,
+                maxBuffer: rule.maxContentBytes + 1024 * 1024,
+                signal,
+                sourceId: gbrainSourceId,
+                gbrainHome,
+                gbrainDatabaseUrl,
+              }));
         }
         const content = JSON.stringify(pages, null, 2);
         const bytes = Buffer.byteLength(content);
@@ -1185,6 +1194,7 @@ export function createReadOnlyWorkAdapters({
             bytes,
             sha256: createHash("sha256").update(content).digest("hex"),
             verification: "exact_slug_and_project_prefix",
+            source: personalMemoryClient ? "personal_default" : "legacy_gbrain",
           },
         };
       },
@@ -1259,6 +1269,7 @@ export function createReadOnlyWorkAdapters({
 
 export function createControlledWorkAdapters({
   codexPath,
+  personalMemoryClient = null,
   artifactRuntime = null,
   dwsPath = null,
   gbrainPath = "gbrain",
@@ -1271,6 +1282,7 @@ export function createControlledWorkAdapters({
   return {
     ...createReadOnlyWorkAdapters({
       codexPath,
+      personalMemoryClient,
       gbrainPath,
       gbrainSourceId,
       gbrainHome,

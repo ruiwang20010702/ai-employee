@@ -1,0 +1,227 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  createPersonalMemoryClient,
+  PersonalMemoryClient,
+} from "../src/personal-memory-client.mjs";
+
+function response(body, { status = 200, headers = {} } = {}) {
+  return new Response(
+    typeof body === "string" ? body : JSON.stringify(body),
+    { status, headers },
+  );
+}
+
+function mcpResult(value) {
+  return response({
+    jsonrpc: "2.0",
+    id: 1,
+    result: {
+      content: [{ type: "text", text: JSON.stringify(value) }],
+    },
+  });
+}
+
+function client(fetchImpl) {
+  return new PersonalMemoryClient({
+    mcpUrl: "https://memory.example.test/mcp",
+    issuerUrl: "https://memory.example.test",
+    clientId: "foursday-reader",
+    clientSecret: "s".repeat(32),
+    fetchImpl,
+    now: () => 1_000_000,
+  });
+}
+
+function discovery() {
+  return response({
+    token_endpoint: "https://memory.example.test/oauth/token",
+  });
+}
+
+function token(value = "access-token-value") {
+  return response({ access_token: value, token_type: "Bearer", expires_in: 3600 });
+}
+
+test("个人记忆客户端只接受同源 HTTPS 与有效 OAuth 身份", () => {
+  assert.throws(
+    () => new PersonalMemoryClient({
+      mcpUrl: "http://memory.example.test/mcp",
+      issuerUrl: "https://memory.example.test",
+      clientId: "foursday-reader",
+      clientSecret: "s".repeat(32),
+    }),
+    /credential-free HTTPS/u,
+  );
+  assert.throws(
+    () => new PersonalMemoryClient({
+      mcpUrl: "https://memory.example.test/mcp",
+      issuerUrl: "https://issuer.example.test",
+      clientId: "foursday-reader",
+      clientSecret: "s".repeat(32),
+    }),
+    /share one HTTPS origin/u,
+  );
+  assert.equal(createPersonalMemoryClient({ personalMemoryEnabled: false }), null);
+});
+
+test("探针只放行 default source 的只读 OAuth 客户端", async () => {
+  const calls = [];
+  const memory = client(async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    if (calls.length === 1) return discovery();
+    if (calls.length === 2) return token();
+    return mcpResult({
+      transport: "oauth",
+      source_id: "default",
+      scopes: ["read"],
+    });
+  });
+  assert.deepEqual(await memory.probe(), {
+    ready: true,
+    sourceId: "default",
+    readOnly: true,
+  });
+  assert.equal(calls[0].options.redirect, "error");
+  assert.equal(calls[1].options.body.includes("client_secret="), true);
+  assert.equal(calls[2].options.headers.authorization, "Bearer access-token-value");
+  assert.equal(calls[2].options.body.includes('"name":"whoami"'), true);
+
+  for (const identity of [
+    { transport: "legacy", scopes: ["read"], source_id: "default" },
+    { transport: "oauth", scopes: ["read", "write"], source_id: "default" },
+    { transport: "oauth", scopes: ["read"], source_id: "foursday" },
+  ]) {
+    let count = 0;
+    const rejected = client(async () => {
+      count += 1;
+      if (count === 1) return discovery();
+      if (count === 2) return token();
+      return mcpResult(identity);
+    });
+    await assert.rejects(
+      rejected.probe(),
+      /not read-only default-scoped/u,
+    );
+  }
+});
+
+test("检索只返回有界、可读且不含敏感材料的个人知识", async () => {
+  let count = 0;
+  const memory = client(async () => {
+    count += 1;
+    if (count === 1) return discovery();
+    if (count === 2) return token();
+    return mcpResult([
+      {
+        slug: "projects/foursday",
+        type: "project",
+        title: "Foursday",
+        chunk_text: "这是与当前项目直接相关的正式知识。",
+        source_kind: "curated",
+      },
+      {
+        slug: "people/private",
+        type: "person",
+        chunk_text: "手机号是 13800138000",
+      },
+      {
+        slug: "projects/secret",
+        type: "project",
+        sensitivity: "confidential",
+        chunk_text: "不应返回",
+      },
+      {
+        slug: "projects/other-source",
+        source_id: "other",
+        type: "project",
+        chunk_text: "跨来源结果不应返回",
+      },
+    ]);
+  });
+  assert.deepEqual(await memory.searchContext("Foursday", { limit: 4 }), [{
+    slug: "projects/foursday",
+    type: "project",
+    title: "Foursday",
+    statement: "这是与当前项目直接相关的正式知识。",
+    sourceKind: "curated",
+    updatedAt: null,
+  }]);
+  await assert.rejects(
+    memory.callTool("put_page", {}),
+    /not allowed/u,
+  );
+});
+
+test("包含凭据或敏感人物信息的查询不会离开 Foursday 进程", async () => {
+  let called = false;
+  const memory = client(async () => {
+    called = true;
+    throw new Error("must not call network");
+  });
+  assert.deepEqual(await memory.searchContext("token: secret-value"), []);
+  assert.deepEqual(await memory.searchContext("手机号是 13800138000"), []);
+  assert.equal(called, false);
+});
+
+test("精确页面读取拒绝越权路径、身份漂移和秘密正文", async () => {
+  let count = 0;
+  const memory = client(async () => {
+    count += 1;
+    if (count === 1) return discovery();
+    if (count === 2) return token();
+    return mcpResult({
+      slug: "projects/foursday",
+      type: "project",
+      title: "Foursday",
+      content: "正式项目知识",
+    });
+  });
+  assert.deepEqual(await memory.getPage("projects/foursday"), {
+    slug: "projects/foursday",
+    type: "project",
+    title: "Foursday",
+    content: "正式项目知识",
+    updatedAt: null,
+  });
+  await assert.rejects(memory.getPage("../secret"), /slug is invalid/u);
+
+  for (const page of [
+    { slug: "projects/other", content: "正文" },
+    { slug: "projects/foursday", source_id: "other", content: "正文" },
+    { slug: "projects/foursday", content: "token: secret-value" },
+  ]) {
+    let next = 0;
+    const rejected = client(async () => {
+      next += 1;
+      if (next === 1) return discovery();
+      if (next === 2) return token();
+      return mcpResult(page);
+    });
+    await assert.rejects(rejected.getPage("projects/foursday"));
+  }
+});
+
+test("401 会刷新一次令牌且不无限重试", async () => {
+  const tokens = [];
+  let calls = 0;
+  const memory = client(async (_url, options = {}) => {
+    calls += 1;
+    if (String(_url).includes("well-known")) return discovery();
+    if (String(_url).includes("oauth/token")) {
+      const value = `access-token-value-${tokens.length + 1}`;
+      tokens.push(value);
+      return token(value);
+    }
+    assert.equal(options.headers.authorization, `Bearer ${tokens.at(-1)}`);
+    if (tokens.length === 1) return response({}, { status: 401 });
+    return mcpResult({
+      transport: "oauth",
+      source_id: "default",
+      scopes: ["read"],
+    });
+  });
+  await memory.probe();
+  assert.deepEqual(tokens, ["access-token-value-1", "access-token-value-2"]);
+  assert.equal(calls, 6);
+});

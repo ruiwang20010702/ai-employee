@@ -1474,7 +1474,7 @@ test("群聊草稿不调用无权限的完整群历史接口", async (t) => {
   assert.equal(store.getTask(taskId).status, "no_reply");
 });
 
-test("草稿只使用已确认且非机密的正式记忆", async (t) => {
+test("草稿长期上下文只读取个人 gbrain，不使用 PostgreSQL 事实正文", async (t) => {
   const store = await fixture(t);
   const taskId = enqueue(store);
   const confirmed = store.proposeMemory({
@@ -1507,12 +1507,26 @@ test("草稿只使用已确认且非机密的正式记忆", async (t) => {
   await processDraftTask({
     store,
     dws: { async fetchDirect() { return []; } },
-    config: baseConfig,
+    config: {
+      ...baseConfig,
+      personalMemoryEnabled: true,
+      personalMemoryMaxResults: 8,
+    },
+    personalMemoryClient: {
+      async searchContext() {
+        return [{
+          slug: "people/collaborator",
+          type: "person",
+          title: "协作对象",
+          statement: "对方偏好简短回复。",
+        }];
+      },
+    },
     async generator(_event, options) {
-      assert.deepEqual(
-        options.memories.map((memory) => memory.statement),
-        ["对方偏好简短回复。"],
-      );
+      assert.deepEqual(options.memories, []);
+      assert.deepEqual(options.personalMemory.map((memory) => memory.statement), [
+        "对方偏好简短回复。",
+      ]);
       return {
         shouldReply: false,
         reply: "",
@@ -1525,7 +1539,7 @@ test("草稿只使用已确认且非机密的正式记忆", async (t) => {
   assert.equal(store.getTask(taskId).status, "no_reply");
 });
 
-test("私聊后续省略项目名时沿用二十四小时会话中的项目身份记忆", async (t) => {
+test("私聊后续省略项目名时用 PostgreSQL 项目索引路由个人 gbrain", async (t) => {
   const store = await fixture(t);
   const confirm = (input) => {
     const id = store.proposeMemory({
@@ -1568,6 +1582,7 @@ test("私聊后续省略项目名时沿用二十四小时会话中的项目身�
     },
   });
   const taskId = enqueue(store, "project-followup", "继续吧");
+  let searchQuery = "";
   await processDraftTask({
     store,
     dws: {
@@ -1588,12 +1603,27 @@ test("私聊后续省略项目名时沿用二十四小时会话中的项目身�
         ];
       },
     },
-    config: baseConfig,
+    config: {
+      ...baseConfig,
+      personalMemoryEnabled: true,
+      personalMemoryMaxResults: 8,
+    },
+    personalMemoryClient: {
+      async searchContext(query) {
+        searchQuery = query;
+        return [{
+          slug: "projects/s9-vocab-pipeline",
+          type: "project",
+          title: "S9-Vocab-Pipeline",
+          statement: "S9 项目使用受控内容流水线。",
+        }];
+      },
+    },
     async generator(_event, options) {
-      assert.deepEqual(
-        options.memories.map((memory) => memory.statement).sort(),
-        ["S9 项目使用受控内容流水线。", "S9-Vocab-Pipeline 项目身份。"].sort(),
-      );
+      assert.deepEqual(options.memories, []);
+      assert.deepEqual(options.personalMemory.map((memory) => memory.statement), [
+        "S9 项目使用受控内容流水线。",
+      ]);
       return {
         shouldReply: true,
         reply: "继续处理 S9 项目。",
@@ -1603,6 +1633,8 @@ test("私聊后续省略项目名时沿用二十四小时会话中的项目身�
       };
     },
   });
+  assert.match(searchQuery, /S9-Vocab-Pipeline/u);
+  assert.doesNotMatch(searchQuery, /Foursday 项目身份/u);
   assert.equal(store.getTask(taskId).status, "awaiting_approval");
 });
 

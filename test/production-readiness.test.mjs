@@ -350,12 +350,76 @@ test("即使未启用项目知识读取，生产记忆权威仍强制验证 gbra
   assert.equal(calls.includes("gbrain"), true);
 });
 
-test("生产记忆权威拒绝回退到数据库正文模式", () => {
-  assert.throws(() => validateProductionReadinessConfig(validConfig({
+test("生产只允许个人 gbrain 基座或旧 overlay 二选一", () => {
+  const personal = validConfig({
     memoryAuthorityMode: "disabled",
+    memoryAuthorityWrite: false,
+    memoryAuthorityAutoConfirm: false,
+    memoryAuthorityRoot: null,
+    gbrainHome: null,
+    gbrainDatabaseUrl: null,
+    personalMemoryEnabled: true,
+  });
+  assert.doesNotThrow(() => validateProductionReadinessConfig(personal, {
+    AI_EMPLOYEE_BACKUP_KEY: backupKey,
+  }));
+  assert.throws(() => validateProductionReadinessConfig({
+    ...personal,
+    personalMemoryEnabled: false,
+  }, {
+    AI_EMPLOYEE_BACKUP_KEY: backupKey,
+  }), /must configure the personal gbrain memory base/u);
+  assert.throws(() => validateProductionReadinessConfig(validConfig({
+    personalMemoryEnabled: true,
   }), {
     AI_EMPLOYEE_BACKUP_KEY: backupKey,
-  }), /must use gbrain/u);
+  }), /cannot enable personal memory and the legacy overlay together/u);
+});
+
+test("个人 gbrain 模式用只读 OAuth 探针且不再要求本机 gbrain overlay", async () => {
+  const calls = [];
+  const config = validConfig({
+    memoryAuthorityMode: "disabled",
+    memoryAuthorityWrite: false,
+    memoryAuthorityAutoConfirm: false,
+    memoryAuthorityRoot: null,
+    gbrainHome: null,
+    gbrainDatabaseUrl: null,
+    personalMemoryEnabled: true,
+    capabilities: new Set(["work_plan_execution"]),
+  });
+  const result = await checkProductionReadiness({
+    config,
+    environment: { AI_EMPLOYEE_BACKUP_KEY: backupKey },
+    manifestLoader: async () => new Map([["project", {
+      capabilities: { knowledge_read: { mode: "automatic" } },
+    }]]),
+    executableChecker: async (name) => calls.push(name),
+    codexChecker: async () => ({ status: "ok" }),
+    dwsChecker: async () => ({ authenticated: true }),
+    gbrainChecker: async () => {
+      throw new Error("legacy gbrain must not run");
+    },
+    personalMemoryClientFactory: () => ({
+      async probe() {
+        calls.push("personal-memory");
+        return { ready: true, sourceId: "default", readOnly: true };
+      },
+    }),
+    createPool: () => ({ async end() {} }),
+    checkDatabase: async () => ({ database: true }),
+    migrationInspector: currentMigrations,
+  });
+  assert.equal(calls.includes("gbrain"), false);
+  assert.equal(calls.includes("personal-memory"), true);
+  assert.deepEqual(result.gbrainRuntime, { required: false });
+  assert.deepEqual(result.personalMemoryRuntime, {
+    ready: true,
+    sourceId: "default",
+    readOnly: true,
+  });
+  assert.equal(result.memoryAuthority.durableStore, "personal_private_git");
+  assert.equal(result.memoryAuthority.candidateStore, "postgresql");
 });
 
 test("生产预检可报告待迁移，严格诊断必须在业务查询前停止", async () => {
