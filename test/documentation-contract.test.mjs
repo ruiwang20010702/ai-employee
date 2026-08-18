@@ -72,7 +72,7 @@ test("技术部署与业务自动化放量的状态口径不互相冒充", async
   assert.match(matrix, /具体生产提交、迁移数量、服务健康和开关必须以[^\n]*回读为准/u);
   assert.match(matrix, /有界群聊自动回复/u);
   assert.match(acceptance, /技术发布完成不等于业务自动化放量/u);
-  assert.match(review, /V2\.4 发布后补充[^\n]*仍未放量/u);
+  assert.match(review, /V2\.6 发布后补充[^\n]*个人 gbrain/u);
   for (const text of [matrix, acceptance, review]) {
     assert.doesNotMatch(text, /V2\.2[^\n|]*(?:尚未提交|尚未推送|尚未部署)/u);
   }
@@ -138,7 +138,7 @@ test("项目记忆同步工作台口径绑定模型调用、服务端快照和�
   assert.match(readmeZh, /显式使用写入令牌才调用模型/u);
   assert.match(requirements, /生成包只在服务端保存十分钟/u);
   assert.match(capabilities, /generated bundle stays only in server memory for ten minutes/u);
-  assert.match(matrix, /统一记忆.*第 023 号候选/u);
+  assert.match(matrix, /统一记忆.*个人 PRIVATE gbrain Git/u);
   for (const text of [readme, readmeZh, requirements, capabilities]) {
     assert.match(text, /(?:already authorized|既有授权|不能超出既有授权|already-authorized)/u);
   }
@@ -224,7 +224,7 @@ test("权威文档区分当前技术部署与业务放量状态", async () => {
   assert.equal(version, "V2.6");
   assert.match(matrix, /具体生产提交、迁移数量、服务健康和开关必须以[^\n]*回读为准/u);
   assert.match(matrix, /代码通过不等于生产放量/u);
-  assert.match(review, /V2\.4 发布后补充/u);
+  assert.match(review, /V2\.6 发布后补充/u);
   assert.ok(technical.includes(`当前生产提交为 \`${productionSha}\``));
   for (const text of [readme, matrix, acceptance, review, technical, overview, operations]) {
     assert.doesNotMatch(
