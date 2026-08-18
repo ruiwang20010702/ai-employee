@@ -11,6 +11,16 @@ preview or production until a later exact-commit release.
 
 ### Added
 
+- Re-established documentation governance for the Hermes architecture: concise bilingual homepages, a V3 product constitution, a Hermes-first technical authority, a live status/delete-zone matrix, and explicit legacy scope banners so current production compatibility is not mistaken for the personal default.
+- Pinned Hermes Agent `v2026.8.18` / `0.20.4` as the candidate Foursday runtime, with a locked upstream commit, reproducible isolated install, and a three-file workspace-session patch rather than a heavy fork.
+- Added external Foursday plugins for DWS personal DingTalk, minimal project routing, read-only personal gbrain context, and cross-cutting high-risk tool boundaries.
+- Added a generic Hermes/Codex shadow runner that preserves project and session continuity, supports read-only macOS sandboxing, and records natural answers plus tool evidence without sending a real message.
+- Verified the 2.2 production question, follow-up release/failure/batch/cost/root-cause questions, and an autonomous code fix without predefined business metrics, JSON pointers, deterministic reply templates, or per-project requester edits.
+- Added bounded DWS message bundling, verified human-takeover interrupts, content-free withdrawal audit events, and unknown-send handling that forbids automatic retry without a server message ID.
+- Verified one real personal-DingTalk self-chat send with a unique server message ID and a real owner reply that triggered Hermes interrupt plus audit; no second message was sent during reconciliation.
+- With separate recipient authorization, sent the evidence-backed 68,786 correction through the owner's personal DingTalk account to the original conversation and independently read back exactly one matching server message.
+- Added per-tool macOS workspace sandboxing: model credentials stay in the host process, terminal tools get no production/DWS/deployment secrets or network, and unregistered project reads fail closed.
+- Added a dry-run-first, rollback-safe Hermes distribution installer for the three Foursday plugins, Profile, and Skill; it explicitly refuses built-in tool override permission.
 - Optional DingTalk mobile approval for message drafts with owner-only self-chat commands, idempotent notifications, expiry, replay protection, and transactional full-draft hash binding.
 - Personal PRIVATE gbrain Git is now the only durable readable memory authority. Foursday reads the personal `default` source through a dedicated OAuth client that must have `read` and must not have `write` or `admin`; bounded reply retrieval and exact-slug `knowledge_read` no longer copy personal content into a second repository.
 - Foursday PostgreSQL now keeps only runtime state, governance evidence, project routing aliases, and unpromoted candidates. Legacy overlay writers, cleanup jobs, and source leases remain migration compatibility code but are not run in personal-memory mode.
@@ -37,6 +47,8 @@ preview or production until a later exact-commit release.
 
 ### Security
 
+- Unknown contacts and unmentioned groups never create a Hermes session; ambiguous projects ask for clarification instead of guessing. Push, merge, release, production database writes, irreversible deletion, payments, contracts, HR actions, and secret access are blocked independently of the model prompt.
+- Boundary configuration errors fail closed; web tools reject credential-like outbound text, and DWS refuses secret material or irreversible commitments before the bridge sees them.
 - Registration is same-origin and loopback-only, requires both existing admin tokens, rejects config symlinks and existing accounts, and never persists the password or bootstrap tokens in the browser. Password sessions are memory-only, bounded to 5 minutes–24 hours, rate limited after repeated failures, issued as `HttpOnly; SameSite=Strict` loopback cookies, and require a separate CSRF token for every non-GET request. Login does not remove content-level plan/hash confirmations.
 - Shadow admission never fabricates a production work plan or imports memory. The apply path requires a digest-derived confirmation and remains subject to project privacy erasure.
 - Shadow research is limited to the historical-import paths already verified for that project, and downstream artifact evidence is type checked, size bounded, and treated as untrusted data.

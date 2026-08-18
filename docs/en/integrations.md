@@ -1,5 +1,7 @@
 # Integration Guide
 
+> V3 direction: prefer Hermes platform plugins, MCP servers, and Skills. Legacy runtime adapters remain compatibility/Enterprise surfaces, not the default extension model.
+
 [Project home](../../README.md) · [Architecture](./architecture.md)
 
 Foursday separates channels, agent CLIs, and direct model providers behind

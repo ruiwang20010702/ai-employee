@@ -1,0 +1,17 @@
+name: foursday-project-router
+label: Foursday Project Router
+kind: standalone
+version: 0.1.0
+description: >
+  Minimal project identity and session-routing layer for Foursday. It stores no
+  requesters, capabilities, business metrics, credentials, or approval policy.
+author: Foursday
+optional_env:
+  - name: FOURSDAY_PROJECT_REGISTRY
+    description: "Absolute path to the Foursday project registry JSON"
+    prompt: "Foursday project registry"
+    password: false
+  - name: FOURSDAY_ROUTE_STATE_FILE
+    description: "Private JSON file for conversation-to-project bindings"
+    prompt: "Foursday route state"
+    password: false

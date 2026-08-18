@@ -1,5 +1,9 @@
 src/store.mjs
 test/
 .runtime/
+**/__pycache__/
+**/*.pyc
+hermes/**/__pycache__/**
+hermes/**/*.pyc
 .github/
 .env*

@@ -44,52 +44,80 @@ export function collectMessages(payload, senderUserId) {
   );
   const direct = Array.isArray(result) ? result : result.messages ?? [];
   return [...nested, ...direct]
-    .map((message) => ({
-      id: message.openMessageId ?? message.messageId ?? message.id,
-      senderUserId: normalizeDwsIdentity(
+    .map((message) => {
+      const payloadSenderUserId = normalizeDwsIdentity(
         message.senderUserId ??
         message.sender?.userId ??
-        message.sender?.staffId ??
-        senderUserId ??
-        message.senderOpenDingTalkId ??
-        message.sender?.openDingTalkId,
-      ),
-      senderOpenDingTalkId: normalizeDwsIdentity(
+        message.sender?.staffId,
+      );
+      const openDingTalkId = normalizeDwsIdentity(
         message.senderOpenDingTalkId ?? message.sender?.openDingTalkId,
-      ),
-      senderName:
-        typeof message.sender === "string"
-          ? message.sender
-          : message.senderName ?? message.sender?.name,
-      conversationId:
-        message.openConversationId ??
-        message.conversationId ??
-        message.openCid,
-      singleChat: message.singleChat,
-      createTime:
-        message.createTime ?? message.createdAt ?? message.sendTime ?? "",
-      content:
-        typeof message.content === "string"
-          ? message.content
-          : message.content?.text ?? JSON.stringify(message.content ?? ""),
-      isSelf:
-        message.isSelf === true ||
-        message.direction === "outgoing" ||
-        message.sendType === "send",
-      raw: message,
-    }))
+      );
+      return {
+        id: message.openMessageId ?? message.messageId ?? message.id,
+        senderUserId: payloadSenderUserId ??
+          normalizeDwsIdentity(senderUserId) ?? openDingTalkId,
+        senderOpenDingTalkId: openDingTalkId,
+        senderIdentitySource: payloadSenderUserId
+          ? "payload_user_id"
+          : normalizeDwsIdentity(senderUserId)
+            ? "query_fallback"
+            : openDingTalkId
+              ? "payload_open_id"
+              : "missing",
+        senderName:
+          typeof message.sender === "string"
+            ? message.sender
+            : message.senderName ?? message.sender?.name,
+        conversationId:
+          message.openConversationId ??
+          message.conversationId ??
+          message.openCid,
+        singleChat: message.singleChat,
+        createTime:
+          message.createTime ?? message.createdAt ?? message.sendTime ?? "",
+        content:
+          typeof message.content === "string"
+            ? message.content
+            : message.content?.text ?? JSON.stringify(message.content ?? ""),
+        isSelf:
+          message.isSelf === true ||
+          message.direction === "outgoing" ||
+          message.sendType === "send",
+        isWithdrawn:
+          message.isWithdrawn === true ||
+          message.recalled === true ||
+          message.revoked === true ||
+          /^(?:RECALLED|REVOKED|WITHDRAWN)$/iu.test(String(message.status ?? "")),
+        withdrawnAt:
+          message.withdrawnAt ?? message.recalledAt ?? message.revokedAt ?? null,
+        raw: message,
+      };
+    })
     .filter((message) => message.id && message.conversationId);
 }
 
-export function bindMessagesToSender(messages, senderUserId) {
+export function bindMessagesToSender(
+  messages,
+  senderUserId,
+  expectedOpenDingTalkId = null,
+) {
   const expectedSenderUserId = normalizeDwsIdentity(senderUserId);
+  const expectedOpenId = normalizeDwsIdentity(expectedOpenDingTalkId);
   if (!expectedSenderUserId) {
     const error = new Error("DWS list-by-sender requires a sender identity");
     error.code = "dws_sender_identity_required";
     throw error;
   }
   return messages.map((message) => {
-    if (normalizeDwsIdentity(message.senderUserId) !== expectedSenderUserId) {
+    const actualSender = message.senderIdentitySource === "query_fallback"
+      ? null
+      : normalizeDwsIdentity(message.senderUserId);
+    const actualOpenId = normalizeDwsIdentity(message.senderOpenDingTalkId);
+    if (
+      actualSender !== expectedSenderUserId &&
+      (!expectedOpenId || actualOpenId !== expectedOpenId)
+    ) {
       const error = new Error(
         "DWS list-by-sender returned a message for a different sender",
       );
@@ -181,7 +209,10 @@ function epoch(value) {
 }
 
 function normalizedText(value) {
-  return String(value ?? "").replace(/\r\n?/gu, "\n").trim();
+  return String(value ?? "")
+    .replace(/\r\n?/gu, "\n")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 function explicitAiMarker(raw) {
@@ -279,6 +310,7 @@ export class DwsAdapter {
     this.commandRunner = commandRunner;
     this.environment = environment;
     this.selfApprovalIdentity = null;
+    this.userIdentityCache = new Map();
   }
 
   async run(args, options = {}) {
@@ -304,6 +336,9 @@ export class DwsAdapter {
       throw error;
     }
     const messages = [];
+    let expectedOpenDingTalkId = this.userIdentityCache.get(
+      expectedSenderUserId,
+    ) ?? null;
     const seenCursors = new Set();
     let cursor = "0";
 
@@ -327,10 +362,29 @@ export class DwsAdapter {
         "--cursor",
         cursor,
       ]);
+      const pageMessages = collectMessages(payload);
+      const messagesNeedingOpenIdentity = pageMessages.filter(
+        (message) => message.senderIdentitySource !== "payload_user_id",
+      );
+      if (!expectedOpenDingTalkId && messagesNeedingOpenIdentity.length > 0) {
+        const names = [...new Set(messagesNeedingOpenIdentity.map((message) =>
+          String(message.senderName ?? "").trim()
+        ).filter(Boolean))];
+        if (names.length !== 1) {
+          const error = new Error("DWS sender display name is ambiguous or unavailable");
+          error.code = "dws_contact_identity_unavailable";
+          throw error;
+        }
+        expectedOpenDingTalkId = await this.resolveUserOpenDingTalkId(
+          expectedSenderUserId,
+          names[0],
+        );
+      }
       messages.push(
         ...bindMessagesToSender(
-          collectMessages(payload, expectedSenderUserId),
+          pageMessages,
           expectedSenderUserId,
+          expectedOpenDingTalkId,
         ),
       );
       const pageInfo = pagination(payload);
@@ -338,6 +392,62 @@ export class DwsAdapter {
       cursor = pageInfo.nextCursor;
     }
     throw new Error("DWS pagination exceeded 100 pages");
+  }
+
+  async resolveUserOpenDingTalkId(expectedUserId, displayName = null) {
+    const userId = normalizeDwsIdentity(expectedUserId);
+    if (!userId) {
+      const error = new Error("DWS contact identity requires a user ID");
+      error.code = "dws_contact_identity_required";
+      throw error;
+    }
+    if (this.userIdentityCache.has(userId)) {
+      return this.userIdentityCache.get(userId);
+    }
+    let payload;
+    try {
+      payload = await this.run([
+        "contact",
+        "user",
+        "get",
+        "--ids",
+        userId,
+      ]);
+    } catch (error) {
+      const name = String(displayName ?? "").trim();
+      if (!name) throw error;
+      payload = await this.run([
+        "contact",
+        "user",
+        "search",
+        "--query",
+        name,
+      ]);
+    }
+    const candidates = Array.isArray(payload?.result)
+      ? payload.result
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : payload?.result && typeof payload.result === "object"
+          ? [payload.result]
+          : [];
+    const exact = candidates.filter((candidate) =>
+      normalizeDwsIdentity(
+        candidate?.userId ?? candidate?.orgEmployeeModel?.userId,
+      ) === userId
+    );
+    const openDingTalkId = normalizeDwsIdentity(
+      exact[0]?.openDingTalkId ??
+      exact[0]?.openDingtalkId ??
+      exact[0]?.orgEmployeeModel?.openDingTalkId,
+    );
+    if (exact.length !== 1 || !openDingTalkId) {
+      const error = new Error("DWS contact identity is ambiguous or unavailable");
+      error.code = "dws_contact_identity_unavailable";
+      throw error;
+    }
+    this.userIdentityCache.set(userId, openDingTalkId);
+    return openDingTalkId;
   }
 
   async fetchBySender({ senderUserId, start, end }) {
@@ -390,6 +500,7 @@ export class DwsAdapter {
 
   async fetchDirect({
     userId,
+    identityKind = null,
     before = new Date(),
     limit = 30,
     lookbackMs = 2 * 60 * 60 * 1_000,
@@ -402,9 +513,16 @@ export class DwsAdapter {
     if (!Number.isSafeInteger(lookbackMs) || lookbackMs < 60_000 || lookbackMs > 24 * 60 * 60 * 1_000) {
       throw new Error("DWS direct context lookback must be between 1 minute and 24 hours");
     }
-    const identityFlag = /^DT[A-Za-z0-9]/.test(String(userId))
+    if (identityKind != null && !["open_dingtalk_id", "user_id"].includes(identityKind)) {
+      throw new Error("DWS direct context identity kind is invalid");
+    }
+    const identityFlag = identityKind === "open_dingtalk_id"
       ? "--open-dingtalk-id"
-      : "--user";
+      : identityKind === "user_id"
+        ? "--user"
+        : /^DT[A-Za-z0-9]/.test(String(userId))
+          ? "--open-dingtalk-id"
+          : "--user";
     const queryLimit = Math.min(200, Math.max(limit, limit * 4));
     const payload = await this.run([
       "chat",
@@ -551,10 +669,17 @@ export class DwsAdapter {
     return { known: true, replied };
   }
 
-  async sendText({ userId, text, idempotencyKey }) {
-    const identityFlag = /^DT[A-Za-z0-9]/.test(String(userId))
+  async sendText({ userId, identityKind = null, text, idempotencyKey }) {
+    if (identityKind != null && !["open_dingtalk_id", "user_id"].includes(identityKind)) {
+      throw new Error("DWS send identity kind is invalid");
+    }
+    const identityFlag = identityKind === "open_dingtalk_id"
       ? "--open-dingtalk-id"
-      : "--user";
+      : identityKind === "user_id"
+        ? "--user"
+        : /^DT[A-Za-z0-9]/.test(String(userId))
+          ? "--open-dingtalk-id"
+          : "--user";
     return this.run([
       "chat",
       "message",
@@ -636,6 +761,7 @@ export class DwsAdapter {
   async sendMessage({
     conversationId,
     recipientId,
+    recipientKind = null,
     chatType,
     text,
     idempotencyKey,
@@ -652,6 +778,7 @@ export class DwsAdapter {
     }
     return this.sendText({
       userId: recipientId,
+      identityKind: recipientKind,
       text,
       idempotencyKey,
     });

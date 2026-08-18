@@ -1,0 +1,166 @@
+"""JSON-lines bridge between Hermes' Python gateway and Foursday's DWS adapter."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Optional
+
+
+def _required_file(value: Optional[str], label: str) -> str:
+    path = Path(str(value or "").strip()).expanduser()
+    if not path.is_absolute() or not path.is_file():
+        raise RuntimeError(f"{label} must be an absolute regular file")
+    return str(path.resolve())
+
+
+class JsonLineDwsBridge:
+    """Runs the Node DWS sidecar without exposing production secrets to Hermes tools."""
+
+    def __init__(
+        self,
+        *,
+        node_path: str,
+        sidecar_path: str,
+        environment: Optional[dict[str, str]] = None,
+        startup_timeout: float = 30.0,
+        request_timeout: float = 60.0,
+    ) -> None:
+        self.node_path = _required_file(node_path, "Node executable")
+        if not os.access(self.node_path, os.X_OK):
+            raise RuntimeError("Node executable is not executable")
+        self.sidecar_path = _required_file(sidecar_path, "DWS sidecar")
+        self.environment = dict(environment or {})
+        self.startup_timeout = startup_timeout
+        self.request_timeout = request_timeout
+        self._process: Optional[asyncio.subprocess.Process] = None
+        self._reader_task: Optional[asyncio.Task] = None
+        self._callback: Optional[Callable[[dict], Awaitable[None]]] = None
+        self._ready: Optional[asyncio.Future] = None
+        self._pending: dict[str, asyncio.Future] = {}
+        self._counter = 0
+
+    @classmethod
+    def from_environment(cls) -> "JsonLineDwsBridge":
+        node_path = os.getenv("FOURSDAY_NODE_PATH") or "/opt/homebrew/bin/node"
+        sidecar_path = os.getenv("FOURSDAY_DWS_SIDECAR")
+        allowed = {
+            key: value
+            for key, value in os.environ.items()
+            if key in {
+                "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ",
+                "DWS_PATH", "DINGTALK_ROOT", "DINGTALK_DATA_ROOT",
+                "DINGTALK_SELF_USER_ID",
+                "DWS_PERSONAL_ALLOWED_USERS", "DWS_PERSONAL_ALLOWED_GROUPS",
+                "DWS_PERSONAL_FETCH_USERS",
+                "DWS_PERSONAL_STATE_FILE", "DWS_PERSONAL_FALLBACK_MS",
+                "DWS_PERSONAL_INITIAL_LOOKBACK_MS", "DWS_PERSONAL_SEND_ENABLED",
+            }
+        }
+        allowed["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        return cls(
+            node_path=node_path,
+            sidecar_path=str(sidecar_path or ""),
+            environment=allowed,
+        )
+
+    async def start(self, callback: Callable[[dict], Awaitable[None]]) -> None:
+        if self._process is not None:
+            return
+        self._callback = callback
+        loop = asyncio.get_running_loop()
+        self._ready = loop.create_future()
+        self._process = await asyncio.create_subprocess_exec(
+            self.node_path,
+            self.sidecar_path,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=self.environment,
+        )
+        self._reader_task = asyncio.create_task(self._read_loop())
+        try:
+            await asyncio.wait_for(self._ready, timeout=self.startup_timeout)
+        except BaseException:
+            await self.stop()
+            raise
+
+    async def _read_loop(self) -> None:
+        assert self._process is not None and self._process.stdout is not None
+        try:
+            while line := await self._process.stdout.readline():
+                try:
+                    frame = json.loads(line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if frame.get("type") == "ready":
+                    if self._ready and not self._ready.done():
+                        self._ready.set_result(True)
+                    continue
+                if frame.get("type") == "event" and isinstance(frame.get("record"), dict):
+                    if self._callback is not None:
+                        await self._callback(frame["record"])
+                    continue
+                if frame.get("type") == "response":
+                    request_id = str(frame.get("id") or "")
+                    future = self._pending.pop(request_id, None)
+                    if future is not None and not future.done():
+                        future.set_result(frame.get("result"))
+        finally:
+            error = RuntimeError("DWS sidecar stopped")
+            if self._ready and not self._ready.done():
+                self._ready.set_exception(error)
+            for future in self._pending.values():
+                if not future.done():
+                    future.set_exception(error)
+            self._pending.clear()
+
+    async def _request(self, action: str, payload: Optional[dict] = None) -> Any:
+        if self._process is None or self._process.stdin is None:
+            raise RuntimeError("DWS sidecar is not running")
+        self._counter += 1
+        request_id = str(self._counter)
+        future = asyncio.get_running_loop().create_future()
+        self._pending[request_id] = future
+        frame = {
+            "type": "request",
+            "id": request_id,
+            "action": action,
+            "payload": dict(payload or {}),
+        }
+        self._process.stdin.write((json.dumps(frame, ensure_ascii=False) + "\n").encode())
+        await self._process.stdin.drain()
+        try:
+            return await asyncio.wait_for(future, timeout=self.request_timeout)
+        finally:
+            self._pending.pop(request_id, None)
+
+    async def send(self, payload: dict) -> dict:
+        result = await self._request("send", payload)
+        return result if isinstance(result, dict) else {"success": False}
+
+    async def stop(self) -> None:
+        process = self._process
+        if process is None:
+            return
+        if process.returncode is None:
+            try:
+                await self._request("shutdown")
+            except Exception:
+                pass
+        if process.returncode is None:
+            process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+        if self._reader_task is not None:
+            await asyncio.gather(self._reader_task, return_exceptions=True)
+        self._process = None
+        self._reader_task = None
+
+
+__all__ = ["JsonLineDwsBridge"]

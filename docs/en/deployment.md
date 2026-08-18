@@ -1,5 +1,7 @@
 # Deployment
 
+> Scope: legacy Node.js governed production. The Hermes V3 candidate is not deployed. Build its isolated candidate with the root README commands and review the Chinese Gate 2 report before any migration.
+
 > Rename compatibility: new installations use the Foursday CLI, plugin,
 > service labels, release root, and Keychain namespace. Existing `0.x`
 > installations may keep `AI_EMPLOYEE_*` configuration keys and legacy secret

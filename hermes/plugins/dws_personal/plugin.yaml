@@ -1,0 +1,46 @@
+name: dws-personal-platform
+label: DWS Personal DingTalk
+kind: platform
+version: 0.1.0
+description: >
+  Foursday personal DingTalk gateway adapter backed by the local DWS bridge.
+  It admits only configured contacts and groups and sends through the owner's
+  personal DingTalk account rather than a DingTalk robot.
+author: Foursday
+optional_env:
+  - name: DWS_PATH
+    description: "Absolute path to the local DWS executable"
+    prompt: "DWS executable path"
+    password: false
+  - name: DINGTALK_DATA_ROOT
+    description: "Absolute DingTalkMac data root used only as an activity signal"
+    prompt: "DingTalk data root"
+    password: false
+  - name: DWS_PERSONAL_ALLOWED_USERS
+    description: "Comma-separated DingTalk staff IDs allowed to use Foursday"
+    prompt: "Allowed DingTalk users"
+    password: false
+  - name: DWS_PERSONAL_FETCH_USERS
+    description: "Optional comma-separated polling targets; defaults to the allowlist"
+    prompt: "DWS polling targets"
+    password: false
+  - name: DWS_PERSONAL_ALLOWED_GROUPS
+    description: "Comma-separated DingTalk conversation IDs allowed to use Foursday"
+    prompt: "Allowed DingTalk groups"
+    password: false
+  - name: DINGTALK_SELF_USER_ID
+    description: "Owner staff ID used only for verified human-takeover detection"
+    prompt: "DingTalk owner ID"
+    password: false
+  - name: DWS_PERSONAL_STATE_FILE
+    description: "Absolute private checkpoint file for dedupe and session recovery"
+    prompt: "DWS checkpoint file"
+    password: false
+  - name: DWS_PERSONAL_BUNDLE_QUIET_MS
+    description: "Short-message quiet window, default 3000 and maximum 8000"
+    prompt: "DWS quiet window"
+    password: false
+  - name: DWS_PERSONAL_BUNDLE_MAX_WAIT_MS
+    description: "Maximum first-message wait, default and maximum 8000"
+    prompt: "DWS bundle maximum wait"
+    password: false

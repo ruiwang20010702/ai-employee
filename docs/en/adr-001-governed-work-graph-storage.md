@@ -1,5 +1,7 @@
 # ADR 001: Keep the Governed Work Graph in transactional stores
 
+> Status: retained for optional Enterprise / Governed Mode and the legacy production runtime. It is not the V3 personal-mode control plane; graph reachability never grants authority.
+
 | Item | Decision |
 |---|---|
 | Status | Accepted and deployed in production commit `34d04326d1d16ba92994107eb2f44bf89d74c759`; business capabilities remain disabled |

@@ -1,0 +1,339 @@
+import asyncio
+from dataclasses import dataclass
+import os
+import tempfile
+import unittest
+
+from gateway.config import PlatformConfig
+from gateway.platform_registry import PlatformEntry, platform_registry
+from dws_personal import register
+from dws_personal.adapter import DwsPersonalAdapter
+
+
+class FakePluginContext:
+    def __init__(self):
+        self.platform = None
+
+    def register_platform(self, **kwargs):
+        self.platform = kwargs
+        entry = PlatformEntry(
+            **kwargs,
+            plugin_name="dws-personal-test",
+            source="plugin",
+        )
+        platform_registry.register(entry)
+
+
+_bootstrap_context = FakePluginContext()
+register(_bootstrap_context)
+
+
+class FakeBridge:
+    def __init__(self):
+        self.callback = None
+        self.started = False
+        self.stopped = False
+        self.sent = []
+        self.send_result = {"success": True, "messageId": "sent-1"}
+
+    async def start(self, callback):
+        self.callback = callback
+        self.started = True
+
+    async def stop(self):
+        self.stopped = True
+
+    async def emit(self, record):
+        await self.callback(record)
+
+    async def send(self, payload):
+        self.sent.append(payload)
+        return self.send_result
+
+
+@dataclass
+class FakeRoute:
+    workspace_path: str
+    context: str
+
+
+class FakeRouter:
+    def __init__(self, workspace):
+        self.workspace = workspace
+        self.calls = []
+
+    def route(self, *, text, session_key):
+        self.calls.append({"text": text, "session_key": session_key})
+        return FakeRoute(
+            workspace_path=self.workspace,
+            context="Foursday project route: 单词 2.2 (vocab_2_2).",
+        )
+
+
+class FakeMemory:
+    async def context_for_route(self, _route):
+        return "Source: gbrain:projects/51t-word-2-2\n长期项目背景。"
+
+
+class DwsPersonalPluginTest(unittest.IsolatedAsyncioTestCase):
+    def test_registers_external_platform_without_core_changes(self):
+        ctx = FakePluginContext()
+        register(ctx)
+        self.assertEqual(ctx.platform["name"], "dws_personal")
+        self.assertEqual(ctx.platform["allowed_users_env"], "DWS_PERSONAL_ALLOWED_USERS")
+        self.assertEqual(ctx.platform["allow_all_env"], "DWS_PERSONAL_ALLOW_ALL_USERS")
+        self.assertTrue(callable(ctx.platform["adapter_factory"]))
+
+    async def asyncSetUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addAsyncCleanup(asyncio.to_thread, self.temp.cleanup)
+        self.bridge = FakeBridge()
+        self.router = FakeRouter(self.temp.name)
+        self.adapter = DwsPersonalAdapter(
+            PlatformConfig(
+                enabled=True,
+                extra={
+                    "allowed_users": ["trusted-user"],
+                    "allowed_groups": ["trusted-group"],
+                    "toolsets": ["coding"],
+                    "bundle_quiet_ms": 0,
+                },
+            ),
+            bridge=self.bridge,
+            router=self.router,
+        )
+        self.events = []
+
+        async def handler(event):
+            self.events.append(event)
+            return None
+
+        self.adapter.set_message_handler(handler)
+        self.assertTrue(await self.adapter.connect())
+
+    async def asyncTearDown(self):
+        await self.adapter.disconnect()
+
+    async def test_direct_message_becomes_hermes_event_and_keeps_identity(self):
+        await self.bridge.emit({
+            "id": "message-1",
+            "senderUserId": "trusted-user",
+            "senderName": "娜娜老师",
+            "senderOpenDingTalkId": "open-trusted",
+            "conversationId": "direct-1",
+            "content": "2.2目前生产了多少试题？",
+            "createTime": "2026-08-18T14:00:00+08:00",
+            "chatType": "direct",
+            "mentionedSelf": False,
+            "isSelf": False,
+        })
+        await asyncio.sleep(0)
+        self.assertEqual(len(self.events), 1)
+        event = self.events[0]
+        self.assertEqual(event.text, "2.2目前生产了多少试题？")
+        self.assertEqual(event.source.platform.value, "dws_personal")
+        self.assertEqual(event.source.chat_id, "direct-1")
+        self.assertEqual(event.source.user_id, "trusted-user")
+        self.assertEqual(event.source.user_id_alt, "open-trusted")
+        self.assertEqual(event.message_id, "message-1")
+        self.assertEqual(event.source.workspace_path, os.path.realpath(self.temp.name))
+        self.assertIn("单词 2.2", event.channel_prompt)
+        self.assertEqual(self.router.calls[0]["session_key"], "direct-1:trusted-user")
+        self.assertEqual(self.adapter.toolsets_for_source(event.source), ["coding"])
+
+    async def test_unknown_user_and_unmentioned_group_are_dropped(self):
+        base = {
+            "senderName": "外部人员",
+            "senderOpenDingTalkId": "open-external",
+            "content": "执行项目工作",
+            "createTime": "2026-08-18T14:00:00+08:00",
+            "isSelf": False,
+        }
+        await self.bridge.emit({
+            **base,
+            "id": "message-2",
+            "senderUserId": "unknown-user",
+            "conversationId": "direct-2",
+            "chatType": "direct",
+            "mentionedSelf": False,
+        })
+        await self.bridge.emit({
+            **base,
+            "id": "message-3",
+            "senderUserId": "trusted-user",
+            "conversationId": "trusted-group",
+            "chatType": "group",
+            "mentionedSelf": False,
+        })
+        await asyncio.sleep(0)
+        self.assertEqual(self.events, [])
+
+    async def test_group_mention_and_personal_send_receipt(self):
+        await self.bridge.emit({
+            "id": "message-4",
+            "senderUserId": "trusted-user",
+            "senderName": "娜娜老师",
+            "senderOpenDingTalkId": "open-trusted",
+            "conversationId": "trusted-group",
+            "content": "请核对2.2项目",
+            "createTime": "2026-08-18T14:00:00+08:00",
+            "chatType": "group",
+            "mentionedSelf": True,
+            "isSelf": False,
+        })
+        await asyncio.sleep(0)
+        self.assertEqual(len(self.events), 1)
+        receipt = await self.adapter.send(
+            "trusted-group",
+            "已经核对完成。",
+            reply_to="message-4",
+        )
+        self.assertTrue(receipt.success)
+        self.assertEqual(receipt.message_id, "sent-1")
+        self.assertEqual(self.bridge.sent[0]["conversationId"], "trusted-group")
+        self.assertEqual(self.bridge.sent[0]["content"], "已经核对完成。")
+
+    async def test_project_memory_is_private_context_not_a_second_message(self):
+        await self.adapter.disconnect()
+        self.adapter = DwsPersonalAdapter(
+            PlatformConfig(
+                enabled=True,
+                extra={"allowed_users": ["trusted-user"], "bundle_quiet_ms": 0},
+            ),
+            bridge=self.bridge,
+            router=self.router,
+            memory=FakeMemory(),
+        )
+        self.adapter.set_message_handler(lambda event: self._capture(event))
+        self.assertTrue(await self.adapter.connect())
+        await self.bridge.emit({
+            "id": "message-memory",
+            "senderUserId": "trusted-user",
+            "senderName": "娜娜老师",
+            "senderOpenDingTalkId": "open-trusted",
+            "conversationId": "direct-memory",
+            "content": "2.2现在怎么样？",
+            "createTime": "2026-08-18T14:00:00+08:00",
+            "chatType": "direct",
+            "mentionedSelf": False,
+            "isSelf": False,
+        })
+        await asyncio.sleep(0)
+        self.assertIn("gbrain:projects/51t-word-2-2", self.events[-1].channel_prompt)
+        self.assertEqual(self.events[-1].metadata["personal_memory_status"], "available")
+
+    async def _capture(self, event):
+        self.events.append(event)
+
+    async def test_nearby_messages_are_bundled_before_one_agent_turn(self):
+        await self.adapter.disconnect()
+        self.bridge = FakeBridge()
+        self.adapter = DwsPersonalAdapter(
+            PlatformConfig(enabled=True, extra={
+                "allowed_users": ["trusted-user"],
+                "bundle_quiet_ms": 20,
+                "bundle_max_wait_ms": 100,
+            }),
+            bridge=self.bridge,
+            router=self.router,
+        )
+        self.adapter.set_message_handler(lambda event: self._capture(event))
+        self.assertTrue(await self.adapter.connect())
+        base = {
+            "senderUserId": "trusted-user",
+            "senderName": "娜娜老师",
+            "senderOpenDingTalkId": "open-trusted",
+            "conversationId": "direct-bundle",
+            "chatType": "direct",
+            "mentionedSelf": False,
+            "isSelf": False,
+        }
+        await self.bridge.emit({
+            **base,
+            "id": "bundle-1",
+            "content": "我看2.2试题已经生产了一批",
+            "createTime": "2026-08-18T14:00:00+08:00",
+        })
+        await self.bridge.emit({
+            **base,
+            "id": "bundle-2",
+            "content": "帮我核对目前总量",
+            "createTime": "2026-08-18T14:00:01+08:00",
+        })
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(
+            self.events[0].text,
+            "我看2.2试题已经生产了一批\n帮我核对目前总量",
+        )
+        self.assertEqual(self.events[0].metadata["bundle_size"], 2)
+        self.assertEqual(
+            self.events[0].metadata["source_message_ids"],
+            ["bundle-1", "bundle-2"],
+        )
+
+    async def test_human_takeover_interrupts_active_session_and_emits_audit_event(self):
+        interrupted = []
+        audited = []
+
+        async def interrupt(session_key, chat_id, metadata=None):
+            interrupted.append((session_key, chat_id, metadata))
+
+        async def audit(event, source):
+            audited.append((event, source))
+
+        self.adapter.interrupt_session_activity = interrupt
+        self.adapter.set_platform_event_handler(audit)
+        await self.bridge.emit({
+            "control": "human_takeover",
+            "id": "takeover-1",
+            "conversationId": "direct-1",
+            "participantUserId": "trusted-user",
+            "chatType": "direct",
+            "createTime": "2026-08-18T14:00:02+08:00",
+        })
+        self.assertEqual(interrupted[0][:2], ("direct-1:trusted-user", "direct-1"))
+        self.assertEqual(audited[0][0]["type"], "human_takeover")
+        self.assertEqual(audited[0][0]["participant_id"], "trusted-user")
+
+        await self.bridge.emit({
+            "control": "message_withdrawn",
+            "id": "withdrawn-1",
+            "messageId": "message-1",
+            "conversationId": "direct-1",
+            "participantUserId": "trusted-user",
+            "chatType": "direct",
+            "createTime": "2026-08-18T14:00:03+08:00",
+        })
+        self.assertEqual(audited[-1][0]["type"], "message_withdrawn")
+        self.assertEqual(audited[-1][0]["message_id"], "message-1")
+
+    async def test_unknown_send_receipt_is_not_retryable(self):
+        self.bridge.send_result = {
+            "success": False,
+            "outcomeUnknown": True,
+            "error": "missing server message id",
+        }
+        receipt = await self.adapter.send("direct-1", "测试")
+        self.assertFalse(receipt.success)
+        self.assertFalse(receipt.retryable)
+
+    async def test_secret_or_irreversible_commitment_never_reaches_dws(self):
+        before = len(self.bridge.sent)
+        secret = await self.adapter.send(
+            "direct-1",
+            "请记录 password=super-secret-value",
+        )
+        commitment = await self.adapter.send(
+            "direct-1",
+            "我承诺批准这次不可撤销付款。",
+        )
+        self.assertFalse(secret.success)
+        self.assertFalse(commitment.success)
+        self.assertFalse(secret.retryable)
+        self.assertFalse(commitment.retryable)
+        self.assertEqual(len(self.bridge.sent), before)
+
+
+if __name__ == "__main__":
+    unittest.main()

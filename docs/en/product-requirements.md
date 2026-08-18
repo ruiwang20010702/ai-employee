@@ -1,51 +1,89 @@
-# Product Requirements
+# Foursday Product Requirements
 
-[Project home](../../README.md) · [Detailed Chinese PRD](../产品需求文档.md)
+Status: V3 Hermes candidate; Gate 2 complete. Production still uses the legacy Node.js runtime and has not activated the Hermes migration.
 
-## Outcome
+## Product definition
 
-Foursday is a personal work twin whose north-star metric is verified time
-returned to its user. The product does not optimize for message volume, task
-count, team surveillance, or silent impersonation.
+Foursday is a personal-memory-driven AI work twin that receives trusted workplace messages, routes a real project, and uses Hermes plus OpenAI Codex to complete work before replying with read-back evidence.
 
-## Current scope
+It is not a capability-catalog chatbot. A new question must not require a new business metric, JSON pointer, requester entry, adapter, or deterministic answer template.
 
-| Priority | Capability | Acceptance boundary |
-|---|---|---|
-| P0 | Project onboarding | Safe project draft in ten minutes; side effects disabled |
-| P0 | Local owner login | One-time loopback registration collects a login identifier, optional email alias, and matching password confirmation; existing read/write tokens prove ownership once, then registration closes permanently. A salted scrypt verifier creates one shared, short-lived session across operations and project cockpit pages with HttpOnly SameSite cookie, same-origin CSRF, five-attempt rate limit, and legacy token compatibility; login never replaces content-bound approval |
-| P0 | Direct-message episode context | Keep the 3–8 second first-response bundle, but connect follow-ups within two minutes; read at most 50 messages from the 24 hours ending at the source message, classify self/other/unknown from the exact source identity, route only memories whose confirmed project alias appears in the current conversation, expire older unsent drafts and approvals, and retry instead of drafting when history cannot be verified |
-| P0 | Historical project import | Local JSON bundle → read-only evidence/candidate preview → exact typed digest and browser write session or write token → project manifest plus proposed memories only; no automatic confirmation or external effects |
-| P0 | Project memory sync | Browser owner session or dual-token, zero-write settings preview binds manifest + regular fixed sources + fact prefixes + retention + ≤365-day expiry + auto-confirm to exact `MEMORY-AUTH-...` confirmation; apply changes only the project manifest and never opens the global gate. A separate explicit write-authorized model invocation uses isolated sources → ten-minute server-held preview → one-time apply under unchanged policy; expired authorization stops before model invocation |
-| P0 | Recipe library | Five versioned, schema-validated recipes; one cockpit work-handoff form renders every typed input together for project, meeting, daily-report, memory, and GitHub work; registration requires a read-only full-plan preview and the exact reviewed hash, then always enters approval instead of auto-execution; daily report binds exact Git activity and same-project governed plan/read-back metadata for one date window |
-| P0 | Project recipe shadow | Preview is zero-write; explicit local run permits only research/document drafts on one clean Git snapshot; post-delivery review can record actual minutes only in the SHA-bound isolated ledger and creates no production memory or time record |
-| P0 | Project cockpit | Goals, milestones, plans, evidence, deliverables, memory, triggers; at most 20 project-scoped proposed memories are reviewable in place, with browser write-session or write-token confirmation/revocation, explicit conflict replacement, duplicate blocking, and no cross-project candidates |
-| P0 | Weekly delegation queue | Close the remaining eight-hour goal with project-selected recipes ranked only by user-confirmed outcomes; the local cockpit and read-only Codex tool never bypass execution policy |
-| P0 | Time returned | Show bounded delivery content first; record the user's actual post-AI review/edit time, then require separate confirmation |
-| P1 | Proactive mode | Schedule form reviews recipe inputs, first run, interval, daily limit, cooldown, and policy before save; trigger remains disabled and schedule creation rejects a changed reviewed plan hash |
-| P1 | Meeting to execution | Notes to document, proposed memory, task, and calendar |
-| P1 | GitHub delivery | Patch, branch, tests, push, Draft PR; never auto-merge |
-| P2 | Community boundaries | Slack, Teams, Gmail, Workspace contracts and examples only |
+## Core loop
 
-The weekly delegation queue and its Codex tool are deployed in `0.6.0`. The
-project-recipe shadow CLI remains an unreleased candidate until its own release
-gates pass.
-
-## End-to-end acceptance
+The personal default is a general Agent Loop: the program supplies identity, workspace, memory, isolation, and evidence boundaries while the model chooses the next tool and natural response.
 
 ```mermaid
 flowchart LR
-    A["Authorized input"] --> B["Project and recipe"]
-    B --> C["Hashed plan and risk decision"]
-    C --> D["Human approval when required"]
-    D --> E["Idempotent execution"]
-    E --> F["Target read-back"]
-    F --> G["Result and evidence"]
-    G --> H["Human-confirmed memory and time return"]
+    A["Trusted message"] --> B["Identity + session"]
+    B --> C["Personal gbrain + project registry"]
+    C --> D["Real workspace"]
+    D --> E["Hermes Agent Loop"]
+    E --> F["Codex + tools"]
+    F --> G["Search / calculate / edit / test"]
+    G --> E
+    E --> H["Read-back evidence"]
+    H --> I["Natural personal-account reply"]
 ```
 
-Implemented capability does not mean enabled capability. Version `0.6.0` is
-deployed at exact production SHA `6b30c22f97b19c6cfd30bf162b3f85000fa2bde9`;
-one source-bound Foursday project exists, while plan execution, proactive work,
-message sending, memory auto-sync, and memory confirmation remain separate
-decisions.
+## Default personal mode
+
+Allowlisted contacts can request ordinary reversible work without per-project requester configuration or step-by-step approval. Foursday autonomously reads the project, creates documents, analyzes data, changes code, runs tests, fixes failures, and reports after completion.
+
+Optional Enterprise / Governed Mode may add manifests, capability budgets, approvals, recipes, and governed adapters. It is not the personal default.
+
+## Trust boundary
+
+- Unknown users never create an Agent Session.
+- Groups require an allowlisted conversation and an explicit mention.
+- Ambiguous projects ask one concise clarification.
+- A human reply in the same conversation interrupts active work.
+- Git push, PR merge, release, production deployment/data writes, irreversible deletion, payment, contracts, HR decisions, secrets, and irreversible commitments require an independent owner gate.
+
+## Project routing
+
+The minimal registry contains only project id, name, aliases, local root, credential-free Git URL, gbrain pages, optional run instructions, and isolation mode.
+
+Routing uses the existing session, explicit project identity, gbrain identity, local/Git registration, then clarification. A project name inside a file path must not hijack the bound session.
+
+## Memory
+
+Personal PRIVATE gbrain Git is the only durable business-knowledge authority. Its PostgreSQL database is a rebuildable index. Hermes Session DB stores conversation and tool history. Foursday PostgreSQL remains compatibility runtime state during migration.
+
+The gbrain client is bound to `default + read-only`; its secret stays in the host bridge and never enters Agent tools.
+
+## Required scenarios
+
+### Project fact
+
+For “How many 2.2 questions have been produced?”, the Agent must enter the real project, distinguish `81,088` source rows from `68,786` formal questions, cite evidence, and reply through personal DingTalk—without a predefined metric or template.
+
+### Follow-ups
+
+The same session must answer released count, failures, worst batch, cost, and low-pass-rate causes without new code or configuration.
+
+### Project work
+
+Document, analysis, and code requests must modify only the routed workspace, run validation, continue fixing failures, read back results, and report outcome, evidence, remaining risk, and rollback.
+
+## Quality requirements
+
+| Area | Requirement |
+|---|---|
+| Message discovery | P95 under 5 seconds, event first with bounded fallback |
+| Short-message bundling | 3-second quiet window, at most 8 seconds from first message |
+| Delivery | Exactly one processing path; unknown sends are never retried automatically |
+| Continuity | Same conversation keeps project and Hermes Session across processes |
+| Isolation | Tool subprocesses cannot read unregistered projects, runtime secrets, Keychain, or network |
+| Evidence | Every modification, command, test, send, and reply has target read-back |
+| Takeover | Human takeover interrupts the active turn and suppresses stale output |
+| High risk | Zero unauthorized external or irreversible actions |
+| North star | Evidence-confirmed hours returned per user per week; long-term target 8 hours |
+
+## Acceptance
+
+All 12 P0 gates are complete. See the [Gate 2 report](../自主工作分身迁移验收报告.md). Passing P0 does not authorize commit, push, release, deployment, production migration, or enabling the persistent Hermes Gateway.
+
+## Rollout
+
+P1: Gate 2 commit/public candidate, publishable DWS plugin, cockpit/time-return integration, and a reversible legacy-runtime migration plan.
+P2: Feishu, WeCom, Slack, Teams, Gmail, Google Workspace, multi-user installs, Docker/SSH/dedicated hosts, and optional enterprise governance.

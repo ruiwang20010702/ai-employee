@@ -4,197 +4,136 @@
 
 # Foursday
 
-**Your open-source work twin. One more you, one less workday.**
+**A personal-memory-driven work twin for real projects.**
 
-Foursday turns workplace messages into reviewable replies and project-scoped
-work, executes only authorized tools, and verifies the real result. Its north
-star is verified hours returned per user each week.
+Trusted message → personal context → real workspace → Hermes + Codex → verified work → natural reply.
 
-[简体中文](./README_ZH.md) · [Quick Start](#quick-start) · [75-second demo](./assets/foursday-v0.5-demo.mp4) · [Architecture](./docs/en/architecture.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+[简体中文](./README_ZH.md) · [Architecture](./docs/设计总览.md) · [Gate 2 evidence](./docs/自主工作分身迁移验收报告.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 [![Checks](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![Security](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
-[![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024-3c873a)](https://nodejs.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
-
-**Version status:** [`v0.6.0-rc.1`](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1)
-is the latest tagged public preview at
-`6b30c22f97b19c6cfd30bf162b3f85000fa2bde9`. `main` may contain post-RC
-candidates. `private: true` prevents accidental npm publication; the repository
-remains reusable under MIT.
 
 </div>
 
-## Why Foursday?
+## What Foursday is
 
-Chatbots generate text. Real work also needs scope, permission, interruption,
-evidence, and memory:
+Foursday is an AI work twin that uses your personal gbrain and a general Hermes Agent Loop to do work—not a chatbot that needs a new capability, JSON pointer, or reply template for every question.
 
-- decide whether to ignore, clarify, reply, or work;
-- bind every action to a requester, project, capability, budget, and plan hash;
-- require approval before high-risk side effects;
-- read the target system back instead of trusting a model or tool receipt;
-- stop when the human takes over;
-- keep durable memory reviewable in isolated gbrain Markdown sources.
-- optionally approve or reject message drafts from a DingTalk self-chat on mobile while keeping high-risk plans in the full console.
+For an allowlisted contact, ordinary reversible work is autonomous:
 
-DingTalk uses DWS. Feishu uses its official WebSocket and messaging APIs with
-no DWS dependency. `MessageAdapter`, `AgentRuntime`, and `ModelProvider` are
-versioned contracts, so channels and model runtimes can evolve independently.
+- understand the conversation and route the project;
+- enter the real workspace;
+- inspect files, scripts, ledgers, and Git state;
+- calculate, analyze, write documents, or change code;
+- run tests and continue fixing failures;
+- read the result back and reply with evidence.
 
-## How it works
+Push, merge, production deployment, production data writes, irreversible deletion, payment, contracts, HR decisions, secrets, and irreversible commitments remain independent hard boundaries.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    A["Message / meeting / GitHub / schedule"] --> B["Scope + context"]
-    B --> C{"Ignore, clarify, reply, or recipe"}
-    C --> D["Project-bound plan"]
-    D --> E{"Policy + approval"}
-    E --> F["Codex / Claude Code / adapters"]
-    F --> G["Target read-back + evidence"]
-    G --> H["Result + governed memory + time returned"]
+    A["DWS personal DingTalk / Hermes channels"] --> B["Allowlist + session"]
+    B --> C["Personal gbrain + minimal project registry"]
+    C --> D["Real project workspace"]
+    D --> E["Hermes Agent Loop"]
+    E --> F["OpenAI Codex app-server"]
+    F --> G["Search / files / terminal / tests"]
+    G --> F
+    F --> H["Read-back evidence + natural reply"]
+    E --> I{"High-risk boundary"}
+    I -->|"reversible"| G
+    I -->|"external / irreversible"| J["Owner authorization"]
 ```
 
-| Capability | User outcome | Default boundary |
-|---|---|---|
-| Project onboarding | Goal, milestones, people, recipes, memory scope, and risk budget | External effects disabled |
-| Recipe library | Reuse five versioned workflows | The one cockpit handoff form previews steps, risk, evidence, and the exact plan hash; registration always enters approval and cannot auto-execute |
-| Project cockpit | Plans, evidence, deliverables, memory, triggers, and a weekly delegation queue | Read and plan, never silently execute |
-| Time-return dashboard | Count only evidence-backed, owner-confirmed minutes | Model estimates do not count |
-| Proactive mode | Scheduled or event-triggered follow-up | Triggers start disabled |
-| GitHub delivery | Issue → patch → branch → tests → push → Draft PR | Approved repositories and commands only |
+Foursday is a thin distribution on an exact Hermes upstream release:
 
-Optional unattended sending is deliberately narrow. Ordinary direct replies,
-ordinary replies in allowlisted groups that explicitly mention the account, and
-single-question direct clarifications can be enabled independently; each still
-requires `riskLevel=low`, confidence at least 0.95, and no work request. Group
-clarifications, commitments, plans, and medium/high-risk content still require
-review. Takeover and receipt checks still run. Prohibited, unscoped, or
-unauthorized work gets a deterministic capability-limit reply instead of a
-fabricated completion claim.
+- pinned Hermes `v2026.8.18` / `0.20.4`;
+- external DWS, project-router, and high-risk-boundary plugins;
+- a Foursday Profile and general project-work Skill;
+- one locked three-file patch for per-session workspace persistence;
+- no heavy fork and no second business-memory repository.
 
-Historical import is two-stage: preview first, then the exact typed `IMPORT-...`
-digest plus the write token creates proposed facts only. Project-memory settings
-use a dual-token, zero-write preview bound to `MEMORY-AUTH-...`; it never opens
-the global gate. An explicit write-token action invokes the model against an
-already authorized, ten-minute server snapshot. Candidates are reviewed in the
-same project card; a conflict requires explicit replacement.
+[Read the canonical architecture map](./docs/设计总览.md).
 
-## Inspectable memory
-
-Foursday uses four parallel kinds: working, episodic, semantic, and prospective
-memory. People, projects, principles, and knowledge are sibling semantic
-namespaces—not a ladder.
+## Memory model
 
 ```text
-Personal PRIVATE gbrain Git → every durable, readable memory and source
-Personal gbrain PostgreSQL  → rebuildable search / entity / graph index
-Foursday PostgreSQL         → hidden runtime state and promotion candidates
+Personal PRIVATE gbrain Git → durable business knowledge authority
+Personal gbrain PostgreSQL  → rebuildable search/entity/graph index
+Hermes Session DB           → conversation, tool calls, short-term execution
+Foursday PostgreSQL         → compatibility state for the current legacy runtime
 ```
 
-Foursday reads the authorized personal `default` source in place; it does not
-copy personal pages into a second memory repository. A dedicated OAuth client
-is bound to `default` with `read` only, and startup fails if `write` or `admin`
-appears. Reply context uses bounded semantic retrieval, while `knowledge_read`
-still requires exact project-authorized slugs. Message bodies, drafts, leases,
-approvals, execution state, and unpromoted candidates stay in Foursday
-PostgreSQL and never become personal memory automatically. Credentials, PII,
-sensitive person material, and confidential results are filtered before model
-context assembly.
+The gbrain OAuth credential stays in a host-side read-only bridge. Agent terminal commands never receive the credential, production configuration, DWS executable, deployment secrets, or network access.
 
-## Quick Start
+## Verified candidate
 
-### 1. Zero-write Web preview
+The local V3 candidate has passed all 12 PoC gates:
 
-Requires Node.js 22 or 24. This pinned command does not install a production
-service or touch an external system at startup:
+- real DWS receipt from the original personal DingTalk conversation;
+- autonomous 2.2 project audit: `68,786` formal questions vs `81,088` source rows;
+- same-session follow-ups for release, failures, worst batch, cost, and cause;
+- real project documentation, analysis, and code changes with read-back;
+- one real personal self-chat send plus owner takeover interrupt;
+- one separately authorized natural correction to the original contact, read back exactly once;
+- unknown users, unmentioned groups, ambiguity, secret access, network, push, and deployment rejected;
+- full Foursday regression passed; the live count is maintained only in the [status matrix](./docs/完成度矩阵.md);
+- Hermes contract checks: 202 passed, 1 upstream conditional skip.
+
+This is **candidate evidence, not production rollout**. The current production service still uses the Node.js governed runtime; Hermes Gateway is stopped, and production `/ready` has a pre-existing 503 that must be handled separately.
+
+[Review the full Gate 2 report](./docs/自主工作分身迁移验收报告.md).
+
+## Try the public preview
+
+The latest tagged public preview is still [`v0.6.0-rc.1`](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1). Use the immutable reviewed commit:
 
 ```bash
-npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#6b30c22f97b19c6cfd30bf162b3f85000fa2bde9" foursday start --pilot-sha 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
+npx --yes --ignore-scripts \
+  --package "github:ruiwang20010702/foursday#6b30c22f97b19c6cfd30bf162b3f85000fa2bde9" \
+  foursday start --pilot-sha 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
 ```
 
-Use a reviewed 40-character commit SHA for any newer candidate. The optional
-public pilot uses your fork as the push source and the approved upstream as the
-Issue / Draft PR target. **Prepare my pilot fork** is separate from the second
-approval bound to the complete plan hash. Never merge or deploy a pilot PR.
+This previews the legacy governed runtime and does not install or start the Hermes candidate.
 
-The UI can copy a **privacy-safe pilot proof** and a **Copy privacy-safe
-readiness report**; both are unsigned and require maintainer target read-back.
-Foursday never submits it. Reports exclude executable paths, usernames,
-credentials, and model output. Server-start-to-confirmed timing uses a monotonic
-clock; package download remains a separate measurement.
+## Build the Hermes candidate
 
-See [pilot validation](./docs/en/pilot-validation.md), join through
-[Issue #49](https://github.com/ruiwang20010702/foursday/issues/49), or
-[report a successful install](https://github.com/ruiwang20010702/foursday/issues/50).
+Requires macOS, Node.js, Python 3.11–3.13, `uv`, an authenticated Codex CLI, and DWS only for real DingTalk verification.
 
-### 2. Local demo and checks
+Every command previews by default and writes only `.runtime/hermes-poc` when `--apply` is explicit:
 
 ```bash
-npm run demo
-npm run check
+npm run hermes:prepare -- --apply
+npm run hermes:patch -- --apply
+npm run hermes:install
+npm run hermes:install -- --apply
 ```
 
-The 75-second demo uses synthetic [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29)
-and verified [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39).
-
-### 3. Initialize a real installation
-
-```bash
-foursday init                 # zero-write plan
-foursday init --apply         # protected config; no duplicate memory repository
-foursday secrets --apply      # generate Keychain secrets; never save them in config
-foursday check
-```
-
-`init --apply` creates only the protected Foursday runtime configuration. To
-use long-term memory, register a source-scoped, read-only OAuth client against
-your existing personal gbrain and inject its client secret from Keychain or an
-environment secret. The public Foursday repository never receives personal
-Markdown, tokens, or database URLs.
-
-## Governed Work Graph
-
-Loop Engineering remains the execution unit. Graph Engineering connects the
-**Work graph**, **Knowledge graph**, and **Governance graph** so the system can
-explain what happened, which source supported it, and who authorized it.
-Foursday does not add a graph database or grant production authority through
-graph reachability.
-
-Implementation detail and the four bounded graph explanations live in the
-[architecture guide](./docs/en/architecture.md) and
-[ADR 001](./docs/en/adr-001-governed-work-graph-storage.md).
+The installer is rollback-safe and explicitly refuses permission to override Hermes built-in tools. It does not start a gateway, send a message, or touch production.
 
 ## Documentation
 
-| Need | Read |
+| Need | Canonical source |
 |---|---|
-| Product scope and what it is not | [Overview](./docs/en/overview.md) |
-| Architecture, state machines, memory, graph | [Architecture](./docs/en/architecture.md) |
-| Capabilities, approvals, project memory | [Capabilities](./docs/en/capabilities.md) |
-| Installation, production, backup, rollback | [Deployment](./docs/en/deployment.md) |
-| Integrations | [Integrations](./docs/en/integrations.md) |
-| Real demo evidence | [Demo](./docs/en/demo.md) |
-| Public launch process | [Public launch playbook](./docs/en/public-launch-playbook.md) |
-| Public growth scorecard | [Public growth scorecard](./docs/en/growth-scorecard.md) |
-| First contribution tasks | [First contributions](./docs/en/first-contributions.md) |
+| Product definition and acceptance | [Product requirements](./docs/产品需求文档.md) |
+| Architecture and module map | [Design overview](./docs/设计总览.md) |
+| Implementation rules | [Technical design](./docs/技术设计文档.md) |
+| Current status and removed concepts | [Status matrix](./docs/完成度矩阵.md) |
+| Migration evidence | [Gate 2 report](./docs/自主工作分身迁移验收报告.md) |
+| Current production operations | [Legacy runtime runbook](./docs/生产运维手册.md) |
+| Historical decision | [Hermes migration decision](./docs/自主工作分身架构迁移方案.md) |
 
 ## Roadmap
 
-- [x] Governed Work Graph v1 production implementation
-- [x] Four bounded graph explanations in the project cockpit
-- [x] Isolated gbrain Markdown authority and PostgreSQL runtime projection
-- [ ] Ten distinct external pilot loops
-- [ ] Keep tightening the bounded production rollout with real group,
-  clarification, and long-window SLO evidence
-- [ ] Slack, Teams, Gmail, and Google Workspace production connectors
-
-## Contributing
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md), [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md),
-and [SECURITY.md](./SECURITY.md). The first five good-first-issue tasks are live
-in [first contributions](./docs/en/first-contributions.md).
+- [x] General Hermes/Codex loop with DWS, gbrain, routing, evidence, and hard boundaries
+- [x] Real P0 conversations, follow-ups, project work, send read-back, and takeover
+- [x] Reproducible thin distribution with pinned upstream and rollback-safe install
+- [ ] Gate 2 commit and public candidate release
+- [ ] Controlled production migration from the legacy runtime
+- [ ] Feishu, WeCom, Slack, Teams, Gmail, and Google Workspace profiles
 
 ## License
 

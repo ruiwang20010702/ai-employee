@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/NousResearch/hermes-agent.git",
+  "release": "v2026.8.18",
+  "version": "0.20.4",
+  "commit": "e624e9fde561e1add9388384012b295fde669ade",
+  "license": "MIT",
+  "licenseSha256": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6",
+  "pythonRequires": ">=3.11,<3.14"
+}

@@ -279,12 +279,25 @@ test("AI 标签、发送标识或同次发送内容不会冒充人工回复", ()
     content: "我来接手处理。",
     raw: {},
   }, evidence), false);
+  assert.equal(isAutomatedSelfMessage({
+    id: "m4",
+    conversationId: "c1",
+    createTime: "2026-07-31T10:00:01Z",
+    content: "第一行 第二行",
+    raw: {},
+  }, [{
+    ...evidence[0],
+    content: "第一行\n第二行",
+  }]), true);
 });
 
 test("发送者分页只保留单聊消息", async () => {
   const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
   let calls = 0;
-  dws.run = async () => {
+  dws.run = async (args) => {
+    if (args[0] === "contact") {
+      return { result: [{ userId: "u1", openDingTalkId: "open-u1" }] };
+    }
     calls += 1;
     return calls === 1
       ? {
@@ -295,12 +308,12 @@ test("发送者分页只保留单聊消息", async () => {
               {
                 singleChat: false,
                 openConversationId: "group",
-                messages: [{ openMessageId: "g1", createTime: "1" }],
+                messages: [{ openMessageId: "g1", sender: "测试用户", senderOpenDingTalkId: "open-u1", createTime: "1" }],
               },
               {
                 singleChat: true,
                 openConversationId: "direct",
-                messages: [{ openMessageId: "d1", createTime: "2" }],
+                messages: [{ openMessageId: "d1", sender: "测试用户", senderOpenDingTalkId: "open-u1", createTime: "2" }],
               },
             ],
           },
@@ -312,7 +325,7 @@ test("发送者分页只保留单聊消息", async () => {
               {
                 singleChat: true,
                 openConversationId: "direct",
-                messages: [{ openMessageId: "d2", createTime: "3" }],
+                messages: [{ openMessageId: "d2", sender: "测试用户", senderOpenDingTalkId: "open-u1", createTime: "3" }],
               },
             ],
           },
@@ -329,22 +342,52 @@ test("发送者分页只保留单聊消息", async () => {
   );
 });
 
+test("响应已含精确发送者身份时不依赖显示名或通讯录查询", async () => {
+  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
+  dws.run = async (args) => {
+    assert.notEqual(args[0], "contact");
+    return {
+      result: {
+        hasMore: false,
+        conversationMessagesList: [{
+          singleChat: true,
+          openConversationId: "direct",
+          messages: [{
+            openMessageId: "d-stable",
+            senderUserId: "u-stable",
+            createTime: "2026-07-31 10:00:00",
+          }],
+        }],
+      },
+    };
+  };
+  const messages = await dws.fetchBySender({
+    senderUserId: "u-stable",
+    start: new Date("2026-07-31T00:00:00Z"),
+    end: new Date("2026-07-31T12:00:00Z"),
+  });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].senderUserId, "u-stable");
+});
+
 test("发送者查询拒绝响应中不匹配的身份", async () => {
   const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
-  dws.run = async () => ({
-    result: {
+  dws.run = async (args) => args[0] === "contact"
+    ? { result: [{ userId: "allowlisted-user", openDingTalkId: "open-allowlisted" }] }
+    : ({ result: {
       hasMore: false,
       conversationMessagesList: [{
         singleChat: true,
         openConversationId: "direct",
         messages: [{
           openMessageId: "unexpected-message",
+          sender: "异常用户",
           senderUserId: "unexpected-user",
+          senderOpenDingTalkId: "open-attacker",
           createTime: "2026-07-31 10:00:00",
         }],
       }],
-    },
-  });
+    } });
 
   await assert.rejects(
     dws.fetchBySender({
@@ -353,6 +396,24 @@ test("发送者查询拒绝响应中不匹配的身份", async () => {
       end: new Date("2026-07-31T12:00:00Z"),
     }),
     (error) => error.code === "dws_sender_identity_mismatch",
+  );
+});
+
+test("通讯录详情受策略限制时按显示名搜索并精确绑定双身份", async () => {
+  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
+  dws.run = async (args) => {
+    if (args[2] === "get") throw new Error("PAT_ORG_POLICY_DENIED");
+    assert.deepEqual(args.slice(0, 4), ["contact", "user", "search", "--query"]);
+    return {
+      result: [
+        { userId: "other-user", openDingTalkId: "open-other" },
+        { userId: "staff-user", openDingTalkId: "open-staff" },
+      ],
+    };
+  };
+  assert.equal(
+    await dws.resolveUserOpenDingTalkId("staff-user", "测试用户"),
+    "open-staff",
   );
 });
 
@@ -452,6 +513,21 @@ test("已有开放账号任务使用开放账号参数拉取私聊", async () =>
   assert.equal(args[args.indexOf("--forward") + 1], "true");
 });
 
+test("非 DT 前缀的开放账号依靠显式身份类型拉取私聊", async () => {
+  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
+  let args;
+  dws.run = async (input) => {
+    args = input;
+    return { result: { conversationMessagesList: [] } };
+  };
+  await dws.fetchDirect({
+    userId: "opaque-open-id",
+    identityKind: "open_dingtalk_id",
+  });
+  assert.ok(args.includes("--open-dingtalk-id"));
+  assert.ok(!args.includes("--user"));
+});
+
 test("私聊上下文从过去向现在读取并只保留截止时间前最后若干条", async () => {
   const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
   let args;
@@ -496,6 +572,23 @@ test("已有开放账号任务使用开放账号参数发送私聊", async () =>
     userId: "DTestOpenId123",
     text: "收到",
     idempotencyKey: "task-1",
+  });
+  assert.ok(args.includes("--open-dingtalk-id"));
+  assert.ok(!args.includes("--user"));
+});
+
+test("非 DT 前缀的开放账号依靠显式身份类型发送私聊", async () => {
+  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
+  let args;
+  dws.run = async (input) => {
+    args = input;
+    return { success: true };
+  };
+  await dws.sendText({
+    userId: "opaque-open-id",
+    identityKind: "open_dingtalk_id",
+    text: "收到",
+    idempotencyKey: "task-explicit-open-id",
   });
   assert.ok(args.includes("--open-dingtalk-id"));
   assert.ok(!args.includes("--user"));

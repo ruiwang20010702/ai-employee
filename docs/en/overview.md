@@ -1,101 +1,48 @@
-# Foursday Overview
+# Foursday Documentation Map
 
-[Project home](../../README.md) · [简体中文设计总览](../设计总览.md)
+Foursday is a personal-memory-driven Hermes work twin. This page maps canonical documentation; it does not duplicate live status.
 
-## One sentence
+## Canonical owners
 
-Foursday is an open-source work twin that decides when to respond, proposes project-scoped work, requests approval, executes authorized tools, reads the target system back, and retains only auditable memory. Its mission is to return one verified workday per user each week. DingTalk uses DWS; Feishu uses the official Open Platform and never depends on DWS.
+| Question | Canonical source |
+|---|---|
+| What is the product and how is it accepted? | [Product requirements](./product-requirements.md) |
+| What exists and how does it work? | [Architecture](./architecture.md) |
+| What is currently complete or intentionally removed? | [Chinese status matrix](../完成度矩阵.md) |
+| What passed Gate 2? | [Gate 2 report](../自主工作分身迁移验收报告.md) |
+| Why did the runtime change? | [Migration decision](../自主工作分身架构迁移方案.md) |
+| How does current production run? | [Legacy production runbook](../生产运维手册.md) |
+| What rules must contributors obey? | [Security](../../SECURITY.md), [Contributing](../../CONTRIBUTING.md) |
 
-## Try it without an enterprise account
-
-```bash
-npm ci
-npm run demo
-```
-
-The interactive demo uses the same versioned `MessageAdapter`, `AgentRuntime`,
-and `ModelProvider` contracts as production integrations. It never connects to
-an external system. Approval is still required before the in-memory effect is
-recorded, and completion still requires simulated target read-back evidence.
-
-## Why it exists
-
-Text generation is only one part of workplace automation. A production agent must also answer harder questions:
-
-- Should this message receive a reply at all?
-- Is the requester allowed to ask for this action?
-- Does the current project authorize the capability, target, time window, and run count?
-- Which actions require a human approval bound to the exact plan?
-- Did the external system actually change as intended?
-- What should happen when a person takes over or the outcome is unknown?
-- Which facts may become long-term memory, and who confirms them?
-
-Foursday makes these questions explicit in code, storage, tests, and operational gates.
-
-## End-to-end flow
+## Architecture at a glance
 
 ```mermaid
 flowchart LR
-    A["DingTalk / Feishu message"] --> B["MessageAdapter scope, deduplication, bounded bundling"]
-    B --> C{"Ignore, clarify, reply, or propose work"}
-    C -->|"Ignore"| D["Persist a reason"]
-    C -->|"Clarify or reply"| E["Draft awaiting review"]
-    C -->|"Work request"| F["Project capability gateway"]
-    F --> G["Hashed plan and approval policy"]
-    G --> H["Authorized adapter execution"]
-    H --> I["Target-system read-back"]
-    I --> J["Result draft, evidence, and memory candidates"]
-    E --> K["Final human-takeover check"]
-    K --> L["Channel-native send with receipt verification"]
+    MSG["Trusted message"] --> ROUTE["Session + project route"]
+    GB["Personal gbrain"] --> ROUTE
+    ROUTE --> LOOP["Hermes + Codex"]
+    LOOP --> WORK["Real workspace work"]
+    WORK --> EVIDENCE["Read-back evidence"]
+    EVIDENCE --> REPLY["Personal-account reply"]
+    LOOP --> BOUNDARY["Independent high-risk boundary"]
 ```
 
-## Core principles
+## Code map
 
-1. **Default deny.** Message content and model output never create permission.
-2. **Humans remain in control.** Approval, rejection, pause, cancellation, and takeover are first-class states.
-3. **External facts beat model claims.** A tool response is not enough; the target must be read back.
-4. **Unknown outcomes fail closed.** Side effects with uncertain results are not replayed automatically.
-5. **Memory is governed data.** The model may propose candidates, but only a human can confirm formal memory.
+| Need | Source |
+|---|---|
+| Hermes upstream/patch | `src/hermes-upstream.mjs`, `src/hermes-patches.mjs`, `hermes/patches/` |
+| DWS personal DingTalk | `src/hermes-dws-sidecar.mjs`, `hermes/plugins/dws_personal/` |
+| Project routing | `hermes/plugins/project_router/` |
+| Personal gbrain | `src/hermes-personal-memory-context.mjs` |
+| Tool isolation/high risk | `hermes/plugins/foursday_boundary/` |
+| Profile and Skills | `hermes/profile/`, `hermes/skills/` |
+| Candidate install | `scripts/准备Hermes候选.mjs`, `scripts/准备Hermes补丁层.mjs`, `scripts/安装Hermes发行层.mjs` |
+| Legacy production | `src/listener.mjs`, `src/worker.mjs`, `src/plan-executor.mjs` |
 
-## What it can do
+## State boundary
 
-| Area | Examples | Boundary |
-|---|---|---|
-| Messaging | Ignore, clarify, draft replies, summarize current capabilities | Draft-only by default |
-| Project work | Research, documents, code patches, tests, Git, release planning | Project manifest required |
-| DingTalk work | Documents, tasks, calendars, rooms, reports | Fixed targets and read-back |
-| Memory | Person, project, and principle candidates | Source-bound and human-confirmed |
-| Operations | Health, alerts, backups, migration checks, immutable releases | Separate deployment approval |
-
-## Personal work loop
-
-The V2.3 production implementation adds a personal project cockpit rather than a
-team-control console: ten-minute project onboarding, five versioned recipes,
-an evidence-ranked weekly delegation queue, evidence-backed time return,
-disabled-by-default proactive triggers,
-meeting-to-execution, and a GitHub draft-PR loop. The user confirms formal
-memory and saved time; neither is accepted from a model estimate alone.
-
-Slack, Teams, Gmail, and Google Workspace currently have versioned extension
-contracts and example manifests only. They are not production connectors.
-
-Implemented capability does not mean enabled capability. Production environments start with `draft_reply`; sending and work-plan execution have separate global switches and project-level authorization.
-
-## What it is not
-
-- It is not a general-purpose chatbot that responds to every message.
-- It does not silently impersonate the user; AI-originated DingTalk messages retain a transparent marker.
-- It does not allow a prompt to expand contacts, projects, files, commands, or production access.
-- It does not treat deployment success as business readiness or automatic rollout approval.
-- It does not auto-confirm memory or auto-resolve dead tasks.
-
-## Read next
-
-- [Architecture](./architecture.md)
-- [Integration guide](./integrations.md)
-- [Capabilities and memory](./capabilities.md)
-- [Deployment](./deployment.md)
-- [Security policy](../../SECURITY.md)
-- [Contributing](../../CONTRIBUTING.md)
-
-The Chinese documents remain the most detailed source for product rules, state transitions, and production operations.
+- Tagged public preview and production still use the legacy Node.js runtime.
+- The local Hermes V3 candidate has complete P0/Gate 2 evidence.
+- Hermes Gateway is stopped and the candidate is not deployed.
+- Production `/ready` has a pre-existing 503 and must be handled independently.

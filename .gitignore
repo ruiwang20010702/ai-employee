@@ -1,4 +1,6 @@
 .runtime/
+**/__pycache__/
+**/*.pyc
 node_modules/
 *.log
 .env

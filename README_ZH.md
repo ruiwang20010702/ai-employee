@@ -4,194 +4,136 @@
 
 # Foursday
 
-**你的开源工作分身。多一个你，少上一天班。**
+**由个人记忆驱动、能够在真实项目中工作的 AI 工作分身。**
 
-Foursday 把工作消息转化为可审阅回复和项目工作，只执行明确授权的工具，并用目标系统回读证明结果。北极星指标是每位用户每周经过验证拿回的工作时间。
+可信消息 → 个人上下文 → 真实工作区 → Hermes + Codex → 已验证工作 → 自然回复。
 
-[English](./README.md) · [快速开始](#快速开始) · [75 秒真实演示](./assets/foursday-v0.5-demo.mp4) · [设计总览](./docs/设计总览.md) · [安全说明](./SECURITY.md) · [参与贡献](./CONTRIBUTING_ZH.md)
+[English](./README.md) · [架构地图](./docs/设计总览.md) · [Gate 2 证据](./docs/自主工作分身迁移验收报告.md) · [安全说明](./安全说明.md) · [参与贡献](./CONTRIBUTING_ZH.md)
 
 [![检查](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![安全扫描](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
-[![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024-3c873a)](https://nodejs.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017-4169e1)](https://www.postgresql.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
-
-**版本状态：**[`v0.6.0-rc.1`](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1)
-是最新带标签的公开预览版，对应
-`6b30c22f97b19c6cfd30bf162b3f85000fa2bde9`；`main` 可能继续包含 RC 后候选改动。
+[![许可证: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
 </div>
 
-## 为什么做 Foursday
+## Foursday 是什么
 
-聊天机器人能生成文字，真实工作还需要范围、权限、接管、证据和记忆：
+Foursday 使用个人 gbrain 和 Hermes 通用 Agent Loop 完成工作，不再为每一种问题新增 capability、JSON Pointer、请求人配置或固定回复模板。
 
-- 判断应该沉默、追问、回复还是开始工作；
-- 每个动作绑定请求人、项目、能力、预算和完整计划哈希；
-- 高风险副作用先审批；
-- 执行后回读目标系统，不相信模型自述；
-- 人工接管时停止自动流程；
-- 长期记忆保存在可阅读、相互隔离的 gbrain Markdown source。
-- 需要人工判断的消息可以在本机管理台处理，也可以选择在钉钉手机端通过本人自聊短码批准或拒绝；高风险计划仍留在完整控制台。
+对白名单可信联系人，普通可恢复工作默认自主执行：
 
-钉钉使用 DWS；飞书直接使用官方 WebSocket 与消息 API，不依赖 DWS。
-`MessageAdapter`、`AgentRuntime` 和 `ModelProvider` 是独立的版本化契约。
+- 理解会话并自动识别项目；
+- 进入真实项目目录；
+- 阅读文件、脚本、台账和 Git 状态；
+- 计算、分析、整理文档或修改代码；
+- 运行测试并根据失败继续修复；
+- 回读真实结果，带证据自然回复。
 
-## 它如何工作
+Git 推送、PR 合并、生产部署、生产改数、不可恢复删除、付款、合同、人事决定、秘密外发和不可撤销承诺继续由独立硬边界阻断。
+
+## 架构
 
 ```mermaid
 flowchart LR
-    A["消息 / 会议 / GitHub / 定时事件"] --> B["范围与上下文"]
-    B --> C{"沉默、追问、回复或配方"}
-    C --> D["项目绑定计划"]
-    D --> E{"策略与审批"}
-    E --> F["Codex / Claude Code / 适配器"]
-    F --> G["目标回读与证据"]
-    G --> H["结果、治理记忆与返还时间"]
+    A["DWS 个人钉钉 / Hermes 消息平台"] --> B["白名单 + 会话"]
+    B --> C["个人 gbrain + 最小项目注册表"]
+    C --> D["真实项目工作区"]
+    D --> E["Hermes Agent Loop"]
+    E --> F["OpenAI Codex app-server"]
+    F --> G["搜索 / 文件 / 终端 / 测试"]
+    G --> F
+    F --> H["回读证据 + 自然回复"]
+    E --> I{"高风险边界"}
+    I -->|"普通可恢复"| G
+    I -->|"外部或不可逆"| J["负责人授权"]
 ```
 
-| 功能 | 用户价值 | 默认边界 |
-|---|---|---|
-| 项目接入向导 | 一次配置目标、里程碑、协作对象、配方、记忆范围和风险预算 | 外部动作关闭 |
-| 工作配方库 | 复用 5 个版本化流程 | 同一张工作委托单先预览步骤、风险、证据和精确计划哈希；工作台登记一律进入待审批，不能自动执行 |
-| 项目驾驶舱 | 查看计划、证据、交付物、记忆、触发器和本周工作返还队列 | 只读与规划 |
-| 时间返还仪表盘 | 只统计有证据且经本人确认的分钟 | 模型估算不计入 |
-| 主动工作模式 | 定时或事件触发跟进 | 触发器默认关闭 |
-| GitHub 交付 | Issue → 补丁 → 分支 → 测试 → 推送 → Draft PR | 只限授权仓库与命令 |
+Foursday 是建立在精确 Hermes 上游之上的薄发行层：
 
-无人值守发送保持窄边界：普通私聊、白名单群中明确 `@` 当前账号的普通回复，以及私聊中只问一个必要问题的最小追问，只有在 `riskLevel=low`、置信度不低于 0.95 且不包含工作请求时才可分别授权自动批准。群聊追问、承诺、计划和中高风险内容仍需审阅；人工接管检查和发送回执核对不会关闭。禁止区、未授权项目和未开放能力会返回确定性的“暂时无法执行”说明，不会假装已经处理。
+- 固定 Hermes `v2026.8.18` / `0.20.4`；
+- DWS、项目路由和高风险边界三个外部插件；
+- Foursday Profile 与通用项目工作 Skill；
+- 一个用于 Session workspace 持久化的三文件锁定补丁；
+- 不维护重度 Fork，不创建第二套业务知识库。
 
-历史导入分两步：先预览，再用写入令牌加手工输入的当前 `IMPORT-...`
-摘要创建待审候选。项目记忆设置使用双令牌零写的 `MEMORY-AUTH-...`
-预览，不会开启全局能力；显式使用写入令牌才调用模型，并且不能超出既有授权和服务端十分钟快照。候选在同一项目卡片确认或拒绝，冲突必须明确替代旧事实。
+[查看权威架构地图](./docs/设计总览.md)。
 
-## 可阅读的统一记忆
-
-Foursday 使用工作、情景、语义和前瞻四类并列记忆。人物、项目、原则和知识是语义记忆的并列子域，不是上下级。
+## 记忆模型
 
 ```text
-个人 PRIVATE gbrain Git → 全部长期可阅读记忆与 source
-个人 gbrain PostgreSQL  → 可重建的搜索、实体与图谱索引
-Foursday PostgreSQL     → 隐藏运行状态与待晋升候选
+个人 PRIVATE gbrain Git → 长期业务知识唯一权威
+个人 gbrain PostgreSQL  → 可重建的搜索、实体和图索引
+Hermes Session DB       → 会话、工具调用和短期执行上下文
+Foursday PostgreSQL     → 当前旧 Runtime 的兼容运行状态
 ```
 
-Foursday 直接读取已授权的个人 `default`，不再复制第二套长期知识库。
-生产身份固定为 `default + read-only OAuth`；启动时发现 `write` 或 `admin`
-会立即拒绝。普通回复使用有界语义检索，计划内 `knowledge_read` 仍要求
-项目白名单中的精确 slug。消息原文、草稿、审批、租约、执行状态和未晋升
-候选只留在 Foursday PostgreSQL，不自动污染个人知识库。凭据、PII、敏感
-人物材料和机密内容在进入模型上下文前直接过滤。
+gbrain OAuth 凭据只存在于宿主只读桥接进程。Agent 终端拿不到凭据、生产配置、DWS 可执行文件、部署密钥或网络。
 
-## 与普通机器人的区别
+## 已验证候选
 
-| 普通机器人 | Foursday |
-|---|---|
-| 看到消息就回答 | 判断沉默、追问、回复或工作 |
-| 提示词决定权限 | 项目清单、预算、风险和审批决定权限 |
-| 相信工具返回 | 副作用账本、幂等键和目标回读 |
-| 自动堆积上下文 | Markdown 权威、来源、冲突替代、过期和撤销 |
-| 人工与自动流程竞争 | 人工回复、暂停和取消统一接管 |
+本机 V3 候选已通过全部 12 项 PoC 门槛：
 
-## 快速开始
+- 从个人钉钉原会话真实接收 DWS 消息；
+- 自主核对 2.2 项目：正式成品 `68,786`，释义级源记录 `81,088`；
+- 同一 Session 连续回答放行量、未通过量、问题批次、成本和原因；
+- 在真实项目完成文档、分析和代码修改并回读；
+- 本人自聊真实发送与人工接管 interrupt；
+- 经单独授权向原联系人发送自然更正，独立回读精确正文只有一条；
+- 陌生人、未 @ 群聊、项目歧义、秘密、网络、推送和部署均失败关闭；
+- Foursday 全量回归通过；实时数量只在[完成度矩阵](./docs/完成度矩阵.md)维护；
+- Hermes 上游契约：202 通过、1 条条件跳过。
 
-### 1. 零写 Web 预览
+这些是**候选证据，不是生产放量**。当前生产仍运行旧 Node.js 治理 Runtime；Hermes Gateway 保持停止，生产 `/ready` 的既有 503 需要单独处理。
 
-需要 Node.js 22 或 24。下面的固定提交启动时不安装生产服务、不触碰外部系统：
+[查看完整 Gate 2 报告](./docs/自主工作分身迁移验收报告.md)。
+
+## 体验公开预览
+
+最新带标签公开预览仍是 [`v0.6.0-rc.1`](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1)，请使用已审核的不可变提交：
 
 ```bash
-npx --yes --ignore-scripts --package "github:ruiwang20010702/foursday#6b30c22f97b19c6cfd30bf162b3f85000fa2bde9" foursday start --pilot-sha 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
+npx --yes --ignore-scripts \
+  --package "github:ruiwang20010702/foursday#6b30c22f97b19c6cfd30bf162b3f85000fa2bde9" \
+  foursday start --pilot-sha 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
 ```
 
-更新候选必须换成经过审核的完整 40 位提交编号。公开体验使用个人 fork 作为推送来源，以获批 upstream 作为 Issue 和 Draft PR 目标。**Prepare my pilot fork** 与再次批准完整计划哈希是两个动作；禁止合并或部署体验 PR。
+该入口预览的是旧治理 Runtime，不会安装或启动 Hermes 候选。
 
-页面可复制**隐私安全体验证明**和 **Copy privacy-safe readiness report**；两者均未签名，需要维护者独立回读，且 Foursday 不会自动提交。报告不含可执行文件路径、用户名、凭据或模型输出。服务启动到确认使用单调时钟；包下载时间单独记录，不能拿局部时间冒充完整安装耗时。
+## 构建 Hermes 候选
 
-查看[体验验证说明](./docs/体验验证说明.md)，通过
-[Issue #49](https://github.com/ruiwang20010702/foursday/issues/49) 加入，或在
-[Issue #50](https://github.com/ruiwang20010702/foursday/issues/50) 报告一次成功安装。
+需要 macOS、Node.js、Python 3.11–3.13、`uv`、已登录的 Codex CLI；只有真实钉钉验证才需要 DWS。
 
-### 2. 本地演示与检查
+每条命令默认只预览，显式 `--apply` 也只写 `.runtime/hermes-poc`：
 
 ```bash
-npm run demo
-npm run check
+npm run hermes:prepare -- --apply
+npm run hermes:patch -- --apply
+npm run hermes:install
+npm run hermes:install -- --apply
 ```
 
-75 秒真实演示使用合成 [Issue #29](https://github.com/ruiwang20010702/foursday/issues/29)
-和已回读验证的 [Draft PR #39](https://github.com/ruiwang20010702/foursday/pull/39)，未合并、未部署。
-
-### 3. 初始化真实安装
-
-```bash
-foursday init                 # 零写预览
-foursday init --apply         # 受保护配置，不创建重复记忆仓库
-foursday secrets --apply      # 在钥匙串生成密钥，不把生成的生产密钥写入配置
-foursday check
-```
-
-`init --apply` 只创建 Foursday 运行配置。长期记忆需要为现有个人 gbrain
-登记绑定 `default` 的只读 OAuth 身份，并从钥匙串或环境密钥注入 client
-secret。公开 Foursday 仓库永远不会接收个人 Markdown、令牌或数据库地址。
-
-## 首次部署
-
-完整操作解释和回滚要求以[生产运维手册](./docs/生产运维手册.md)为准。安全顺序固定为：
-
-```bash
-npm run production:preflight
-npm run db:backup
-npm run db:migrate
-npm run production:doctor
-npm run production:agent-probe
-npm run service:install
-npm run production:service-verify
-npm run production:verify
-npm run shadow:verify
-```
-
-部署不会自动打开发送、计划执行、主动工作、记忆写入或自动确认。
-
-## 日常操作
-
-日常管理使用本机回环管理台；项目配方可先运行默认零写的
-`npm run projects:shadow`，只有显式 `--run` 才调用模型服务，阅读结果后再用
-`--review` 记录真实审阅时间。
-
-## 受治理工作图
-
-Loop Engineering 是执行单元，Graph Engineering 连接**工作图、知识图和治理图**，解释发生了什么、事实来自哪里、谁允许执行。受治理工作图不代表已经引入图数据库，也不代表项目、配方或主动工作已经获得生产权限。
-
-实现和四类项目驾驶舱图解释见[技术设计](./docs/技术设计文档.md)与
-[架构决策 001](./docs/架构决策受治理工作图存储.md)。
+安装器失败可恢复，并明确拒绝覆盖 Hermes 内置工具；不会启动 Gateway、发送消息或修改生产。
 
 ## 文档导航
 
-| 想了解 | 阅读 |
+| 想了解 | 权威来源 |
 |---|---|
-| 产品边界和当前状态 | [设计总览](./docs/设计总览.md) · [完成度矩阵](./docs/完成度矩阵.md) |
-| 产品需求 | [产品需求文档](./docs/产品需求文档.md) |
-| 架构、状态机、记忆和图 | [技术设计文档](./docs/技术设计文档.md) |
-| 能力、审批和正式记忆 | [能力清单与正式记忆](./docs/能力清单与正式记忆.md) |
-| 安装、备份、发布和回退 | [生产运维手册](./docs/生产运维手册.md) |
-| 真实演示证据 | [演示说明](./docs/真实演示录制说明.md) |
-| 公开发布 | [公开发布手册](./docs/公开发布手册.md) |
-| 增长证据 | [公开增长记分卡](./docs/公开增长记分卡.md) |
-| 首次贡献任务 | [首次贡献任务](./docs/首次贡献任务.md) |
+| 产品定义与验收 | [产品需求文档](./docs/产品需求文档.md) |
+| 架构和模块地图 | [设计总览](./docs/设计总览.md) |
+| 具体实现规则 | [技术设计文档](./docs/技术设计文档.md) |
+| 当前状态和已撤销概念 | [完成度矩阵](./docs/完成度矩阵.md) |
+| 迁移验证证据 | [Gate 2 报告](./docs/自主工作分身迁移验收报告.md) |
+| 当前生产运维 | [旧 Runtime 运维手册](./docs/生产运维手册.md) |
+| 历史架构决策 | [Hermes 迁移决策](./docs/自主工作分身架构迁移方案.md) |
 
 ## 路线图
 
-- [x] 受治理工作图 V1 生产实现
-- [x] 四类项目驾驶舱图解释
-- [x] 隔离 gbrain Markdown 权威层与 PostgreSQL 运行投影
-- [ ] 10 位不同外部体验者完成真实闭环
-- [ ] 用真实群聊、追问和长期 SLO 样本持续收紧已开放的有界生产自动化
-- [ ] Slack、Teams、Gmail、Google Workspace 生产连接器
-
-## 参与贡献
-
-请阅读 [CONTRIBUTING_ZH.md](./CONTRIBUTING_ZH.md)、
-[CODE_OF_CONDUCT_ZH.md](./CODE_OF_CONDUCT_ZH.md) 和
-[SECURITY.md](./SECURITY.md)。5 个任务都已经开放，见[首次贡献任务](./docs/首次贡献任务.md)。
+- [x] Hermes/Codex 通用 Loop、DWS、gbrain、项目路由、证据与硬边界
+- [x] 真实 P0 会话、追问、项目工作、发送回读和人工接管
+- [x] 固定上游、失败可恢复的薄发行层
+- [ ] Gate 2 提交与公开候选发布
+- [ ] 从旧 Runtime 受控迁移生产
+- [ ] 飞书、企业微信、Slack、Teams、Gmail 和 Google Workspace 发行配置
 
 ## 许可证
 
