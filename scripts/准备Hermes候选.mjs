@@ -111,6 +111,29 @@ const lock = validateHermesUpstreamLock(JSON.parse(await readFile(
   join(projectRoot, "hermes", "upstream.lock.json"),
   "utf8",
 )));
+const previewPlan = buildHermesCandidatePlan({
+  projectRoot,
+  lock,
+  uvPath: isAbsolute(process.env.UV_PATH ?? "")
+    ? process.env.UV_PATH
+    : "/usr/bin/uv",
+  pythonPath: "/usr/bin/python3",
+});
+await assertHermesRuntimeRoot(projectRoot, previewPlan.layout.root);
+
+if (!apply) {
+  console.log(JSON.stringify({
+    valid: true,
+    apply: false,
+    release: lock.release,
+    commit: lock.commit,
+    operationCount: previewPlan.commands.length,
+    productionWrite: false,
+    existingHermesTouched: false,
+  }));
+  process.exit(0);
+}
+
 const uvPath = await resolveExecutable("uv", [
   process.env.UV_PATH,
   "/opt/homebrew/bin/uv",
@@ -129,19 +152,6 @@ const plan = buildHermesCandidatePlan({
   pythonPath,
 });
 await assertHermesRuntimeRoot(projectRoot, plan.layout.root);
-
-if (!apply) {
-  console.log(JSON.stringify({
-    valid: true,
-    apply: false,
-    release: lock.release,
-    commit: lock.commit,
-    operationCount: plan.commands.length,
-    productionWrite: false,
-    existingHermesTouched: false,
-  }));
-  process.exit(0);
-}
 
 await mkdir(plan.layout.root, { recursive: true, mode: 0o700 });
 await chmod(plan.layout.root, 0o700);

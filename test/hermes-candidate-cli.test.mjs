@@ -13,7 +13,7 @@ test("Hermes 候选准备命令默认只输出隔离计划且零写入", async (
       cwd: new URL("../", import.meta.url),
       env: {
         HOME: process.env.HOME,
-        PATH: process.env.PATH,
+        PATH: "/usr/bin:/bin",
       },
       timeout: 30_000,
     },
