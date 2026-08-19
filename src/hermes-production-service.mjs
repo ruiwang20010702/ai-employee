@@ -294,6 +294,9 @@ export function buildHermesGatewayEnvironment({
     PATH: [
       dirname(paths.nodePath),
       dirname(paths.dwsPath),
+      isAbsolute(String(config.codexPath ?? ""))
+        ? dirname(config.codexPath)
+        : null,
       "/usr/bin",
       "/bin",
       "/usr/sbin",

@@ -105,6 +105,7 @@ test("Hermes shadow Gateway 使用固定路径且绝不开放发送", async (t) 
       fallbackMs: 30_000,
       quietWindowMs: 3_000,
       bundleMaxWaitMs: 8_000,
+      codexPath: "/trusted/codex/bin/codex",
       databaseUrl: "postgresql://must-not-leak",
       dataKey: "must-not-leak",
       adminWriteToken: "must-not-leak",
@@ -127,6 +128,7 @@ test("Hermes shadow Gateway 使用固定路径且绝不开放发送", async (t) 
   );
   assert.equal(environment.DWS_PERSONAL_ALLOWED_USERS, "trusted-user");
   assert.equal(environment.DWS_PERSONAL_ALLOWED_GROUPS, "trusted-group");
+  assert.equal(environment.PATH.split(":").includes("/trusted/codex/bin"), true);
   assert.match(
     environment.FOURSDAY_SHADOW_EVIDENCE_FILE,
     /shadow-evidence\.jsonl$/u,
