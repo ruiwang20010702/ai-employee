@@ -68,10 +68,19 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:16]
 
 
-def _shadow_evidence(event: dict[str, Any]) -> None:
+_SHADOW_REPLY_KEYS: dict[str, set[str]] = {}
+
+
+def _reply_evidence_key(event: dict[str, Any]) -> str:
+    return ":".join(str(event.get(name) or "") for name in (
+        "conversationHash", "replyToHash", "deliveryContextHash", "contentHash",
+    ))
+
+
+def _shadow_evidence(event: dict[str, Any]) -> bool:
     configured = str(os.getenv("FOURSDAY_SHADOW_EVIDENCE_FILE", "")).strip()
     if not configured:
-        return
+        return False
     path = Path(configured).expanduser()
     if not path.is_absolute():
         raise RuntimeError("Foursday shadow evidence path must be absolute")
@@ -86,6 +95,25 @@ def _shadow_evidence(event: dict[str, Any]) -> None:
         metadata = path.lstat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
             raise RuntimeError("Foursday shadow evidence must be a private regular file")
+    if event.get("type") == "reply_attempt":
+        key = _reply_evidence_key(event)
+        known = _SHADOW_REPLY_KEYS.get(str(path))
+        if known is None:
+            known = set()
+            if path.exists():
+                for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+                    if index >= 100_000:
+                        raise RuntimeError("Foursday shadow evidence is too large")
+                    try:
+                        prior = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if prior.get("type") == "reply_attempt":
+                        known.add(_reply_evidence_key(prior))
+            _SHADOW_REPLY_KEYS[str(path)] = known
+        if key in known:
+            return False
+        known.add(key)
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -97,6 +125,7 @@ def _shadow_evidence(event: dict[str, Any]) -> None:
             os.fsync(handle.fileno())
     finally:
         os.chmod(path, 0o600)
+    return True
 
 
 class UnavailableBridge:

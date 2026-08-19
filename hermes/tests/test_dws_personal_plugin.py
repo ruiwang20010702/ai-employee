@@ -409,7 +409,13 @@ class DwsPersonalPluginTest(unittest.IsolatedAsyncioTestCase):
                 "private natural reply",
                 reply_to="private-message-id",
             )
+            duplicate = await self.adapter.send(
+                "private-conversation-id",
+                "private natural reply",
+                reply_to="private-message-id",
+            )
         self.assertTrue(reply.success)
+        self.assertTrue(duplicate.success)
         self.assertTrue(reply.message_id.startswith("shadow-"))
         rows = [json.loads(line) for line in evidence.read_text().splitlines()]
         self.assertEqual([row["type"] for row in rows], ["inbound", "reply_attempt"])

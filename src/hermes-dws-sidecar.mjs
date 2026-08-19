@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { watch } from "node:fs";
 import { access, chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
@@ -21,6 +21,23 @@ function boundedInteger(value, fallback, minimum, maximum) {
 
 function hash(value) {
   return createHash("sha256").update(String(value)).digest("hex").slice(0, 16);
+}
+
+function stableSendKey(payload) {
+  return createHash("sha256").update(JSON.stringify({
+    conversationId: String(payload?.conversationId ?? ""),
+    content: String(payload?.content ?? ""),
+    replyTo: String(payload?.replyTo ?? ""),
+    metadata: payload?.metadata && typeof payload.metadata === "object"
+      ? Object.fromEntries(Object.entries(payload.metadata).sort(([left], [right]) =>
+        left.localeCompare(right)))
+      : {},
+  })).digest("hex");
+}
+
+function idempotencyUuid(key) {
+  const hex = `${key.slice(0, 12)}5${key.slice(13, 16)}8${key.slice(17, 32)}`;
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 function epoch(value) {
@@ -80,7 +97,7 @@ function emptyState() {
   return {
     lastUsers: {}, lastGroups: {}, recentMessageIds: [],
     recipients: {}, activeConversations: {}, takeoverReported: [],
-    lastCheckAt: null, lastFullSuccessAt: null, lastErrorCount: 0,
+    sendLedger: {}, lastCheckAt: null, lastFullSuccessAt: null, lastErrorCount: 0,
   };
 }
 
@@ -104,6 +121,9 @@ async function loadState(path) {
       takeoverReported: Array.isArray(parsed?.takeoverReported)
         ? parsed.takeoverReported.map(String).filter(Boolean)
         : [],
+      sendLedger: parsed?.sendLedger && typeof parsed.sendLedger === "object"
+        ? Object.fromEntries(Object.entries(parsed.sendLedger).slice(-1_000))
+        : {},
       lastCheckAt: typeof parsed?.lastCheckAt === "string" ? parsed.lastCheckAt : null,
       lastFullSuccessAt:
         typeof parsed?.lastFullSuccessAt === "string" ? parsed.lastFullSuccessAt : null,
@@ -174,7 +194,14 @@ export async function createSidecarRuntime({
   const recipients = new Map(Object.entries(state.recipients));
   const activeConversations = new Map(Object.entries(state.activeConversations));
   const takeoverReported = new Set(state.takeoverReported);
-  const automatedSendEvidence = [];
+  const sendLedger = new Map(Object.entries(state.sendLedger));
+  const automatedSendEvidence = [...sendLedger.values()]
+    .filter((entry) => entry?.status === "completed" && entry.messageId)
+    .map((entry) => ({
+      conversationId: entry.conversationId,
+      startedAt: entry.startedAt,
+      receipt: { messageId: entry.messageId },
+    }));
   const watchers = [];
   let fallbackTimer = null;
   let debounceTimer = null;
@@ -385,17 +412,50 @@ export async function createSidecarRuntime({
       const conversationId = String(payload?.conversationId ?? "").trim();
       const route = recipients.get(conversationId);
       if (!route) return { success: false, error: "DWS conversation recipient is unknown" };
-      const idempotencyKey = randomUUID();
+      const sendKey = stableSendKey(payload);
+      const existing = sendLedger.get(sendKey);
+      if (existing?.status === "completed" && existing.messageId) {
+        return {
+          success: true,
+          messageId: existing.messageId,
+          receiptKind: "idempotent_server",
+        };
+      }
+      if (existing) {
+        return {
+          success: false,
+          outcomeUnknown: true,
+          error: "DWS send has an unresolved prior intent",
+        };
+      }
+      const idempotencyKey = idempotencyUuid(sendKey);
       const startedAt = new Date().toISOString();
-      const receipt = await dws.sendMessage({
-        conversationId,
-        recipientId: route.recipientId,
-        recipientKind: route.recipientKind ?? null,
-        chatType: route.chatType,
-        text: String(payload?.content ?? ""),
-        idempotencyKey,
-      });
-      dws.verifySendReceipt(receipt);
+      const intent = { status: "sending", conversationId, startedAt, idempotencyKey };
+      sendLedger.set(sendKey, intent);
+      while (sendLedger.size > 1_000) sendLedger.delete(sendLedger.keys().next().value);
+      state.sendLedger = Object.fromEntries(sendLedger);
+      await saveState(config.stateFile, state);
+      let receipt;
+      try {
+        receipt = await dws.sendMessage({
+          conversationId,
+          recipientId: route.recipientId,
+          recipientKind: route.recipientKind ?? null,
+          chatType: route.chatType,
+          text: String(payload?.content ?? ""),
+          idempotencyKey,
+        });
+        dws.verifySendReceipt(receipt);
+      } catch {
+        sendLedger.set(sendKey, { ...intent, status: "unknown" });
+        state.sendLedger = Object.fromEntries(sendLedger);
+        await saveState(config.stateFile, state);
+        return {
+          success: false,
+          outcomeUnknown: true,
+          error: "DWS send failed after intent persistence",
+        };
+      }
       const evidence = {
         conversationId,
         taskId: idempotencyKey,
@@ -407,12 +467,22 @@ export async function createSidecarRuntime({
       const serverMessageId = messageIdFromReceipt(receipt) ??
         await readBackSentMessage({ dws, route, conversationId, evidence });
       if (!serverMessageId) {
+        sendLedger.set(sendKey, { ...intent, status: "unknown" });
+        state.sendLedger = Object.fromEntries(sendLedger);
+        await saveState(config.stateFile, state);
         return {
           success: false,
           outcomeUnknown: true,
           error: "DWS explicit receipt did not include a server message ID",
         };
       }
+      sendLedger.set(sendKey, {
+        ...intent,
+        status: "completed",
+        messageId: serverMessageId,
+      });
+      state.sendLedger = Object.fromEntries(sendLedger);
+      await saveState(config.stateFile, state);
       automatedSendEvidence.push(evidence);
       if (automatedSendEvidence.length > 1_000) automatedSendEvidence.shift();
       return {

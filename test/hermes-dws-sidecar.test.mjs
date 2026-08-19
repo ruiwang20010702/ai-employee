@@ -221,8 +221,15 @@ test("Hermes DWS sidecar keeps real sending disabled unless explicitly enabled",
     conversationId: "conversation-1",
     content: "完成了",
   });
+  const duplicate = await enabled.send({
+    conversationId: "conversation-1",
+    content: "完成了",
+  });
   await enabled.stop();
   assert.equal(receipt.success, true);
+  assert.equal(duplicate.success, true);
+  assert.equal(duplicate.messageId, receipt.messageId);
+  assert.equal(dws.sent.length, 1);
   assert.equal(receipt.messageId, "server-message-1");
   assert.equal(dws.sent.at(-1).recipientId, "open-trusted");
   assert.equal(dws.sent.at(-1).recipientKind, "open_dingtalk_id");
@@ -316,9 +323,64 @@ test("Hermes DWS sidecar marks an explicit send without server message id as unk
     conversationId: "conversation-1",
     content: "完成了",
   });
+  const duplicate = await runtime.send({
+    conversationId: "conversation-1",
+    content: "完成了",
+  });
   await runtime.stop();
   assert.equal(result.success, false);
   assert.equal(result.outcomeUnknown, true);
+  assert.equal(duplicate.outcomeUnknown, true);
+  assert.equal(dws.sent.length, 1);
+});
+
+test("Hermes DWS sidecar reuses a completed send receipt after restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "foursday-dws-send-ledger-"));
+  const stateFile = join(root, "state.json");
+  const config = {
+    dwsPath: process.execPath,
+    dingtalkRoot: "",
+    userIds: ["trusted-user"],
+    groupIds: [],
+    selfUserId: null,
+    stateFile,
+    initialLookbackMs: 120_000,
+    fallbackMs: 300_000,
+    sendEnabled: true,
+  };
+  const firstDws = new FakeDws();
+  const first = await createSidecarRuntime({
+    config,
+    dws: firstDws,
+    emit: () => {},
+    now: () => new Date("2026-08-18T14:01:00+08:00"),
+  });
+  await first.start();
+  const receipt = await first.send({
+    conversationId: "conversation-1",
+    content: "完成了",
+    replyTo: "source-1",
+  });
+  await first.stop();
+
+  const secondDws = new FakeDws();
+  const second = await createSidecarRuntime({
+    config,
+    dws: secondDws,
+    emit: () => {},
+    now: () => new Date("2026-08-18T14:02:00+08:00"),
+  });
+  await second.start();
+  const repeated = await second.send({
+    conversationId: "conversation-1",
+    content: "完成了",
+    replyTo: "source-1",
+  });
+  await second.stop();
+  assert.equal(receipt.success, true);
+  assert.equal(repeated.success, true);
+  assert.equal(repeated.messageId, receipt.messageId);
+  assert.equal(secondDws.sent.length, 0);
 });
 
 test("Hermes DWS sidecar restart keeps dedupe and recipient recovery", async () => {
