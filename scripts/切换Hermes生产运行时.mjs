@@ -352,13 +352,23 @@ export async function runHermesCutoverCommand({
     if (argument(args, "--confirm") !== expectedConfirmation) {
       throw new Error("Hermes cutover confirmation does not match current evidence");
     }
+    let initialLegacy = legacy;
+    let initialShadow = shadow;
     const receiptPath = environment.FOURSDAY_HERMES_CUTOVER_RECEIPT ?? join(
       activeContext.paths.stateDirectory,
       "cutover.active.json",
     );
     return executeHermesCutover({
-      async inspectLegacy() { return store.health(); },
-      async inspectShadow() { return hermesGatewayStatus(shadowContext); },
+      async inspectLegacy() {
+        const state = initialLegacy;
+        initialLegacy = null;
+        return state ?? store.health();
+      },
+      async inspectShadow() {
+        const state = initialShadow;
+        initialShadow = null;
+        return state ?? hermesGatewayStatus(shadowContext);
+      },
       stopLegacyWriters,
       async startActiveHermes() { return installHermesGateway(activeContext); },
       async inspectActive() { return hermesGatewayStatus(activeContext); },
