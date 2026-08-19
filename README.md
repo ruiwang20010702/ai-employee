@@ -76,12 +76,12 @@ Foursday is a thin distribution on an exact Hermes upstream release:
 Personal PRIVATE gbrain Git → durable business knowledge authority
 Personal gbrain PostgreSQL  → rebuildable search/entity/graph index
 Hermes Session DB           → conversation, tool calls, short-term execution
-Foursday PostgreSQL         → compatibility state for the current legacy runtime
+Foursday PostgreSQL         → retained rollback and governance state
 ```
 
 The gbrain OAuth credential stays in a host-side read-only bridge. Agent terminal commands never receive the credential, production configuration, DWS executable, deployment secrets, or network access.
 
-## Verified candidate
+## Production status
 
 The local V3 candidate has passed all 12 PoC gates:
 
@@ -95,7 +95,7 @@ The local V3 candidate has passed all 12 PoC gates:
 - full Foursday regression passed; the live count is maintained only in the [status matrix](./docs/完成度矩阵.md);
 - Hermes contract checks: 202 passed, 1 upstream conditional skip.
 
-This is **candidate evidence, not an active-runtime cutover**. The legacy Node.js runtime remains the only sender. A send-disabled, read-only Hermes shadow Gateway now runs from an isolated Application Support release and has passed DWS checkpoint plus launchd restart read-back. See the [status matrix](./docs/完成度矩阵.md) for live boundaries.
+Hermes is now the production `active` runtime and the only message writer. The legacy Node.js writers are stopped and retained only as a tested rollback path. The exact active release passed ten-scenario shadow acceptance, a real rollback-to-legacy drill, and a second successful activation. See the [status matrix](./docs/完成度矩阵.md) for live boundaries.
 
 [Review the full Gate 2 report](./docs/自主工作分身迁移验收报告.md).
 
@@ -119,7 +119,7 @@ For manual recovery, the same operation remains available as three independently
 - [x] Real P0 conversations, follow-ups, project work, send read-back, and takeover
 - [x] Reproducible thin distribution with pinned upstream and rollback-safe install
 - [x] Gate 2 candidate committed and published on `main`
-- [ ] Controlled production migration from the legacy runtime
+- [x] Controlled production migration from the legacy runtime
 - [ ] Feishu, WeCom, Slack, Teams, Gmail, and Google Workspace profiles
 
 ## License

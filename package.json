@@ -48,7 +48,6 @@
     "start": "node scripts/启动体验.mjs",
     "onboard": "node scripts/启动体验.mjs",
     "demo": "node scripts/交互式演示.mjs",
-    "demo:verify": "node scripts/验证公开演示.mjs",
     "listen": "node src/listener.mjs",
     "worker": "node src/worker.mjs",
     "worker:once": "node src/worker.mjs --once",

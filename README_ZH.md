@@ -76,12 +76,12 @@ Foursday 是建立在精确 Hermes 上游之上的薄发行层：
 个人 PRIVATE gbrain Git → 长期业务知识唯一权威
 个人 gbrain PostgreSQL  → 可重建的搜索、实体和图索引
 Hermes Session DB       → 会话、工具调用和短期执行上下文
-Foursday PostgreSQL     → 当前旧 Runtime 的兼容运行状态
+Foursday PostgreSQL     → 保留的回退与治理状态
 ```
 
 gbrain OAuth 凭据只存在于宿主只读桥接进程。Agent 终端拿不到凭据、生产配置、DWS 可执行文件、部署密钥或网络。
 
-## 已验证候选
+## 生产状态
 
 本机 V3 候选已通过全部 12 项 PoC 门槛：
 
@@ -95,7 +95,7 @@ gbrain OAuth 凭据只存在于宿主只读桥接进程。Agent 终端拿不到�
 - Foursday 全量回归通过；实时数量只在[完成度矩阵](./docs/完成度矩阵.md)维护；
 - Hermes 上游契约：202 通过、1 条条件跳过。
 
-这些是**候选证据，不是 active Runtime 切换**。旧 Node.js Runtime 仍是唯一发送者；发送关闭、项目只读的 Hermes shadow Gateway 已从独立 Application Support 版本常驻运行，并通过 DWS 检查点和 launchd 重启回读。实时边界见[完成度矩阵](./docs/完成度矩阵.md)。
+Hermes 现已成为生产 `active` Runtime 和唯一消息写入者。旧 Node.js 写入服务已停止，只作为经过真实验证的回退路径保留。精确 active 版本已通过十项 shadow 验收、一次真实回退到旧 Runtime 演练，以及第二次成功激活。实时边界见[完成度矩阵](./docs/完成度矩阵.md)。
 
 [查看完整 Gate 2 报告](./docs/自主工作分身迁移验收报告.md)。
 
@@ -119,7 +119,7 @@ gbrain OAuth 凭据只存在于宿主只读桥接进程。Agent 终端拿不到�
 - [x] 真实 P0 会话、追问、项目工作、发送回读和人工接管
 - [x] 固定上游、失败可恢复的薄发行层
 - [x] Gate 2 候选已提交并推送到 `main`
-- [ ] 从旧 Runtime 受控迁移生产
+- [x] 从旧 Runtime 受控迁移生产
 - [ ] 飞书、企业微信、Slack、Teams、Gmail 和 Google Workspace 发行配置
 
 ## 许可证

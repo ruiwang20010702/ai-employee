@@ -24,19 +24,19 @@ test("README 中英文首页统一定位为个人记忆驱动的 Hermes 工作�
   }
 });
 
-test("README 区分已发布 Hermes 候选与 active 生产切换", async () => {
+test("README 准确声明 Hermes active 与旧 Runtime 回退边界", async () => {
   const [english, chinese] = await Promise.all([
     projectText("README.md"),
     projectText("README_ZH.md"),
   ]);
   for (const text of [english, chinese]) {
-    assert.match(text, /Hermes.*Gateway/u);
-    assert.match(text, /shadow/iu);
+    assert.match(text, /Hermes.*active/iu);
+    assert.match(text, /rollback|回退/iu);
     assert.match(text, /Gate 2/u);
     assert.doesNotMatch(text, /v0\.6\.0-rc\.1/u);
   }
-  assert.match(english, /candidate evidence, not an active-runtime cutover/iu);
-  assert.match(chinese, /候选证据，不是 active Runtime 切换/u);
+  assert.match(english, /only message writer/iu);
+  assert.match(chinese, /唯一消息写入者/u);
 });
 
 test("README 提供默认零写的一键 Hermes 安装入口并保留三阶段恢复", async () => {
@@ -101,10 +101,10 @@ test("设计总览为文档角色和模块导航的唯一地图", async () => {
 
 test("状态矩阵维护 Gate 2、生产边界和删除区", async () => {
   const status = await projectText("docs/完成度矩阵.md");
-  assert.match(status, /12 项 PoC 门槛全部通过/u);
-  assert.match(status, /Hermes shadow Gateway 已在独立 Application Support/u);
-  assert.match(status, /旧 Node\.js Runtime 仍是唯一发送者/u);
-  assert.match(status, /businessReady=true/u);
+  assert.match(status, /12 项 PoC 和十项生产 shadow 门槛全部通过/u);
+  assert.match(status, /Hermes `active` 是唯一消息写入者/u);
+  assert.match(status, /active → legacy → active 真实回退演练/u);
+  assert.match(status, /旧 listener\/worker\/executor\/proactive 全部停止/u);
   for (const removed of [
     "project_evidence_read",
     "produced_questions",

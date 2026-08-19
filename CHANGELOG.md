@@ -11,6 +11,10 @@ preview or production until a later exact-commit release.
 
 ### Added
 
+- Promoted Hermes to the production `active` single writer after exact-SHA ten-scenario acceptance, then completed a real active → legacy → active rollback drill with private receipts.
+- Added persistent DWS send intents, deterministic idempotency keys, restart receipt reuse, and unresolved-intent blocking so Gateway obligation retries cannot duplicate external messages.
+- Bound the production Gateway to the pinned Codex executable and host Codex authentication directory while retaining project-tool sandbox isolation.
+- Removed the obsolete v0.5 demo video, poster, manifest, verification script, and recording guides now superseded by the Hermes one-command install and live acceptance evidence.
 - Added a single idempotent `hermes:setup` installer that checks prerequisites and performs the pinned upstream, isolated Python, patch, plugin, Profile, and Skill stages without starting the Gateway or touching production.
 - Replaced the legacy governed-Draft-PR hero and social preview with the current personal-memory → workspace → Hermes/Codex Agent Loop product story.
 - Added a production-shaped Hermes shadow service: immutable Application Support layout, Node-supervised launchd Gateway, private full-success DWS checkpoints, read-only project registry, restart ownership verification, and a fail-closed single-writer cutover state machine. The legacy runtime remains the only sender.

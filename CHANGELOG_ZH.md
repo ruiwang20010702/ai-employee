@@ -11,6 +11,10 @@
 
 ### 新增
 
+- Hermes 已在精确 SHA 十项验收后提升为生产 `active` 唯一写入者，并完成 active → legacy → active 真实回退演练与私有回执。
+- DWS 新增持久发送意图、确定性幂等键、跨重启回执复用和未知意图阻断，Gateway obligation 重投不会造成外部重复消息。
+- 生产 Gateway 已绑定固定 Codex 可执行文件和宿主 Codex 认证目录，同时保留项目工具沙箱隔离。
+- 删除已被 Hermes 一键安装与真实验收证据替代的 v0.5 演示视频、海报、清单、验证脚本和录制说明。
 - 新增幂等的一键 `hermes:setup` 安装器：前置检查后一次完成锁定上游、隔离 Python、补丁、插件、Profile 和 Skill，且不会启动 Gateway 或触碰生产。
 - 首页主视觉和社交预览从旧治理 Draft PR 流程更新为“个人记忆 → 真实工作区 → Hermes/Codex Agent Loop”的当前产品叙事。
 - 新增生产形态的 Hermes shadow 服务：Application Support 隔离版本、Node 监督的 launchd Gateway、私有全量 DWS 检查点、全只读项目注册表、重启进程归属回读，以及失败关闭的单写者切换状态机；旧 Runtime 仍保持唯一发送权。
