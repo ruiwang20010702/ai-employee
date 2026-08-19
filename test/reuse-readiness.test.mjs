@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { initializeProductionConfig } from "../scripts/初始化生产配置.mjs";
 import {
@@ -28,6 +29,7 @@ test("新环境向导默认使用当前工作目录而不是安装包目录", ()
 });
 
 test("新环境向导用一个 install 命令安装 Hermes 且默认只预览", async () => {
+  const packageRoot = fileURLToPath(new URL("../", import.meta.url));
   const calls = [];
   const hermesInstaller = async (input) => {
     calls.push(input);
@@ -48,7 +50,7 @@ test("新环境向导用一个 install 命令安装 Hermes 且默认只预览", 
   assert.equal(calls.length, 2);
   assert.equal(calls[0].apply, false);
   assert.equal(calls[1].apply, true);
-  assert.match(calls[0].projectRoot, /ai员工\/?$/u);
+  assert.equal(calls[0].projectRoot, packageRoot);
 });
 
 test("缺少配置时只读检查给出初始化动作且不假装可预检", async (t) => {
