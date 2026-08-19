@@ -50,6 +50,42 @@ class DwsBridgeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(receipt["messageId"], "sent-1")
             await bridge.stop()
 
+    async def test_sidecar_stderr_is_bounded_and_cannot_block_readiness(self):
+        with tempfile.TemporaryDirectory() as root:
+            script = Path(root, "noisy_sidecar.py")
+            script.write_text(textwrap.dedent("""
+                import json, sys
+                for index in range(5000):
+                    print(f"diagnostic-{index}", file=sys.stderr, flush=True)
+                print(
+                    "dws_sidecar_target_failed:user:2:0123456789abcdef:network_unavailable",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                print(json.dumps({"type": "ready"}), flush=True)
+                for line in sys.stdin:
+                    frame = json.loads(line)
+                    print(json.dumps({
+                        "type": "response", "id": frame["id"],
+                        "result": {"success": True}
+                    }), flush=True)
+                    if frame.get("action") == "shutdown":
+                        break
+            """), encoding="utf-8")
+            bridge = JsonLineDwsBridge(
+                node_path=sys.executable,
+                sidecar_path=str(script),
+                environment={"PATH": "/usr/bin:/bin"},
+                startup_timeout=10,
+            )
+            await bridge.start(lambda _record: asyncio.sleep(0))
+            self.assertLessEqual(len(bridge._stderr_codes), 20)
+            self.assertEqual(
+                bridge._stderr_codes[-1],
+                "target:user:2:0123456789abcdef:network_unavailable",
+            )
+            await bridge.stop()
+
     def test_environment_factory_passes_only_bridge_configuration(self):
         with tempfile.TemporaryDirectory() as root:
             sidecar = Path(root, "sidecar.mjs")
@@ -61,6 +97,7 @@ class DwsBridgeTest(unittest.IsolatedAsyncioTestCase):
                     "FOURSDAY_DWS_SIDECAR": str(sidecar),
                     "DWS_PATH": "/absolute/dws",
                     "DWS_PERSONAL_ALLOWED_USERS": "trusted",
+                    "FOURSDAY_DWS_HOME": root,
                     "DATABASE_URL": "must-not-cross",
                     "AI_EMPLOYEE_DATA_KEY": "must-not-cross",
                 })
@@ -69,6 +106,8 @@ class DwsBridgeTest(unittest.IsolatedAsyncioTestCase):
                 os.environ.clear()
                 os.environ.update(previous)
             self.assertEqual(bridge.environment["DWS_PATH"], "/absolute/dws")
+            self.assertEqual(bridge.environment["HOME"], root)
+            self.assertNotIn("FOURSDAY_DWS_HOME", bridge.environment)
             self.assertNotIn("DATABASE_URL", bridge.environment)
             self.assertNotIn("AI_EMPLOYEE_DATA_KEY", bridge.environment)
 

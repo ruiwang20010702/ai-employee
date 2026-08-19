@@ -44,5 +44,5 @@ flowchart LR
 
 - Tagged public preview and production still use the legacy Node.js runtime.
 - The local Hermes V3 candidate has complete P0/Gate 2 evidence.
-- Hermes Gateway is stopped and the candidate is not deployed.
-- Production `/ready` has a pre-existing 503 and must be handled independently.
+- A send-disabled, read-only Hermes shadow Gateway is running from an isolated Application Support release.
+- The legacy runtime remains the only sender and currently passes service readiness; active cutover is not authorized.

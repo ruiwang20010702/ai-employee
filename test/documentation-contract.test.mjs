@@ -33,11 +33,11 @@ test("README 区分公开旧预览、本地候选与生产放量", async () => {
   for (const text of [english, chinese]) {
     assert.match(text, /v0\.6\.0-rc\.1/u);
     assert.match(text, new RegExp(sha, "u"));
-    assert.match(text, /Hermes Gateway/u);
-    assert.match(text, /\/ready/u);
+    assert.match(text, /Hermes.*Gateway/u);
+    assert.match(text, /shadow/iu);
   }
-  assert.match(english, /candidate evidence, not production rollout/iu);
-  assert.match(chinese, /候选证据，不是生产放量/u);
+  assert.match(english, /candidate evidence, not an active-runtime cutover/iu);
+  assert.match(chinese, /候选证据，不是 active Runtime 切换/u);
 });
 
 test("README 提供默认零写的 Hermes 三层安装入口", async () => {
@@ -101,8 +101,9 @@ test("设计总览为文档角色和模块导航的唯一地图", async () => {
 test("状态矩阵维护 Gate 2、生产边界和删除区", async () => {
   const status = await projectText("docs/完成度矩阵.md");
   assert.match(status, /12 项 PoC 门槛全部通过/u);
-  assert.match(status, /Hermes Gateway 停止/u);
-  assert.match(status, /\/ready` 仍为既有 503/u);
+  assert.match(status, /Hermes shadow Gateway 已在独立 Application Support/u);
+  assert.match(status, /旧 Node\.js Runtime 仍是唯一发送者/u);
+  assert.match(status, /businessReady=true/u);
   for (const removed of [
     "project_evidence_read",
     "produced_questions",
@@ -143,6 +144,17 @@ test("技术设计覆盖 DWS 个人身份、发送未知、接管和恢复", asy
     "human_takeover",
     "interrupt_session_activity",
     "撤回事件",
+  ]) assert.match(technical, new RegExp(phrase, "u"));
+});
+
+test("技术设计覆盖常驻 shadow 与单写者切换门禁", async () => {
+  const technical = await projectText("docs/技术设计文档.md");
+  for (const phrase of [
+    "Application Support",
+    "Node supervisor",
+    "send=false",
+    "src/hermes-cutover.mjs",
+    "先停 Hermes",
   ]) assert.match(technical, new RegExp(phrase, "u"));
 });
 

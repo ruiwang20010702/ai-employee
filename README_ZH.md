@@ -83,7 +83,7 @@ gbrain OAuth 凭据只存在于宿主只读桥接进程。Agent 终端拿不到�
 - Foursday 全量回归通过；实时数量只在[完成度矩阵](./docs/完成度矩阵.md)维护；
 - Hermes 上游契约：202 通过、1 条条件跳过。
 
-这些是**候选证据，不是生产放量**。当前生产仍运行旧 Node.js 治理 Runtime；Hermes Gateway 保持停止，生产 `/ready` 的既有 503 需要单独处理。
+这些是**候选证据，不是 active Runtime 切换**。旧 Node.js Runtime 仍是唯一发送者；发送关闭、项目只读的 Hermes shadow Gateway 已从独立 Application Support 版本常驻运行，并通过 DWS 检查点和 launchd 重启回读。实时边界见[完成度矩阵](./docs/完成度矩阵.md)。
 
 [查看完整 Gate 2 报告](./docs/自主工作分身迁移验收报告.md)。
 

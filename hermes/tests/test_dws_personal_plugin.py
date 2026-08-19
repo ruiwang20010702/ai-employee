@@ -1,13 +1,16 @@
 import asyncio
 from dataclasses import dataclass
+import json
 import os
+from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from gateway.config import PlatformConfig
 from gateway.platform_registry import PlatformEntry, platform_registry
 from dws_personal import register
-from dws_personal.adapter import DwsPersonalAdapter
+from dws_personal.adapter import DwsPersonalAdapter, _shadow_evidence
 
 
 class FakePluginContext:
@@ -232,7 +235,7 @@ class DwsPersonalPluginTest(unittest.IsolatedAsyncioTestCase):
             PlatformConfig(enabled=True, extra={
                 "allowed_users": ["trusted-user"],
                 "bundle_quiet_ms": 20,
-                "bundle_max_wait_ms": 100,
+                "bundle_max_wait_ms": 2_000,
             }),
             bridge=self.bridge,
             router=self.router,
@@ -270,6 +273,50 @@ class DwsPersonalPluginTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.events[0].metadata["source_message_ids"],
             ["bundle-1", "bundle-2"],
+        )
+
+    async def test_messages_beyond_source_max_wait_become_sequential_session_turns(self):
+        await self.adapter.disconnect()
+        self.bridge = FakeBridge()
+        self.adapter = DwsPersonalAdapter(
+            PlatformConfig(enabled=True, extra={
+                "allowed_users": ["trusted-user"],
+                "bundle_quiet_ms": 20,
+                "bundle_max_wait_ms": 100,
+            }),
+            bridge=self.bridge,
+            router=self.router,
+        )
+        self.adapter.set_message_handler(lambda event: self._capture(event))
+        self.assertTrue(await self.adapter.connect())
+        base = {
+            "senderUserId": "trusted-user",
+            "senderName": "娜娜老师",
+            "senderOpenDingTalkId": "open-trusted",
+            "conversationId": "direct-followup",
+            "chatType": "direct",
+            "mentionedSelf": False,
+            "isSelf": False,
+        }
+        await self.bridge.emit({
+            **base,
+            "id": "followup-1",
+            "content": "第一句",
+            "createTime": "2026-08-18T14:00:00+08:00",
+        })
+        await self.bridge.emit({
+            **base,
+            "id": "followup-2",
+            "content": "三十秒后的第二句",
+            "createTime": "2026-08-18T14:00:30+08:00",
+        })
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(self.events), 2)
+        self.assertEqual(self.events[0].text, "第一句")
+        self.assertEqual(self.events[1].text, "三十秒后的第二句")
+        self.assertEqual(
+            self.router.calls[0]["session_key"],
+            self.router.calls[1]["session_key"],
         )
 
     async def test_human_takeover_interrupts_active_session_and_emits_audit_event(self):
@@ -333,6 +380,65 @@ class DwsPersonalPluginTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(secret.retryable)
         self.assertFalse(commitment.retryable)
         self.assertEqual(len(self.bridge.sent), before)
+
+    async def test_shadow_evidence_is_private_and_contains_no_message_or_identity(self):
+        evidence = Path(self.temp.name).resolve() / "shadow-evidence.jsonl"
+        self.bridge.send_result = {
+            "success": False,
+            "error": "DWS personal send is disabled",
+        }
+        with patch.dict(os.environ, {
+            "FOURSDAY_SHADOW_EVIDENCE_FILE": str(evidence),
+            "FOURSDAY_HERMES_MODE": "shadow",
+        }):
+            await self.bridge.emit({
+                "id": "private-message-id",
+                "senderUserId": "trusted-user",
+                "senderName": "Private Name",
+                "senderOpenDingTalkId": "private-open-id",
+                "conversationId": "private-conversation-id",
+                "content": "private message body",
+                "createTime": "2026-08-18T14:00:00+08:00",
+                "chatType": "direct",
+                "mentionedSelf": False,
+                "isSelf": False,
+            })
+            await asyncio.sleep(0)
+            reply = await self.adapter.send(
+                "private-conversation-id",
+                "private natural reply",
+                reply_to="private-message-id",
+            )
+        self.assertTrue(reply.success)
+        self.assertTrue(reply.message_id.startswith("shadow-"))
+        rows = [json.loads(line) for line in evidence.read_text().splitlines()]
+        self.assertEqual([row["type"] for row in rows], ["inbound", "reply_attempt"])
+        serialized = json.dumps(rows, ensure_ascii=False)
+        for private in [
+            "private-message-id",
+            "trusted-user",
+            "Private Name",
+            "private-open-id",
+            "private-conversation-id",
+            "private message body",
+            "private natural reply",
+        ]:
+            self.assertNotIn(private, serialized)
+        self.assertEqual(rows[-1]["mode"], "shadow")
+        self.assertFalse(rows[-1]["bridgeSuccess"])
+        self.assertEqual(evidence.stat().st_mode & 0o077, 0)
+
+    def test_shadow_evidence_rejects_symbolic_link_target(self):
+        root = Path(self.temp.name).resolve()
+        target = root / "target.jsonl"
+        target.write_text("", encoding="utf-8")
+        evidence = root / "evidence.jsonl"
+        evidence.symlink_to(target)
+        with patch.dict(os.environ, {
+            "FOURSDAY_SHADOW_EVIDENCE_FILE": str(evidence),
+        }):
+            with self.assertRaisesRegex(RuntimeError, "private regular file"):
+                _shadow_evidence({"type": "inbound"})
 
 
 if __name__ == "__main__":

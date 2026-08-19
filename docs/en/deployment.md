@@ -1,6 +1,6 @@
 # Deployment
 
-> Scope: legacy Node.js governed production. The Hermes V3 candidate is not deployed. Build its isolated candidate with the root README commands and review the Chinese Gate 2 report before any migration.
+> Scope: legacy Node.js governed production plus the send-disabled Hermes shadow service. The shadow is not the active sender. Review the Chinese status matrix and Gate 2 report before any single-writer migration.
 
 > Rename compatibility: new installations use the Foursday CLI, plugin,
 > service labels, release root, and Keychain namespace. Existing `0.x`

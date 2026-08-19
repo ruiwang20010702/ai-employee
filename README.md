@@ -83,7 +83,7 @@ The local V3 candidate has passed all 12 PoC gates:
 - full Foursday regression passed; the live count is maintained only in the [status matrix](./docs/完成度矩阵.md);
 - Hermes contract checks: 202 passed, 1 upstream conditional skip.
 
-This is **candidate evidence, not production rollout**. The current production service still uses the Node.js governed runtime; Hermes Gateway is stopped, and production `/ready` has a pre-existing 503 that must be handled separately.
+This is **candidate evidence, not an active-runtime cutover**. The legacy Node.js runtime remains the only sender. A send-disabled, read-only Hermes shadow Gateway now runs from an isolated Application Support release and has passed DWS checkpoint plus launchd restart read-back. See the [status matrix](./docs/完成度矩阵.md) for live boundaries.
 
 [Review the full Gate 2 report](./docs/自主工作分身迁移验收报告.md).
 

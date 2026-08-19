@@ -80,6 +80,7 @@ function emptyState() {
   return {
     lastUsers: {}, lastGroups: {}, recentMessageIds: [],
     recipients: {}, activeConversations: {}, takeoverReported: [],
+    lastCheckAt: null, lastFullSuccessAt: null, lastErrorCount: 0,
   };
 }
 
@@ -103,6 +104,12 @@ async function loadState(path) {
       takeoverReported: Array.isArray(parsed?.takeoverReported)
         ? parsed.takeoverReported.map(String).filter(Boolean)
         : [],
+      lastCheckAt: typeof parsed?.lastCheckAt === "string" ? parsed.lastCheckAt : null,
+      lastFullSuccessAt:
+        typeof parsed?.lastFullSuccessAt === "string" ? parsed.lastFullSuccessAt : null,
+      lastErrorCount: Number.isSafeInteger(parsed?.lastErrorCount)
+        ? parsed.lastErrorCount
+        : 0,
     };
   } catch (error) {
     if (error?.code === "ENOENT") return emptyState();
@@ -158,6 +165,7 @@ export async function createSidecarRuntime({
   config = sidecarConfig(),
   dws = new DwsAdapter({ dwsPath: config.dwsPath }),
   emit = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`),
+  diagnose = (value) => process.stderr.write(`${value}\n`),
   now = () => new Date(),
 } = {}) {
   await access(config.dwsPath);
@@ -181,7 +189,7 @@ export async function createSidecarRuntime({
     return true;
   };
 
-  const emitMessage = (message, chatType, mentionedSelf) => {
+  const emitMessage = (message, chatType, mentionedSelf, emitFrame = emit) => {
     const id = String(message.id ?? "").trim();
     const conversationId = String(message.conversationId ?? "").trim();
     const senderUserId = String(message.senderUserId ?? "").trim();
@@ -189,7 +197,7 @@ export async function createSidecarRuntime({
     const createTime = new Date(message.createTime).toISOString();
     if (!id || !conversationId || !senderUserId || !remember(id)) return;
     if (message.isWithdrawn === true) {
-      emit({
+      emitFrame({
         type: "event",
         record: {
           control: "message_withdrawn",
@@ -217,7 +225,7 @@ export async function createSidecarRuntime({
       after: createTime,
     });
     state.activeConversations = Object.fromEntries(activeConversations);
-    emit({
+    emitFrame({
       type: "event",
       record: {
         id,
@@ -234,7 +242,7 @@ export async function createSidecarRuntime({
     });
   };
 
-  const check = async () => {
+  const check = async ({ deferEmit = false } = {}) => {
     if (running) {
       pending = true;
       return;
@@ -242,38 +250,72 @@ export async function createSidecarRuntime({
     running = true;
     try {
       const end = now();
-      for (const userId of config.userIds) {
-        const last = epoch(state.lastUsers[userId]);
+      const deferredFrames = [];
+      const dispatch = deferEmit
+        ? (frame) => deferredFrames.push(frame)
+        : emit;
+      const targets = [
+        ...config.userIds.map((id) => ({ kind: "user", id })),
+        ...config.groupIds.map((id) => ({ kind: "group", id })),
+      ];
+      const results = await Promise.allSettled(targets.map(async (target) => {
+        const checkpoints = target.kind === "user" ? state.lastUsers : state.lastGroups;
+        const last = epoch(checkpoints[target.id]);
         const start = new Date(last == null
           ? end.getTime() - config.initialLookbackMs
           : Math.max(0, last - 5_000));
-        const messages = await dws.fetchBySender({ senderUserId: userId, start, end });
-        for (const message of messages) emitMessage(message, "direct", false);
-        state.lastUsers[userId] = end.toISOString();
-      }
-      for (const groupId of config.groupIds) {
-        const last = epoch(state.lastGroups[groupId]);
-        const start = new Date(last == null
-          ? end.getTime() - config.initialLookbackMs
-          : Math.max(0, last - 5_000));
-        const messages = await dws.fetchGroupMentions({ groupIds: [groupId], start, end });
-        for (const message of messages) emitMessage(message, "group", true);
-        state.lastGroups[groupId] = end.toISOString();
+        const messages = target.kind === "user"
+          ? await dws.fetchBySender({ senderUserId: target.id, start, end })
+          : await dws.fetchGroupMentions({ groupIds: [target.id], start, end });
+        return { target, messages };
+      }));
+      const errors = [];
+      for (const [index, result] of results.entries()) {
+        const target = targets[index];
+        if (result.status === "rejected") {
+          errors.push(result.reason);
+          const code = String(
+            result.reason?.code ?? result.reason?.name ?? "error",
+          ).replaceAll(/[^A-Za-z0-9_.-]/gu, "_").slice(0, 80) || "error";
+          diagnose(
+            `dws_sidecar_target_failed:${target.kind}:${index}:${hash(target.id)}:${code}`,
+          );
+          continue;
+        }
+        const orderedMessages = [...result.value.messages].sort((left, right) =>
+          (epoch(left.createTime) ?? 0) - (epoch(right.createTime) ?? 0)
+        );
+        for (const message of orderedMessages) {
+          emitMessage(
+            message,
+            target.kind === "user" ? "direct" : "group",
+            target.kind === "group",
+            dispatch,
+          );
+        }
+        const checkpoints = target.kind === "user" ? state.lastUsers : state.lastGroups;
+        checkpoints[target.id] = end.toISOString();
       }
       if (config.selfUserId && typeof dws.hasManualReply === "function") {
         for (const [conversationId, active] of activeConversations) {
           if (takeoverReported.has(conversationId)) continue;
-          const manual = await dws.hasManualReply({
-            conversationId,
-            selfUserId: config.selfUserId,
-            after: active.after,
-            now: end,
-            automatedSendEvidence,
-          });
+          let manual;
+          try {
+            manual = await dws.hasManualReply({
+              conversationId,
+              selfUserId: config.selfUserId,
+              after: active.after,
+              now: end,
+              automatedSendEvidence,
+            });
+          } catch (error) {
+            errors.push(error);
+            continue;
+          }
           if (manual?.known === true && manual.replied === true) {
             takeoverReported.add(conversationId);
             state.takeoverReported = [...takeoverReported];
-            emit({
+            dispatch({
               type: "event",
               record: {
                 control: "human_takeover",
@@ -287,13 +329,22 @@ export async function createSidecarRuntime({
           }
         }
       }
-      await saveState(config.stateFile, state);
+      state.lastCheckAt = end.toISOString();
+      state.lastErrorCount = errors.length;
+      if (errors.length === 0) state.lastFullSuccessAt = end.toISOString();
+      if (!deferEmit) await saveState(config.stateFile, state);
+      if (errors.length > 0) {
+        const error = new Error("One or more DWS shadow targets are unavailable");
+        error.code = "DWS_SIDECAR_TARGETS_UNAVAILABLE";
+        throw error;
+      }
+      return deferredFrames;
     } finally {
       running = false;
       if (pending) {
         pending = false;
         queueMicrotask(() => check().catch((error) => {
-          process.stderr.write(`dws_sidecar_check_failed:${String(error?.code ?? error?.name ?? "error")}\n`);
+          diagnose(`dws_sidecar_check_failed:${String(error?.code ?? error?.name ?? "error")}`);
         }));
       }
     }
@@ -302,7 +353,7 @@ export async function createSidecarRuntime({
   const trigger = () => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => check().catch((error) => {
-      process.stderr.write(`dws_sidecar_check_failed:${String(error?.code ?? error?.name ?? "error")}\n`);
+      diagnose(`dws_sidecar_check_failed:${String(error?.code ?? error?.name ?? "error")}`);
     }), 250);
   };
 
@@ -317,13 +368,15 @@ export async function createSidecarRuntime({
 
   return {
     async start() {
+      const initialFrames = await check({ deferEmit: true });
       emit({
         type: "ready",
         transport: watchers.length > 0 ? "filesystem-events-with-fallback" : "fallback",
         targets: config.userIds.length,
         groups: config.groupIds.length,
       });
-      await check();
+      for (const frame of initialFrames) emit(frame);
+      await saveState(config.stateFile, state);
     },
     async send(payload) {
       if (!config.sendEnabled) {

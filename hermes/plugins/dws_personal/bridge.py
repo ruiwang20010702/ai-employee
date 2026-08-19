@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import json
+import logging
 import os
 from pathlib import Path
+import re
 from typing import Any, Awaitable, Callable, Optional
+
+
+logger = logging.getLogger(__name__)
+_SAFE_ERROR_CODE = re.compile(r"^dws_sidecar_check_failed:([A-Za-z0-9_.-]{1,80})$")
+_SAFE_TARGET_ERROR = re.compile(
+    r"^dws_sidecar_target_failed:(user|group):(\d{1,3}):([a-f0-9]{16}):([A-Za-z0-9_.-]{1,80})$"
+)
 
 
 def _required_file(value: Optional[str], label: str) -> str:
@@ -25,7 +35,7 @@ class JsonLineDwsBridge:
         node_path: str,
         sidecar_path: str,
         environment: Optional[dict[str, str]] = None,
-        startup_timeout: float = 30.0,
+        startup_timeout: float = 120.0,
         request_timeout: float = 60.0,
     ) -> None:
         self.node_path = _required_file(node_path, "Node executable")
@@ -37,10 +47,13 @@ class JsonLineDwsBridge:
         self.request_timeout = request_timeout
         self._process: Optional[asyncio.subprocess.Process] = None
         self._reader_task: Optional[asyncio.Task] = None
+        self._stderr_task: Optional[asyncio.Task] = None
         self._callback: Optional[Callable[[dict], Awaitable[None]]] = None
         self._ready: Optional[asyncio.Future] = None
         self._pending: dict[str, asyncio.Future] = {}
         self._counter = 0
+        self._stderr_codes: deque[str] = deque(maxlen=20)
+        self._logged_stderr_codes: set[str] = set()
 
     @classmethod
     def from_environment(cls) -> "JsonLineDwsBridge":
@@ -51,6 +64,7 @@ class JsonLineDwsBridge:
             for key, value in os.environ.items()
             if key in {
                 "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ",
+                "FOURSDAY_DWS_HOME",
                 "DWS_PATH", "DINGTALK_ROOT", "DINGTALK_DATA_ROOT",
                 "DINGTALK_SELF_USER_ID",
                 "DWS_PERSONAL_ALLOWED_USERS", "DWS_PERSONAL_ALLOWED_GROUPS",
@@ -59,6 +73,11 @@ class JsonLineDwsBridge:
                 "DWS_PERSONAL_INITIAL_LOOKBACK_MS", "DWS_PERSONAL_SEND_ENABLED",
             }
         }
+        dws_home = str(allowed.pop("FOURSDAY_DWS_HOME", "") or "").strip()
+        if dws_home:
+            if not os.path.isabs(dws_home) or not os.path.isdir(dws_home):
+                raise RuntimeError("DWS host home must be an absolute directory")
+            allowed["HOME"] = dws_home
         allowed["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         return cls(
             node_path=node_path,
@@ -81,11 +100,33 @@ class JsonLineDwsBridge:
             env=self.environment,
         )
         self._reader_task = asyncio.create_task(self._read_loop())
+        self._stderr_task = asyncio.create_task(self._read_stderr())
         try:
             await asyncio.wait_for(self._ready, timeout=self.startup_timeout)
         except BaseException:
             await self.stop()
             raise
+
+    async def _read_stderr(self) -> None:
+        assert self._process is not None and self._process.stderr is not None
+        while line := await self._process.stderr.readline():
+            text = line.decode("utf-8", errors="replace").strip()
+            if text:
+                matched = _SAFE_ERROR_CODE.fullmatch(text)
+                target = _SAFE_TARGET_ERROR.fullmatch(text)
+                code = (
+                    matched.group(1)
+                    if matched
+                    else f"target:{target.group(1)}:{target.group(2)}:{target.group(3)}:{target.group(4)}"
+                    if target
+                    else "sidecar_stderr"
+                )
+                self._stderr_codes.append(code)
+                if code not in self._logged_stderr_codes:
+                    if len(self._logged_stderr_codes) >= 50:
+                        self._logged_stderr_codes.clear()
+                    self._logged_stderr_codes.add(code)
+                    logger.warning("DWS sidecar diagnostic: %s", code)
 
     async def _read_loop(self) -> None:
         assert self._process is not None and self._process.stdout is not None
@@ -159,8 +200,11 @@ class JsonLineDwsBridge:
             await process.wait()
         if self._reader_task is not None:
             await asyncio.gather(self._reader_task, return_exceptions=True)
+        if self._stderr_task is not None:
+            await asyncio.gather(self._stderr_task, return_exceptions=True)
         self._process = None
         self._reader_task = None
+        self._stderr_task = None
 
 
 __all__ = ["JsonLineDwsBridge"]

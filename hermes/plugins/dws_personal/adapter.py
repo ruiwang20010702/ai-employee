@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from datetime import datetime
+import hashlib
+import json
 import os
+from pathlib import Path
 import re
 import shutil
+import stat
 from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
 
 from gateway.config import Platform, PlatformConfig
@@ -58,6 +62,41 @@ _IRREVERSIBLE_COMMITMENT = re.compile(
     r"|\b(?:I|we)\s+(?:guarantee|commit|approve|agree)\b.{0,40}\b(?:pay|transfer|sign|hire|fire|salary|contract|irrevocable)\b",
     re.IGNORECASE,
 )
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _shadow_evidence(event: dict[str, Any]) -> None:
+    configured = str(os.getenv("FOURSDAY_SHADOW_EVIDENCE_FILE", "")).strip()
+    if not configured:
+        return
+    path = Path(configured).expanduser()
+    if not path.is_absolute():
+        raise RuntimeError("Foursday shadow evidence path must be absolute")
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if path.parent.resolve(strict=True) != path.parent:
+        raise RuntimeError("Foursday shadow evidence parent must not use a symlink")
+    parent_metadata = path.parent.lstat()
+    if not stat.S_ISDIR(parent_metadata.st_mode) or parent_metadata.st_mode & 0o077:
+        raise RuntimeError("Foursday shadow evidence parent must be private")
+    os.chmod(path.parent, 0o700)
+    if path.exists():
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+            raise RuntimeError("Foursday shadow evidence must be a private regular file")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        os.chmod(path, 0o600)
 
 
 class UnavailableBridge:
@@ -185,6 +224,13 @@ class DwsPersonalAdapter(BasePlatformAdapter):
         control = str(record.get("control") or "").strip()
         if control == "human_takeover":
             await self.interrupt_session_activity(session_key, conversation_id)
+        _shadow_evidence({
+            "schema": "foursday-hermes-shadow-event/v1",
+            "type": control,
+            "conversationHash": _digest(conversation_id),
+            "participantHash": _digest(participant_id),
+            "occurredAt": str(record.get("createTime") or "") or None,
+        })
         handler = getattr(self, "_platform_event_handler", None)
         if handler is not None and control in {"human_takeover", "message_withdrawn"}:
             await handler({
@@ -219,6 +265,23 @@ class DwsPersonalAdapter(BasePlatformAdapter):
             await self._deliver_records([record])
             return
         key = f"{record['chatType']}:{record['conversationId']}:{record['senderUserId']}"
+        existing = self._pending.get(key, [])
+        if existing:
+            previous_at = datetime.fromisoformat(
+                str(existing[-1].get("createTime") or "").replace("Z", "+00:00")
+            )
+            current_at = datetime.fromisoformat(
+                str(record.get("createTime") or "").replace("Z", "+00:00")
+            )
+            source_gap_ms = (current_at - previous_at).total_seconds() * 1_000
+            if source_gap_ms > self._bundle_max_wait_ms:
+                records = self._pending.pop(key, [])
+                task = self._bundle_tasks.pop(key, None)
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                if records:
+                    await self._deliver_records(records)
         record = {
             **record,
             "_received_monotonic_ms": asyncio.get_running_loop().time() * 1_000,
@@ -278,6 +341,18 @@ class DwsPersonalAdapter(BasePlatformAdapter):
                 "bundle_size": len(records),
             },
         )
+        _shadow_evidence({
+            "schema": "foursday-hermes-shadow-event/v1",
+            "type": "inbound",
+            "conversationHash": _digest(conversation_id),
+            "participantHash": _digest(user_id),
+            "messageHashes": [_digest(value) for value in message_ids],
+            "projectId": getattr(getattr(route, "project", None), "id", None),
+            "routeStatus": getattr(route, "status", "unknown"),
+            "memoryStatus": memory_status,
+            "bundleSize": len(records),
+            "occurredAt": timestamp.isoformat(),
+        })
         await self.handle_message(event)
 
     async def _on_record(self, record: Dict[str, Any]) -> None:
@@ -343,7 +418,36 @@ class DwsPersonalAdapter(BasePlatformAdapter):
             "metadata": dict(metadata or {}),
         }
         result = await self._bridge.send(payload)
+        _shadow_evidence({
+            "schema": "foursday-hermes-shadow-event/v1",
+            "type": "reply_attempt",
+            "conversationHash": _digest(chat_id),
+            "replyToHash": _digest(reply_to) if reply_to else None,
+            "deliveryContextHash": hashlib.sha256(
+                json.dumps(metadata or {}, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:16],
+            "contentHash": hashlib.sha256(str(content).encode("utf-8")).hexdigest(),
+            "contentBytes": len(str(content).encode("utf-8")),
+            "mode": str(os.getenv("FOURSDAY_HERMES_MODE", "unknown")),
+            "bridgeSuccess": bool(
+                isinstance(result, dict) and result.get("success") is True
+            ),
+            "outcomeUnknown": bool(
+                isinstance(result, dict) and result.get("outcomeUnknown") is True
+            ),
+        })
         if not isinstance(result, dict) or result.get("success") is not True:
+            shadow_mode = str(
+                os.getenv("FOURSDAY_HERMES_MODE", "")
+            ).strip().lower() == "shadow"
+            if shadow_mode:
+                shadow_id = hashlib.sha256(
+                    f"{chat_id}\n{content}".encode("utf-8")
+                ).hexdigest()[:24]
+                return SendResult(
+                    success=True,
+                    message_id=f"shadow-{shadow_id}",
+                )
             return SendResult(
                 success=False,
                 error="DWS bridge did not return an explicit success receipt",

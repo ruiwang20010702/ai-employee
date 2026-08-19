@@ -123,7 +123,7 @@ npm run hermes:install -- --apply
 
 All three stages are dry-run-first and confined to `.runtime/hermes-poc`. The distribution installer is rollback-safe and denies built-in tool override permission. It never starts the Gateway.
 
-Production migration must separately handle active-task drain, DWS single-writer ownership, message cursors, persistent Gateway configuration, legacy observation, rollback, and the existing production `/ready` 503. New and legacy runtimes must never auto-send to the same conversation concurrently.
+The persistent shadow Gateway now uses an Application Support release, a Node launchd supervisor, a venv-bound Hermes child, a private DWS checkpoint, and a read-only registry. Active migration still requires task drain, DWS single-writer ownership, cursor continuity, a cutover receipt, and verified rollback. New and legacy runtimes must never auto-send to the same conversation concurrently.
 
 ## Module map
 
@@ -135,6 +135,8 @@ Production migration must separately handle active-task drain, DWS single-writer
 | Project router | `hermes/plugins/project_router/` |
 | gbrain bridge | `src/hermes-personal-memory-context.mjs` |
 | Hard boundary | `hermes/plugins/foursday_boundary/` |
+| Persistent shadow service | `src/hermes-production-service.mjs`, `src/hermes-gateway-launcher.mjs`, `scripts/管理Hermes常驻服务.mjs` |
+| Shadow acceptance / cutover | `src/hermes-shadow-acceptance.mjs`, `scripts/生成Hermes影子验收.mjs`, `src/hermes-cutover.mjs`, `scripts/切换Hermes生产运行时.mjs` |
 | Profile/Skill | `hermes/profile/`, `hermes/skills/` |
 | Shadow/evidence tests | `hermes/shadow_runner.py`, `hermes/tests/`, `test/hermes-*.test.mjs` |
 

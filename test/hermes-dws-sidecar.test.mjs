@@ -87,6 +87,101 @@ test("Hermes DWS sidecar emits allowlisted records and persists a private checkp
   assert.equal(frames[1].record.chatType, "direct");
   const state = JSON.parse(await readFile(stateFile, "utf8"));
   assert.equal(state.lastUsers["trusted-user"], "2026-08-18T06:01:00.000Z");
+  assert.equal(state.lastFullSuccessAt, "2026-08-18T06:01:00.000Z");
+  assert.equal(state.lastErrorCount, 0);
+});
+
+test("Hermes DWS sidecar 按源消息时间升序交给 Agent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "foursday-dws-order-"));
+  const frames = [];
+  const dws = {
+    async fetchBySender({ senderUserId }) {
+      return [
+        { id: "later", senderUserId, conversationId: "conversation", content: "later", createTime: "2026-08-18T14:01:00+08:00" },
+        { id: "earlier", senderUserId, conversationId: "conversation", content: "earlier", createTime: "2026-08-18T14:00:00+08:00" },
+      ];
+    },
+    async fetchGroupMentions() { return []; },
+  };
+  const runtime = await createSidecarRuntime({
+    config: {
+      dwsPath: process.execPath,
+      dingtalkRoot: "",
+      userIds: ["trusted-user"],
+      groupIds: [],
+      selfUserId: null,
+      stateFile: join(root, "state.json"),
+      initialLookbackMs: 120_000,
+      fallbackMs: 300_000,
+      sendEnabled: false,
+    },
+    dws,
+    emit: (frame) => frames.push(frame),
+    now: () => new Date("2026-08-18T14:02:00+08:00"),
+  });
+  await runtime.start();
+  await runtime.stop();
+  assert.deepEqual(
+    frames.filter((frame) => frame.type === "event").map((frame) => frame.record.id),
+    ["earlier", "later"],
+  );
+});
+
+test("Hermes DWS sidecar 并发抓取目标且部分失败不覆盖失败游标", async () => {
+  const root = await mkdtemp(join(tmpdir(), "foursday-dws-concurrent-"));
+  const stateFile = join(root, "state.json");
+  let currentTime = new Date("2026-08-18T14:01:00+08:00");
+  let active = 0;
+  let maximumActive = 0;
+  const failing = new Set();
+  const dws = {
+    async fetchBySender({ senderUserId }) {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      try {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+        if (failing.has(senderUserId)) throw new Error("target unavailable");
+        return [];
+      } finally {
+        active -= 1;
+      }
+    },
+    async fetchGroupMentions() { return []; },
+  };
+  const runtime = await createSidecarRuntime({
+    config: {
+      dwsPath: process.execPath,
+      dingtalkRoot: "",
+      userIds: ["good-user", "bad-user"],
+      groupIds: [],
+      selfUserId: null,
+      stateFile,
+      initialLookbackMs: 120_000,
+      fallbackMs: 300_000,
+      sendEnabled: false,
+    },
+    dws,
+    emit: () => {},
+    diagnose: () => {},
+    now: () => currentTime,
+  });
+  await runtime.start();
+  assert.equal(maximumActive, 2);
+  const first = JSON.parse(await readFile(stateFile, "utf8"));
+  assert.equal(first.lastErrorCount, 0);
+
+  failing.add("bad-user");
+  currentTime = new Date("2026-08-18T14:02:00+08:00");
+  await assert.rejects(
+    runtime.check(),
+    (error) => error.code === "DWS_SIDECAR_TARGETS_UNAVAILABLE",
+  );
+  await runtime.stop();
+  const second = JSON.parse(await readFile(stateFile, "utf8"));
+  assert.equal(second.lastUsers["good-user"], "2026-08-18T06:02:00.000Z");
+  assert.equal(second.lastUsers["bad-user"], "2026-08-18T06:01:00.000Z");
+  assert.equal(second.lastFullSuccessAt, "2026-08-18T06:01:00.000Z");
+  assert.equal(second.lastErrorCount, 1);
 });
 
 test("Hermes DWS sidecar keeps real sending disabled unless explicitly enabled", async () => {

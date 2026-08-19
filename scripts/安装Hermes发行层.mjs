@@ -38,7 +38,7 @@ const components = [
   {
     id: "project-router",
     source: join(projectRoot, "hermes/plugins/project_router"),
-    target: join(hermesHome, "plugins/foursday-project-router"),
+    target: join(hermesHome, "plugins/project_router"),
     plugin: "foursday-project-router",
   },
   {
@@ -50,7 +50,7 @@ const components = [
   {
     id: "profile",
     source: join(projectRoot, "hermes/profile/SOUL.md"),
-    target: join(hermesHome, "profiles/foursday/SOUL.md"),
+    target: join(hermesHome, "SOUL.md"),
   },
   {
     id: "project-work-skill",
@@ -166,6 +166,7 @@ const backupRoot = join(
 await mkdir(backupRoot, { recursive: true, mode: 0o700 });
 await chmod(backupRoot, 0o700);
 const installed = [];
+const retired = [];
 
 try {
   for (const component of components) {
@@ -191,6 +192,16 @@ try {
     }
   }
 
+  const obsoleteProjectRouter = join(
+    hermesHome,
+    "plugins/foursday-project-router",
+  );
+  if (await pathMetadata(obsoleteProjectRouter)) {
+    const backup = join(backupRoot, "obsolete-project-router");
+    await rename(obsoleteProjectRouter, backup);
+    retired.push({ target: obsoleteProjectRouter, backup });
+  }
+
   for (const plugin of components.flatMap((component) => component.plugin ? [component.plugin] : [])) {
     await execFileAsync(candidatePython, [
       "-m", "hermes_cli.main", "plugins", "enable",
@@ -205,6 +216,11 @@ try {
 } catch (error) {
   const failedRoot = join(backupRoot, "failed-install");
   await mkdir(failedRoot, { recursive: true, mode: 0o700 });
+  for (const component of retired.reverse()) {
+    if (await pathMetadata(component.backup)) {
+      await rename(component.backup, component.target);
+    }
+  }
   for (const component of installed.reverse()) {
     if (await pathMetadata(component.target)) {
       await rename(component.target, join(failedRoot, component.id));

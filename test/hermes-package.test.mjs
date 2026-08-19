@@ -47,6 +47,15 @@ test("Foursday package publishes the locked Hermes distribution sources without 
     "hermes/profile/SOUL.md",
     "hermes/skills/project-work/SKILL.md",
     "scripts/安装Hermes发行层.mjs",
+    "scripts/管理Hermes常驻服务.mjs",
+    "scripts/切换Hermes生产运行时.mjs",
+    "scripts/生成Hermes影子验收.mjs",
+    "scripts/生成Hermes发布身份.mjs",
+    "src/hermes-production-service.mjs",
+    "src/hermes-gateway-launcher.mjs",
+    "src/hermes-cutover.mjs",
+    "src/hermes-shadow-acceptance.mjs",
+    "src/hermes-release-identity.mjs",
   ]) {
     assert.ok(packagedFiles.includes(path), `missing packaged file: ${path}`);
   }

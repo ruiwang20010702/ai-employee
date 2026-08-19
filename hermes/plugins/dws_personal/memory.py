@@ -45,6 +45,11 @@ class NodeProjectMemoryProvider:
         slugs = list(getattr(project, "gbrain_slugs", ()) or ())
         if not project or not slugs:
             return ""
+        memory_home = str(
+            os.getenv("FOURSDAY_MEMORY_HOME") or os.getenv("HOME") or ""
+        ).strip()
+        if not os.path.isabs(memory_home) or not os.path.isdir(memory_home):
+            raise RuntimeError("Personal memory host home must be an absolute directory")
         process = await asyncio.create_subprocess_exec(
             self.node_path,
             self.sidecar_path,
@@ -52,7 +57,7 @@ class NodeProjectMemoryProvider:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             env={
-                "HOME": os.getenv("HOME", ""),
+                "HOME": memory_home,
                 "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
             },
         )

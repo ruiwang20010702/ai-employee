@@ -11,6 +11,10 @@ preview or production until a later exact-commit release.
 
 ### Added
 
+- Added a production-shaped Hermes shadow service: immutable Application Support layout, Node-supervised launchd Gateway, private full-success DWS checkpoints, read-only project registry, restart ownership verification, and a fail-closed single-writer cutover state machine. The legacy runtime remains the only sender.
+- Added a dry-run-first active cutover command that requires an exact release SHA, a fresh ten-scenario shadow acceptance receipt, a drained legacy database, strict writer stop order, active read-back, and stop-Hermes-before-restore rollback.
+- Added a privacy-safe shadow evidence ledger and acceptance generator; message, participant, conversation, and reply identities are hashed, raw content is never stored, and duplicate delivery attempts block cutover.
+- Added a release identity manifest that binds the exact Git SHA to every critical Gateway, patch, bridge, boundary, and registry file; drift and symlink substitution fail before legacy writers stop.
 - Re-established documentation governance for the Hermes architecture: concise bilingual homepages, a V3 product constitution, a Hermes-first technical authority, a live status/delete-zone matrix, and explicit legacy scope banners so current production compatibility is not mistaken for the personal default.
 - Pinned Hermes Agent `v2026.8.18` / `0.20.4` as the candidate Foursday runtime, with a locked upstream commit, reproducible isolated install, and a three-file workspace-session patch rather than a heavy fork.
 - Added external Foursday plugins for DWS personal DingTalk, minimal project routing, read-only personal gbrain context, and cross-cutting high-risk tool boundaries.
