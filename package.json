@@ -76,6 +76,7 @@
     "hermes:prepare": "node scripts/准备Hermes候选.mjs",
     "hermes:patch": "node scripts/准备Hermes补丁层.mjs",
     "hermes:install": "node scripts/安装Hermes发行层.mjs",
+    "hermes:setup": "node scripts/一键安装Hermes.mjs",
     "hermes:service": "node scripts/管理Hermes常驻服务.mjs",
     "hermes:shadow:accept": "node scripts/生成Hermes影子验收.mjs",
     "hermes:identity": "node scripts/生成Hermes发布身份.mjs",

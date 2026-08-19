@@ -38,6 +38,33 @@ npm run check:full
 - `pg_dump` and `pg_restore` pinned by absolute path in production configuration;
 - gbrain only when project knowledge-page access is enabled.
 
+## One-command local installation
+
+The public source installation is a single copy-paste command:
+
+```bash
+git clone https://github.com/ruiwang20010702/foursday.git && cd foursday && npm ci --ignore-scripts && npm run hermes:setup -- --apply
+```
+
+For an existing checkout, `npm run hermes:setup` is a zero-write preview and
+`npm run hermes:setup -- --apply` performs the complete idempotent local
+installation. It verifies macOS, Node.js, system Git, and `uv`, then prepares
+the pinned upstream, isolated Python runtime, locked patch layer, plugins,
+Profile, and Skill in `.runtime/hermes-poc`.
+
+Credentials are deliberately outside the installer. Codex login, message
+adapter authentication, and personal-memory authorization belong to the user
+and cannot be safely copied or invented. The installer never starts the
+Gateway, sends a message, changes production, or enables active mode.
+
+Manual recovery retains the same three independently repeatable stages:
+
+```bash
+npm run hermes:prepare -- --apply
+npm run hermes:patch -- --apply
+npm run hermes:install -- --apply
+```
+
 ## Install an immutable revision
 
 Never deploy from a mutable branch name. Install a reviewed full commit SHA in a clean workspace:

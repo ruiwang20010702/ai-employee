@@ -11,6 +11,8 @@
 
 ### 新增
 
+- 新增幂等的一键 `hermes:setup` 安装器：前置检查后一次完成锁定上游、隔离 Python、补丁、插件、Profile 和 Skill，且不会启动 Gateway 或触碰生产。
+- 首页主视觉和社交预览从旧治理 Draft PR 流程更新为“个人记忆 → 真实工作区 → Hermes/Codex Agent Loop”的当前产品叙事。
 - 新增生产形态的 Hermes shadow 服务：Application Support 隔离版本、Node 监督的 launchd Gateway、私有全量 DWS 检查点、全只读项目注册表、重启进程归属回读，以及失败关闭的单写者切换状态机；旧 Runtime 仍保持唯一发送权。
 - 新增默认只预览的 active 切换命令：必须绑定精确发布 SHA、七天内十项 shadow 验收、旧数据库零在途、严格停旧顺序、active 回读，以及“先停 Hermes 再恢复旧服务”的失败回退。
 - 新增隐私受限的 shadow 证据账本与验收生成器；消息、参与人、会话和回复身份只保存哈希，不保存正文，发现重复投递会阻断切换。

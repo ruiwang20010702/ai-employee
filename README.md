@@ -31,6 +31,18 @@ For an allowlisted contact, ordinary reversible work is autonomous:
 
 Push, merge, production deployment, production data writes, irreversible deletion, payment, contracts, HR decisions, secrets, and irreversible commitments remain independent hard boundaries.
 
+## One-command install
+
+Requires macOS, Node.js 22.5+, Git, and [`uv`](https://docs.astral.sh/uv/). Python 3.13 is managed inside the isolated runtime.
+
+```bash
+git clone https://github.com/ruiwang20010702/foursday.git && cd foursday && npm ci --ignore-scripts && npm run hermes:setup -- --apply
+```
+
+Already cloned? Run `npm run hermes:setup` for a zero-write preview, then repeat with `-- --apply`. The installer is idempotent and performs the pinned-upstream, isolated-environment, patch, plugin, Profile, and Skill steps as one recoverable operation inside `.runtime/hermes-poc`.
+
+Installation does **not** copy credentials, start the Gateway, send messages, or enable active mode. Authenticate Codex and connect your own message/memory providers after install; begin with a send-disabled shadow.
+
 ## Architecture
 
 ```mermaid
@@ -87,32 +99,7 @@ This is **candidate evidence, not an active-runtime cutover**. The legacy Node.j
 
 [Review the full Gate 2 report](./docs/自主工作分身迁移验收报告.md).
 
-## Try the public preview
-
-The latest tagged public preview is still [`v0.6.0-rc.1`](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1). Use the immutable reviewed commit:
-
-```bash
-npx --yes --ignore-scripts \
-  --package "github:ruiwang20010702/foursday#6b30c22f97b19c6cfd30bf162b3f85000fa2bde9" \
-  foursday start --pilot-sha 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
-```
-
-This previews the legacy governed runtime and does not install or start the Hermes candidate.
-
-## Build the Hermes candidate
-
-Requires macOS, Node.js, Python 3.11–3.13, `uv`, an authenticated Codex CLI, and DWS only for real DingTalk verification.
-
-Every command previews by default and writes only `.runtime/hermes-poc` when `--apply` is explicit:
-
-```bash
-npm run hermes:prepare -- --apply
-npm run hermes:patch -- --apply
-npm run hermes:install
-npm run hermes:install -- --apply
-```
-
-The installer is rollback-safe and explicitly refuses permission to override Hermes built-in tools. It does not start a gateway, send a message, or touch production.
+For manual recovery, the same operation remains available as three independently repeatable stages: `hermes:prepare`, `hermes:patch`, and `hermes:install`. See the [deployment guide](./docs/en/deployment.md).
 
 ## Documentation
 
@@ -131,7 +118,7 @@ The installer is rollback-safe and explicitly refuses permission to override Her
 - [x] General Hermes/Codex loop with DWS, gbrain, routing, evidence, and hard boundaries
 - [x] Real P0 conversations, follow-ups, project work, send read-back, and takeover
 - [x] Reproducible thin distribution with pinned upstream and rollback-safe install
-- [ ] Gate 2 commit and public candidate release
+- [x] Gate 2 candidate committed and published on `main`
 - [ ] Controlled production migration from the legacy runtime
 - [ ] Feishu, WeCom, Slack, Teams, Gmail, and Google Workspace profiles
 

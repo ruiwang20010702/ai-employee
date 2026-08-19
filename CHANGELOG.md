@@ -11,6 +11,8 @@ preview or production until a later exact-commit release.
 
 ### Added
 
+- Added a single idempotent `hermes:setup` installer that checks prerequisites and performs the pinned upstream, isolated Python, patch, plugin, Profile, and Skill stages without starting the Gateway or touching production.
+- Replaced the legacy governed-Draft-PR hero and social preview with the current personal-memory → workspace → Hermes/Codex Agent Loop product story.
 - Added a production-shaped Hermes shadow service: immutable Application Support layout, Node-supervised launchd Gateway, private full-success DWS checkpoints, read-only project registry, restart ownership verification, and a fail-closed single-writer cutover state machine. The legacy runtime remains the only sender.
 - Added a dry-run-first active cutover command that requires an exact release SHA, a fresh ten-scenario shadow acceptance receipt, a drained legacy database, strict writer stop order, active read-back, and stop-Hermes-before-restore rollback.
 - Added a privacy-safe shadow evidence ledger and acceptance generator; message, participant, conversation, and reply identities are hashed, raw content is never stored, and duplicate delivery attempts block cutover.

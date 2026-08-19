@@ -1,102 +1,99 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="640" viewBox="0 0 1440 640" role="img" aria-labelledby="title desc">
-  <title id="title">Foursday — your open-source work twin</title>
-  <desc id="desc">A governed handoff from a GitHub Issue to a verified Draft PR, designed to return one workday.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Foursday — a personal-memory-driven work twin</title>
+  <desc id="desc">A trusted message becomes verified work through personal memory, a real project workspace, Hermes, and Codex.</desc>
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
-      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#14201b" flood-opacity="0.12"/>
+      <feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#0c2119" flood-opacity="0.14"/>
     </filter>
-    <pattern id="grain" width="48" height="48" patternUnits="userSpaceOnUse">
-      <circle cx="5" cy="7" r="0.7" fill="#14201b" opacity="0.06"/>
-      <circle cx="29" cy="19" r="0.6" fill="#14201b" opacity="0.05"/>
-      <circle cx="42" cy="39" r="0.8" fill="#14201b" opacity="0.04"/>
+    <pattern id="grain" width="44" height="44" patternUnits="userSpaceOnUse">
+      <circle cx="6" cy="8" r="0.7" fill="#10241c" opacity="0.055"/>
+      <circle cx="27" cy="19" r="0.55" fill="#10241c" opacity="0.04"/>
+      <circle cx="39" cy="37" r="0.75" fill="#10241c" opacity="0.045"/>
     </pattern>
+    <linearGradient id="loop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f765d"/>
+      <stop offset="1" stop-color="#0f4e3c"/>
+    </linearGradient>
   </defs>
-
-  <rect width="1440" height="640" rx="32" fill="#f3f0e8"/>
-  <rect width="1440" height="640" rx="32" fill="url(#grain)"/>
-  <rect x="0" y="0" width="520" height="640" rx="32" fill="#14201b"/>
-  <path d="M488 0h32v640h-32z" fill="#155f49" opacity="0.28"/>
-
-  <!-- Four-day handoff mark: three focused days and one returned day. -->
-  <g transform="translate(72 60)">
-    <rect width="66" height="66" rx="16" fill="#fffdf8"/>
-    <rect x="14" y="14" width="16" height="16" rx="4" fill="#155f49"/>
-    <rect x="36" y="14" width="16" height="16" rx="4" fill="#155f49"/>
-    <rect x="14" y="36" width="16" height="16" rx="4" fill="#155f49"/>
-    <path d="M37 44h14m-6-6 6 6-6 6" fill="none" stroke="#155f49" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect width="1280" height="640" rx="32" fill="#f4f1e9"/>
+  <rect width="1280" height="640" rx="32" fill="url(#grain)"/>
+  <rect width="430" height="640" rx="32" fill="#10241c"/>
+  <path d="M400 0h30v640h-30z" fill="#1f765d" opacity="0.32"/>
+  <g transform="translate(64 58)">
+    <rect width="62" height="62" rx="16" fill="#fffdf8"/>
+    <rect x="13" y="13" width="15" height="15" rx="4" fill="#1f765d"/>
+    <rect x="34" y="13" width="15" height="15" rx="4" fill="#1f765d"/>
+    <rect x="13" y="34" width="15" height="15" rx="4" fill="#1f765d"/>
+    <path d="M35 42h13m-5-6 6 6-6 6" fill="none" stroke="#1f765d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
-
   <g font-family="Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-    <text x="72" y="198" fill="#a9cabb" font-size="14" font-weight="700" letter-spacing="3">YOUR OPEN-SOURCE WORK TWIN</text>
-    <text x="68" y="286" fill="#fffdf8" font-size="76" font-weight="780" letter-spacing="-4">Foursday</text>
-    <text x="72" y="344" fill="#cbd4cf" font-size="25">One more you.</text>
-    <text x="72" y="382" fill="#fffdf8" font-size="25" font-weight="700">One less workday.</text>
-
-    <g transform="translate(72 452)">
-      <path d="M0 10h15l8 9 10-19" fill="none" stroke="#77b99d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="48" y="16" fill="#a9b8b1" font-size="15">Exact-plan approval</text>
-      <path d="M0 54h15l8 9 10-19" fill="none" stroke="#77b99d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="48" y="60" fill="#a9b8b1" font-size="15">Target-system read-back</text>
-      <path d="M0 98h15l8 9 10-19" fill="none" stroke="#77b99d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="48" y="104" fill="#a9b8b1" font-size="15">Human-confirmed memory and time</text>
+    <text x="64" y="182" fill="#9fcbb9" font-size="13" font-weight="750" letter-spacing="2.6">PERSONAL-MEMORY-DRIVEN</text>
+    <text x="64" y="205" fill="#9fcbb9" font-size="13" font-weight="750" letter-spacing="2.6">OPEN-SOURCE WORK TWIN</text>
+    <text x="60" y="292" fill="#fffdf8" font-size="72" font-weight="790" letter-spacing="-4">Foursday</text>
+    <text x="64" y="348" fill="#cbd8d2" font-size="24">One more you.</text>
+    <text x="64" y="385" fill="#fffdf8" font-size="24" font-weight="730">One less workday.</text>
+    <g transform="translate(64 456)">
+      <circle cx="7" cy="7" r="7" fill="#70b99a"/>
+      <text x="28" y="13" fill="#b7c8c0" font-size="15">Understands the conversation</text>
+      <circle cx="7" cy="52" r="7" fill="#70b99a"/>
+      <text x="28" y="58" fill="#b7c8c0" font-size="15">Works inside the real project</text>
+      <circle cx="7" cy="97" r="7" fill="#70b99a"/>
+      <text x="28" y="103" fill="#b7c8c0" font-size="15">Replies with read-back evidence</text>
     </g>
-
-    <g transform="translate(594 62)" filter="url(#shadow)">
-      <rect width="770" height="516" rx="24" fill="#fffdf8" stroke="#d9d7cc"/>
-      <rect width="770" height="58" rx="24" fill="#f8f6ef"/>
-      <path d="M0 58h770" stroke="#d9d7cc"/>
+    <g transform="translate(486 54)" filter="url(#shadow)">
+      <rect width="730" height="532" rx="26" fill="#fffdf8" stroke="#d8d5ca"/>
+      <rect width="730" height="58" rx="26" fill="#f9f7f1"/>
+      <path d="M0 58h730" stroke="#d8d5ca"/>
       <circle cx="28" cy="29" r="6" fill="#d2cec3"/>
       <circle cx="49" cy="29" r="6" fill="#d2cec3"/>
       <circle cx="70" cy="29" r="6" fill="#d2cec3"/>
-      <rect x="110" y="17" width="312" height="24" rx="12" fill="#ebe8df"/>
-      <text x="128" y="34" fill="#5f6f67" font-size="12">127.0.0.1 · governed delivery</text>
-
-      <text x="36" y="105" fill="#155f49" font-size="11" font-weight="750" letter-spacing="2">ONE APPROVED HANDOFF</text>
-      <text x="36" y="141" fill="#14201b" font-size="25" font-weight="760">GitHub Issue → verified Draft PR</text>
-      <rect x="594" y="99" width="138" height="30" rx="15" fill="#dcebe3"/>
-      <text x="663" y="119" text-anchor="middle" fill="#155f49" font-size="11" font-weight="750">0 silent actions</text>
-
-      <g transform="translate(36 176)">
-        <g>
-          <circle cx="18" cy="20" r="18" fill="#155f49"/>
-          <text x="18" y="25" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="800">1</text>
-          <text x="54" y="18" fill="#14201b" font-size="16" font-weight="720">Bind the Issue and repository</text>
-          <text x="54" y="39" fill="#5f6f67" font-size="12">Requester, commit, remote, recipe, and risk scope</text>
-          <rect x="565" y="7" width="118" height="27" rx="13" fill="#dcebe3"/>
-          <text x="624" y="25" text-anchor="middle" fill="#155f49" font-size="10" font-weight="750">SCOPE CHECKED</text>
-        </g>
-        <path d="M18 43v34" stroke="#c8c9c1" stroke-width="2" stroke-dasharray="4 5"/>
-        <g transform="translate(0 78)">
-          <circle cx="18" cy="20" r="18" fill="#155f49"/>
-          <text x="18" y="25" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="800">2</text>
-          <text x="54" y="18" fill="#14201b" font-size="16" font-weight="720">Review the complete plan hash</text>
-          <text x="54" y="39" fill="#5f6f67" font-size="12">Patch, branch, test, push, Draft PR, and rollback</text>
-          <rect x="565" y="7" width="118" height="27" rx="13" fill="#f7ead7"/>
-          <text x="624" y="25" text-anchor="middle" fill="#82500b" font-size="10" font-weight="750">APPROVAL</text>
-        </g>
-        <path d="M18 121v34" stroke="#c8c9c1" stroke-width="2" stroke-dasharray="4 5"/>
-        <g transform="translate(0 156)">
-          <circle cx="18" cy="20" r="18" fill="#155f49"/>
-          <text x="18" y="25" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="800">3</text>
-          <text x="54" y="18" fill="#14201b" font-size="16" font-weight="720">Execute in an isolated worktree</text>
-          <text x="54" y="39" fill="#5f6f67" font-size="12">Codex, Claude Code, or an OpenAI-compatible model</text>
-          <rect x="565" y="7" width="118" height="27" rx="13" fill="#ebe8df"/>
-          <text x="624" y="25" text-anchor="middle" fill="#425149" font-size="10" font-weight="750">BOUNDED</text>
-        </g>
-        <path d="M18 199v34" stroke="#c8c9c1" stroke-width="2" stroke-dasharray="4 5"/>
-        <g transform="translate(0 234)">
-          <circle cx="18" cy="20" r="18" fill="#155f49"/>
-          <path d="M10 20l6 6 11-14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-          <text x="54" y="18" fill="#14201b" font-size="16" font-weight="720">Read the Draft PR back</text>
-          <text x="54" y="39" fill="#5f6f67" font-size="12">URL, draft state, branch, commit, title, and evidence</text>
-          <rect x="565" y="7" width="118" height="27" rx="13" fill="#dcebe3"/>
-          <text x="624" y="25" text-anchor="middle" fill="#155f49" font-size="10" font-weight="750">VERIFIED</text>
-        </g>
+      <rect x="108" y="17" width="298" height="24" rx="12" fill="#ebe8df"/>
+      <text x="126" y="34" fill="#617068" font-size="12">trusted conversation · active project</text>
+      <rect x="584" y="16" width="110" height="26" rx="13" fill="#dcebe3"/>
+      <text x="639" y="34" text-anchor="middle" fill="#155f49" font-size="10" font-weight="800">VERIFIED LOOP</text>
+      <text x="38" y="102" fill="#1f765d" font-size="11" font-weight="800" letter-spacing="2">FROM MESSAGE TO FINISHED WORK</text>
+      <text x="38" y="139" fill="#10241c" font-size="27" font-weight="770">Hermes + Codex, grounded in your memory</text>
+      <g transform="translate(38 178)">
+        <rect width="190" height="72" rx="17" fill="#eef4f0" stroke="#cfe0d7"/>
+        <circle cx="31" cy="36" r="18" fill="#1f765d"/>
+        <path d="M23 31h16M23 37h11M23 43h8" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+        <text x="60" y="31" fill="#10241c" font-size="14" font-weight="740">Trusted message</text>
+        <text x="60" y="51" fill="#617068" font-size="11">DingTalk · Feishu · Slack</text>
+        <path d="M201 36h44" stroke="#91aa9f" stroke-width="2"/>
+        <path d="m238 30 8 6-8 6" fill="none" stroke="#91aa9f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="256" width="190" height="72" rx="17" fill="#eef4f0" stroke="#cfe0d7"/>
+        <circle cx="287" cy="36" r="18" fill="#1f765d"/>
+        <path d="M280 41c0-9 14-9 14 0M283 31a4 4 0 1 1 8 0" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+        <text x="316" y="31" fill="#10241c" font-size="14" font-weight="740">Personal memory</text>
+        <text x="316" y="51" fill="#617068" font-size="11">gbrain · project context</text>
+        <path d="M457 36h44" stroke="#91aa9f" stroke-width="2"/>
+        <path d="m494 30 8 6-8 6" fill="none" stroke="#91aa9f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="512" width="142" height="72" rx="17" fill="#eef4f0" stroke="#cfe0d7"/>
+        <circle cx="543" cy="36" r="18" fill="#1f765d"/>
+        <path d="M535 29h16v14h-16zM539 25h8" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="572" y="31" fill="#10241c" font-size="14" font-weight="740">Workspace</text>
+        <text x="572" y="51" fill="#617068" font-size="11">real files + Git</text>
       </g>
-
-      <rect x="36" y="466" width="698" height="1" fill="#d9d7cc"/>
-      <text x="36" y="493" fill="#5f6f67" font-size="12">npm start</text>
-      <text x="734" y="493" text-anchor="end" fill="#155f49" font-size="12" font-weight="750">LOCAL-FIRST · DEFAULT-DENY</text>
+      <g transform="translate(38 282)">
+        <rect width="654" height="135" rx="21" fill="#10241c"/>
+        <circle cx="69" cy="68" r="45" fill="url(#loop)"/>
+        <path d="M46 69a23 23 0 0 1 37-18M83 51v15H68M92 67a23 23 0 0 1-37 18M55 85V70h15" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="133" y="45" fill="#8fc9b1" font-size="11" font-weight="800" letter-spacing="2">GENERAL AGENT LOOP</text>
+        <text x="133" y="76" fill="#fffdf8" font-size="22" font-weight="760">Think → use tools → verify → continue</text>
+        <text x="133" y="102" fill="#b6c8c0" font-size="13">Search · read · calculate · edit · test · recover</text>
+        <rect x="520" y="29" width="102" height="32" rx="16" fill="#214e3e"/>
+        <text x="571" y="50" text-anchor="middle" fill="#b8e5d2" font-size="11" font-weight="800">HERMES</text>
+        <rect x="520" y="75" width="102" height="32" rx="16" fill="#f0eadc"/>
+        <text x="571" y="96" text-anchor="middle" fill="#10241c" font-size="11" font-weight="800">CODEX</text>
+      </g>
+      <g transform="translate(38 446)">
+        <rect width="654" height="50" rx="15" fill="#dcebe3"/>
+        <circle cx="27" cy="25" r="14" fill="#1f765d"/>
+        <path d="m20 25 5 5 9-11" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="52" y="22" fill="#10241c" font-size="13" font-weight="750">Natural reply with auditable evidence</text>
+        <text x="52" y="38" fill="#52685e" font-size="10.5">High-risk external actions remain hard-gated</text>
+        <text x="625" y="30" text-anchor="end" fill="#155f49" font-size="11" font-weight="800">WORK DONE</text>
+      </g>
     </g>
   </g>
 </svg>

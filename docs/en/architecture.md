@@ -115,13 +115,11 @@ Evidence includes the routed workspace, source message IDs, tool calls and cwd, 
 ## Install and migration
 
 ```bash
-npm run hermes:prepare -- --apply
-npm run hermes:patch -- --apply
-npm run hermes:install
-npm run hermes:install -- --apply
+npm run hermes:setup
+npm run hermes:setup -- --apply
 ```
 
-All three stages are dry-run-first and confined to `.runtime/hermes-poc`. The distribution installer is rollback-safe and denies built-in tool override permission. It never starts the Gateway.
+The one-command installer validates prerequisites and runs the pinned upstream, isolated environment, patch layer, and Foursday distribution as three idempotent stages confined to `.runtime/hermes-poc`. Each stage remains independently available for recovery. The installer is rollback-safe, denies built-in tool override permission, and never starts the Gateway or copies credentials.
 
 The persistent shadow Gateway now uses an Application Support release, a Node launchd supervisor, a venv-bound Hermes child, a private DWS checkpoint, and a read-only registry. Active migration still requires task drain, DWS single-writer ownership, cursor continuity, a cutover receipt, and verified rollback. New and legacy runtimes must never auto-send to the same conversation concurrently.
 

@@ -47,6 +47,7 @@ test("Foursday package publishes the locked Hermes distribution sources without 
     "hermes/profile/SOUL.md",
     "hermes/skills/project-work/SKILL.md",
     "scripts/安装Hermes发行层.mjs",
+    "scripts/一键安装Hermes.mjs",
     "scripts/管理Hermes常驻服务.mjs",
     "scripts/切换Hermes生产运行时.mjs",
     "scripts/生成Hermes影子验收.mjs",

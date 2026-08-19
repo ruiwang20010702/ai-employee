@@ -24,35 +24,36 @@ test("README 中英文首页统一定位为个人记忆驱动的 Hermes 工作�
   }
 });
 
-test("README 区分公开旧预览、本地候选与生产放量", async () => {
+test("README 区分已发布 Hermes 候选与 active 生产切换", async () => {
   const [english, chinese] = await Promise.all([
     projectText("README.md"),
     projectText("README_ZH.md"),
   ]);
-  const sha = "6b30c22f97b19c6cfd30bf162b3f85000fa2bde9";
   for (const text of [english, chinese]) {
-    assert.match(text, /v0\.6\.0-rc\.1/u);
-    assert.match(text, new RegExp(sha, "u"));
     assert.match(text, /Hermes.*Gateway/u);
     assert.match(text, /shadow/iu);
+    assert.match(text, /Gate 2/u);
+    assert.doesNotMatch(text, /v0\.6\.0-rc\.1/u);
   }
   assert.match(english, /candidate evidence, not an active-runtime cutover/iu);
   assert.match(chinese, /候选证据，不是 active Runtime 切换/u);
 });
 
-test("README 提供默认零写的 Hermes 三层安装入口", async () => {
+test("README 提供默认零写的一键 Hermes 安装入口并保留三阶段恢复", async () => {
   const [english, chinese, manifest] = await Promise.all([
     projectText("README.md"),
     projectText("README_ZH.md"),
     projectText("package.json"),
   ]);
   for (const text of [english, chinese]) {
+    assert.match(text, /hermes:setup/u);
     assert.match(text, /hermes:prepare/u);
     assert.match(text, /hermes:patch/u);
     assert.match(text, /hermes:install/u);
     assert.match(text, /\.runtime\/hermes-poc/u);
   }
   const packageJson = JSON.parse(manifest);
+  assert.equal(packageJson.scripts["hermes:setup"], "node scripts/一键安装Hermes.mjs");
   assert.equal(packageJson.scripts["hermes:prepare"], "node scripts/准备Hermes候选.mjs");
   assert.equal(packageJson.scripts["hermes:patch"], "node scripts/准备Hermes补丁层.mjs");
   assert.equal(packageJson.scripts["hermes:install"], "node scripts/安装Hermes发行层.mjs");

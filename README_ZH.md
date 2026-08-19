@@ -31,6 +31,18 @@ Foursday 使用个人 gbrain 和 Hermes 通用 Agent Loop 完成工作，不再�
 
 Git 推送、PR 合并、生产部署、生产改数、不可恢复删除、付款、合同、人事决定、秘密外发和不可撤销承诺继续由独立硬边界阻断。
 
+## 一条命令安装
+
+需要 macOS、Node.js 22.5+、Git 和 [`uv`](https://docs.astral.sh/uv/)。Python 3.13 由隔离运行时自动管理。
+
+```bash
+git clone https://github.com/ruiwang20010702/foursday.git && cd foursday && npm ci --ignore-scripts && npm run hermes:setup -- --apply
+```
+
+已经克隆仓库时，先运行 `npm run hermes:setup` 查看零写预览，再加 `-- --apply`。安装器会在 `.runtime/hermes-poc` 内把锁定上游、隔离环境、补丁、插件、Profile 和 Skill 串成一次幂等、失败可恢复的完整安装。
+
+安装过程**不会**复制凭据、启动 Gateway、发送消息或切换 active。安装后再登录 Codex，连接自己的消息与记忆来源，并从关闭发送的 shadow 开始。
+
 ## 架构
 
 ```mermaid
@@ -87,32 +99,7 @@ gbrain OAuth 凭据只存在于宿主只读桥接进程。Agent 终端拿不到�
 
 [查看完整 Gate 2 报告](./docs/自主工作分身迁移验收报告.md)。
 
-## 体验公开预览
-
-最新带标签公开预览仍是 [`v0.6.0-rc.1`](https://github.com/ruiwang20010702/foursday/releases/tag/v0.6.0-rc.1)，请使用已审核的不可变提交：
-
-```bash
-npx --yes --ignore-scripts \
-  --package "github:ruiwang20010702/foursday#6b30c22f97b19c6cfd30bf162b3f85000fa2bde9" \
-  foursday start --pilot-sha 6b30c22f97b19c6cfd30bf162b3f85000fa2bde9
-```
-
-该入口预览的是旧治理 Runtime，不会安装或启动 Hermes 候选。
-
-## 构建 Hermes 候选
-
-需要 macOS、Node.js、Python 3.11–3.13、`uv`、已登录的 Codex CLI；只有真实钉钉验证才需要 DWS。
-
-每条命令默认只预览，显式 `--apply` 也只写 `.runtime/hermes-poc`：
-
-```bash
-npm run hermes:prepare -- --apply
-npm run hermes:patch -- --apply
-npm run hermes:install
-npm run hermes:install -- --apply
-```
-
-安装器失败可恢复，并明确拒绝覆盖 Hermes 内置工具；不会启动 Gateway、发送消息或修改生产。
+需要手工恢复时，仍可分别重跑 `hermes:prepare`、`hermes:patch` 和 `hermes:install` 三个阶段。详见[英文部署指南](./docs/en/deployment.md)。
 
 ## 文档导航
 
@@ -131,7 +118,7 @@ npm run hermes:install -- --apply
 - [x] Hermes/Codex 通用 Loop、DWS、gbrain、项目路由、证据与硬边界
 - [x] 真实 P0 会话、追问、项目工作、发送回读和人工接管
 - [x] 固定上游、失败可恢复的薄发行层
-- [ ] Gate 2 提交与公开候选发布
+- [x] Gate 2 候选已提交并推送到 `main`
 - [ ] 从旧 Runtime 受控迁移生产
 - [ ] 飞书、企业微信、Slack、Teams、Gmail 和 Google Workspace 发行配置
 

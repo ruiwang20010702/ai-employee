@@ -9,6 +9,7 @@ import { provisionGeneratedKeychainSecrets } from "./初始化钥匙串密钥.mj
 import { inspectReuseReadiness } from "../src/reuse-readiness.mjs";
 import { isMainModule } from "../src/main-module.mjs";
 import { activationHelp, runActivation } from "./启动体验.mjs";
+import { runHermesOneClickInstall } from "./一键安装Hermes.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -189,6 +190,7 @@ function help() {
     usage: [
       "foursday check [--config /absolute/path.json]",
       "foursday start [--port 4173]",
+      "foursday install [--apply]",
       "foursday init [--apply] [--config /absolute/path.json]",
       "foursday secrets [--apply] [--config /absolute/path.json]",
       "foursday preflight [--dry-run] [--config /absolute/path.json]",
@@ -201,6 +203,7 @@ function help() {
       "foursday shadow [--dry-run] [--config /absolute/path.json]",
     ],
     sequence: [
+      "install --apply",
       "init --apply",
       "secrets --apply",
       "check",
@@ -225,6 +228,7 @@ export async function runReuseGuide({
   configInitializer = initializeProductionConfig,
   scriptRunner = defaultScriptRunner,
   activationRunner = runActivation,
+  hermesInstaller = runHermesOneClickInstall,
 } = {}) {
   const command = args[0] ?? "check";
   if (["help", "--help", "-h"].includes(command)) return help();
@@ -252,6 +256,13 @@ export async function runReuseGuide({
   }
   const options = parsedArguments(args);
   const configPath = reuseConfigPath(args, cwd);
+
+  if (command === "install") {
+    if (options.positionals.length > 0 || options.dryRun) {
+      throw new Error("Usage: foursday install [--apply]");
+    }
+    return hermesInstaller({ apply: options.apply, projectRoot: packageRoot });
+  }
 
   if (command === "init") {
     if (options.positionals.length > 0) {
