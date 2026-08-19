@@ -121,6 +121,7 @@ test("Hermes shadow Gateway 使用固定路径且绝不开放发送", async (t) 
   assert.equal(environment.FOURSDAY_HERMES_MODE, "shadow");
   assert.equal(environment.FOURSDAY_DWS_HOME, paths.fallbackWorkspace);
   assert.equal(environment.FOURSDAY_MEMORY_HOME, paths.fallbackWorkspace);
+  assert.equal(environment.CODEX_HOME, join(paths.fallbackWorkspace, ".codex"));
   assert.notEqual(environment.HOME, environment.FOURSDAY_DWS_HOME);
   assert.equal(
     environment.PYTHONPATH,

@@ -291,6 +291,7 @@ export function buildHermesGatewayEnvironment({
   return {
     ...allowedHost,
     HOME: dirname(dirname(paths.hermesHome)),
+    CODEX_HOME: join(dwsHome, ".codex"),
     PATH: [
       dirname(paths.nodePath),
       dirname(paths.dwsPath),
