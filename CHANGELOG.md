@@ -1,6 +1,6 @@
 # Changelog
 
-**English** · [简体中文](./CHANGELOG_ZH.md)
+**English** · [简体中文](./docs/历史/更新日志.md)
 
 Notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow Semantic Versioning.
 

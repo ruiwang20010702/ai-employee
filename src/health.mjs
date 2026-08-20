@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.mjs";
-import { evaluateHealth } from "./health-check.mjs";
+import { evaluateFoursdayHealth } from "./foursday-runtime-status.mjs";
 import { createProductionStore } from "./production-store.mjs";
 import { applyProductionConfigFile } from "./production-config-file.mjs";
 
@@ -10,7 +10,7 @@ const config = loadConfig({ requireTargets: false, production: true });
 const store = await createProductionStore(config);
 
 try {
-  const health = await evaluateHealth({ store, config });
+  const health = await evaluateFoursdayHealth({ store, config });
   console.log(
     JSON.stringify(
       { healthy: health.ready, checks: health.checks },

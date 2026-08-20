@@ -1,6 +1,6 @@
 # Foursday Product Requirements
 
-Status: V3 Hermes candidate; Gate 2 complete. Production still uses the legacy Node.js runtime and has not activated the Hermes migration.
+Status: V3.1 native Hermes candidate; Gate 2 complete. Production is intentionally paused with no active sender, and the native migration has not been authorized.
 
 ## Product definition
 
@@ -81,7 +81,7 @@ Document, analysis, and code requests must modify only the routed workspace, run
 
 ## Acceptance
 
-All 12 P0 gates are complete. See the [Gate 2 report](../自主工作分身迁移验收报告.md). Passing P0 does not authorize commit, push, release, deployment, production migration, or enabling the persistent Hermes Gateway.
+All 12 P0 gates are complete. See the [Gate 2 report](../历史/自主工作分身迁移验收报告.md). Passing P0 does not authorize commit, push, release, deployment, production migration, or enabling the persistent Hermes Gateway.
 
 ## Rollout
 

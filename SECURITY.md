@@ -1,6 +1,6 @@
 # Security Policy
 
-[中文版安全说明](./安全说明.md)
+[中文版安全说明](./docs/指南/安全说明.md)
 
 Foursday can process workplace messages and execute approved external actions. Please report security issues privately and avoid exposing real users or business data.
 
@@ -31,4 +31,4 @@ Security fixes are developed on the latest `main` revision. Production installat
 - Unknown external outcomes fail closed and are not automatically retried.
 - Production secrets must be injected at runtime and must not be committed to the repository.
 
-For the complete Chinese threat model, secret-handling rules, and operational controls, see [安全说明.md](./安全说明.md).
+For the complete Chinese threat model, secret-handling rules, and operational controls, see [安全说明.md](./docs/指南/安全说明.md).

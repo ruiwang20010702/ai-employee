@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -9,11 +9,35 @@ import { provisionGeneratedKeychainSecrets } from "./初始化钥匙串密钥.mj
 import { inspectReuseReadiness } from "../src/reuse-readiness.mjs";
 import { isMainModule } from "../src/main-module.mjs";
 import { activationHelp, runActivation } from "./启动体验.mjs";
-import { runHermesOneClickInstall } from "./一键安装Hermes.mjs";
+import {
+  foursdayNativeHermesLayout,
+  inspectFoursdaySourceCommit,
+  runFoursdayNativeHermesInstall,
+} from "../src/foursday-hermes-native-install.mjs";
+import { validateHermesUpstreamLock } from "../src/hermes-upstream.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const planSchema = "ai-employee-command-plan/v1";
+
+async function installNativeFoursdayProfile({ apply, projectRoot }) {
+  const [lock, packageDocument, foursdayCommit] = await Promise.all([
+    readFile(new URL("../hermes/upstream.lock.json", import.meta.url), "utf8")
+      .then(JSON.parse)
+      .then(validateHermesUpstreamLock),
+    readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
+    inspectFoursdaySourceCommit(projectRoot),
+  ]);
+  return runFoursdayNativeHermesInstall({
+    apply,
+    installGateway: false,
+    profileOnly: false,
+    lock,
+    layout: foursdayNativeHermesLayout({ projectRoot }),
+    foursdayVersion: packageDocument.version,
+    foursdayCommit,
+  });
+}
 
 const bundledCommands = Object.freeze({
   preflight: Object.freeze({
@@ -204,6 +228,11 @@ function help() {
     ],
     sequence: [
       "install --apply",
+      "npm run hermes:configure -- --apply --registry /absolute/private/projects.json",
+      "npm run hermes:gateway -- install-shadow --apply",
+      "npm run hermes:gateway -- start-shadow --apply",
+    ],
+    legacyGovernedSequence: [
       "init --apply",
       "secrets --apply",
       "check",
@@ -217,7 +246,7 @@ function help() {
       "verify",
       "shadow",
     ],
-    boundary: "check 和所有 --dry-run 只读取本机文件或生成执行计划，不连接钉钉、AgentRuntime 或数据库；init、secrets、backup、migrate、probe 及服务变更只有显式 --apply 才执行。生产放量仍需独立审批。",
+    boundary: "install 是默认原生 Hermes Profile 路径且不会启动 Gateway。init、secrets、service、migrate 等旧命令只用于既有 Governed Runtime 恢复；所有预览零写，真实配置、服务、数据库和生产放量仍需逐阶段显式授权。",
   };
 }
 
@@ -228,7 +257,7 @@ export async function runReuseGuide({
   configInitializer = initializeProductionConfig,
   scriptRunner = defaultScriptRunner,
   activationRunner = runActivation,
-  hermesInstaller = runHermesOneClickInstall,
+  hermesInstaller = installNativeFoursdayProfile,
 } = {}) {
   const command = args[0] ?? "check";
   if (["help", "--help", "-h"].includes(command)) return help();

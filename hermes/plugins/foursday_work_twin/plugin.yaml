@@ -1,0 +1,30 @@
+name: foursday-work-twin
+label: Foursday Work Twin
+kind: standalone
+version: 0.1.0
+description: >
+  Native Hermes composition plugin for Foursday. It assembles the personal DWS
+  platform, project router, personal gbrain candidate tool, and high-risk Hook
+  from one profile-scoped trust boundary without patching Hermes core.
+author: Foursday
+provides_tools:
+  - foursday_remember_project_fact
+provides_hooks:
+  - pre_tool_call
+optional_env:
+  - name: FOURSDAY_PROJECT_REGISTRY
+    description: "Absolute private project registry"
+    prompt: "Foursday project registry"
+    password: false
+  - name: FOURSDAY_DWS_SIDECAR
+    description: "Absolute profile-owned DWS host bridge"
+    prompt: "DWS sidecar"
+    password: false
+  - name: FOURSDAY_MEMORY_CONTEXT_SIDECAR
+    description: "Absolute profile-owned personal gbrain read bridge"
+    prompt: "Memory read sidecar"
+    password: false
+  - name: FOURSDAY_MEMORY_CANDIDATE_SIDECAR
+    description: "Absolute profile-owned personal gbrain candidate bridge"
+    prompt: "Memory candidate sidecar"
+    password: false

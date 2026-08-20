@@ -11,6 +11,7 @@ from gateway.config import PlatformConfig
 from gateway.platform_registry import PlatformEntry, platform_registry
 from dws_personal import register
 from dws_personal.adapter import DwsPersonalAdapter, _shadow_evidence
+from project_router.runtime_context import current_routed_principal_id
 
 
 class FakePluginContext:
@@ -106,9 +107,11 @@ class DwsPersonalPluginTest(unittest.IsolatedAsyncioTestCase):
             router=self.router,
         )
         self.events = []
+        self.principals = []
 
         async def handler(event):
             self.events.append(event)
+            self.principals.append(current_routed_principal_id())
             return None
 
         self.adapter.set_message_handler(handler)
@@ -139,10 +142,12 @@ class DwsPersonalPluginTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.source.user_id, "trusted-user")
         self.assertEqual(event.source.user_id_alt, "open-trusted")
         self.assertEqual(event.message_id, "message-1")
-        self.assertEqual(event.source.workspace_path, os.path.realpath(self.temp.name))
+        self.assertFalse(hasattr(event.source, "workspace_path"))
         self.assertIn("单词 2.2", event.channel_prompt)
         self.assertEqual(self.router.calls[0]["session_key"], "direct-1:trusted-user")
         self.assertEqual(self.adapter.toolsets_for_source(event.source), ["coding"])
+        self.assertEqual(self.principals, ["trusted-user"])
+        self.assertIsNone(current_routed_principal_id())
 
     async def test_unknown_user_and_unmentioned_group_are_dropped(self):
         base = {

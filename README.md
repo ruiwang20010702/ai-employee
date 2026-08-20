@@ -8,7 +8,7 @@
 
 Trusted message → personal context → real workspace → Hermes + Codex → verified work → natural reply.
 
-[简体中文](./README_ZH.md) · [Architecture](./docs/设计总览.md) · [Gate 2 evidence](./docs/自主工作分身迁移验收报告.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+[简体中文](./docs/指南/中文首页.md) · [Architecture](./docs/设计总览.md) · [Gate 2 evidence](./docs/历史/自主工作分身迁移验收报告.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 [![Checks](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![Security](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
@@ -33,15 +33,19 @@ Push, merge, production deployment, production data writes, irreversible deletio
 
 ## One-command install
 
-Requires macOS, Node.js 22.5+, Git, and [`uv`](https://docs.astral.sh/uv/). Python 3.13 is managed inside the isolated runtime.
+Requires macOS and Git. The verified upstream Hermes installer manages its own Python, Node.js, and `uv` runtime.
 
 ```bash
 git clone https://github.com/ruiwang20010702/foursday.git && cd foursday && npm ci --ignore-scripts && npm run hermes:setup -- --apply
 ```
 
-Already cloned? Run `npm run hermes:setup` for a zero-write preview, then repeat with `-- --apply`. The installer is idempotent and performs the pinned-upstream, isolated-environment, patch, plugin, Profile, and Skill steps as one recoverable operation inside `.runtime/hermes-poc`.
+Already cloned? Run `npm run hermes:setup` for a zero-write preview, then repeat with `-- --apply`. Foursday downloads the official Hermes installer from the locked upstream commit, verifies its SHA-256, installs the native runtime, and installs an isolated `foursday` Profile distribution containing the plugins, Profile, Skills, and host bridges. It does not vendor or patch the Hermes core.
 
-Installation does **not** copy credentials, start the Gateway, send messages, or enable active mode. Authenticate Codex and connect your own message/memory providers after install; begin with a send-disabled shadow.
+When installed as an npm/GitHub package, `foursday install` is the same native zero-write preview and `foursday install --apply` uses the same official Profile path. The old overlay/Node initializer is not the default install command.
+
+Installation does **not** copy credentials, start the Gateway, send messages, or enable active mode. Configure the profile with `npm run hermes:configure`, then install the native send-disabled service with `npm run hermes:gateway -- install-shadow --apply`. Active mode remains a separate single-writer cutover.
+
+Updates are refused while the Profile Gateway is running. An existing Profile is exported to a private temporary archive and restored automatically if installation, dependency setup, or plugin doctor fails. Activation requires a private, non-stale shadow acceptance receipt, the same full release SHA, and its derived confirmation value. `npm run hermes:gateway -- remove-profile` is a zero-write uninstall preview; applying the displayed `REMOVE-FOURSDAY-PROFILE` confirmation uses official Hermes commands to remove only the Foursday Gateway, alias, Profile, and bundled plugins while preserving native Hermes, production configuration, and personal gbrain.
 
 ## Architecture
 
@@ -60,13 +64,13 @@ flowchart LR
     I -->|"external / irreversible"| J["Owner authorization"]
 ```
 
-Foursday is a thin distribution on an exact Hermes upstream release:
+Foursday is a native Hermes Profile distribution on an exact compatible upstream release:
 
 - pinned Hermes `v2026.8.18` / `0.20.4`;
-- external DWS, project-router, and high-risk-boundary plugins;
+- external DWS, project-router, personal-gbrain, and high-risk-boundary plugins;
 - a Foursday Profile and general project-work Skill;
-- one locked three-file patch for per-session workspace persistence;
-- no heavy fork and no second business-memory repository.
+- project workspace routing through the official per-turn plugin Hook, with no core patch;
+- no Hermes fork, copied virtualenv, custom Agent Loop, or second business-memory repository.
 
 [Read the canonical architecture map](./docs/设计总览.md).
 
@@ -95,11 +99,11 @@ The local V3 candidate has passed all 12 PoC gates:
 - full Foursday regression passed; the live count is maintained only in the [status matrix](./docs/完成度矩阵.md);
 - Hermes contract checks: 202 passed, 1 upstream conditional skip.
 
-Hermes is now the production `active` runtime and the only message writer. The legacy Node.js writers are stopped and retained only as a tested rollback path. The exact active release passed ten-scenario shadow acceptance, a real rollback-to-legacy drill, and a second successful activation. See the [status matrix](./docs/完成度矩阵.md) for live boundaries.
+Production is intentionally in a safe review stop: the database pause flag is on, both the previously managed Gateway and the native Profile Gateway are stopped and launchd-disabled, and sending, execution, proactive work, automatic approval, and memory read/write are disabled. Only the local console and read-only health surface remain available. The native `~/.hermes` migration is versioned for review but has not received production authority. See the [status matrix](./docs/完成度矩阵.md) for live boundaries.
 
-[Review the full Gate 2 report](./docs/自主工作分身迁移验收报告.md).
+[Review the full Gate 2 report](./docs/历史/自主工作分身迁移验收报告.md).
 
-For manual recovery, the same operation remains available as three independently repeatable stages: `hermes:prepare`, `hermes:patch`, and `hermes:install`. See the [deployment guide](./docs/en/deployment.md).
+The old `hermes:prepare`, `hermes:patch`, and `hermes:install` commands remain temporarily under the legacy migration path only. New installations use the native installer, Profile configuration, official plugin doctor, and official Gateway service commands. See the [deployment guide](./docs/en/deployment.md).
 
 ## Documentation
 
@@ -109,17 +113,17 @@ For manual recovery, the same operation remains available as three independently
 | Architecture and module map | [Design overview](./docs/设计总览.md) |
 | Implementation rules | [Technical design](./docs/技术设计文档.md) |
 | Current status and removed concepts | [Status matrix](./docs/完成度矩阵.md) |
-| Migration evidence | [Gate 2 report](./docs/自主工作分身迁移验收报告.md) |
+| Migration evidence | [Gate 2 report](./docs/历史/自主工作分身迁移验收报告.md) |
 | Current production operations | [Legacy runtime runbook](./docs/生产运维手册.md) |
-| Historical decision | [Hermes migration decision](./docs/自主工作分身架构迁移方案.md) |
+| Historical decision | [Hermes migration decision](./docs/历史/自主工作分身架构迁移方案.md) |
 
 ## Roadmap
 
 - [x] General Hermes/Codex loop with DWS, gbrain, routing, evidence, and hard boundaries
 - [x] Real P0 conversations, follow-ups, project work, send read-back, and takeover
-- [x] Reproducible thin distribution with pinned upstream and rollback-safe install
+- [x] Reproducible native Profile distribution with a pinned official installer and zero core patches
 - [x] Gate 2 candidate committed and published on `main`
-- [x] Controlled production migration from the legacy runtime
+- [ ] Controlled production migration from the Foursday-managed Gateway to the native Hermes Profile Gateway
 - [ ] Feishu, WeCom, Slack, Teams, Gmail, and Google Workspace profiles
 
 ## License

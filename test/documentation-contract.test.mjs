@@ -9,7 +9,7 @@ async function projectText(path) {
 test("README 中英文首页统一定位为个人记忆驱动的 Hermes 工作分身", async () => {
   const [english, chinese] = await Promise.all([
     projectText("README.md"),
-    projectText("README_ZH.md"),
+    projectText("docs/指南/中文首页.md"),
   ]);
   assert.match(english, /personal-memory-driven work twin/u);
   assert.match(english, /Hermes Agent Loop/u);
@@ -24,10 +24,10 @@ test("README 中英文首页统一定位为个人记忆驱动的 Hermes 工作�
   }
 });
 
-test("README 准确声明 Hermes active 与旧 Runtime 回退边界", async () => {
+test("README 准确声明 Hermes 安全停机与未授权迁移边界", async () => {
   const [english, chinese] = await Promise.all([
     projectText("README.md"),
-    projectText("README_ZH.md"),
+    projectText("docs/指南/中文首页.md"),
   ]);
   for (const text of [english, chinese]) {
     assert.match(text, /Hermes.*active/iu);
@@ -35,33 +35,35 @@ test("README 准确声明 Hermes active 与旧 Runtime 回退边界", async () =
     assert.match(text, /Gate 2/u);
     assert.doesNotMatch(text, /v0\.6\.0-rc\.1/u);
   }
-  assert.match(english, /only message writer/iu);
-  assert.match(chinese, /唯一消息写入者/u);
+  assert.match(english, /safe review stop/iu);
+  assert.match(chinese, /安全停机审阅态/u);
+  assert.match(english, /has not received production authority/iu);
+  assert.match(chinese, /尚未取得生产权限/u);
 });
 
-test("README 提供默认零写的一键 Hermes 安装入口并保留三阶段恢复", async () => {
+test("README 提供默认零写的原生 Hermes Profile 与 Gateway 安装入口", async () => {
   const [english, chinese, manifest] = await Promise.all([
     projectText("README.md"),
-    projectText("README_ZH.md"),
+    projectText("docs/指南/中文首页.md"),
     projectText("package.json"),
   ]);
   for (const text of [english, chinese]) {
     assert.match(text, /hermes:setup/u);
-    assert.match(text, /hermes:prepare/u);
-    assert.match(text, /hermes:patch/u);
-    assert.match(text, /hermes:install/u);
-    assert.match(text, /\.runtime\/hermes-poc/u);
+    assert.match(text, /hermes:configure/u);
+    assert.match(text, /hermes:gateway/u);
+    assert.match(text, /Profile/iu);
+    assert.match(text, /official|官方/iu);
   }
   const packageJson = JSON.parse(manifest);
-  assert.equal(packageJson.scripts["hermes:setup"], "node scripts/一键安装Hermes.mjs");
-  assert.equal(packageJson.scripts["hermes:prepare"], "node scripts/准备Hermes候选.mjs");
-  assert.equal(packageJson.scripts["hermes:patch"], "node scripts/准备Hermes补丁层.mjs");
-  assert.equal(packageJson.scripts["hermes:install"], "node scripts/安装Hermes发行层.mjs");
+  assert.equal(packageJson.scripts["hermes:setup"], "node scripts/安装Foursday原生Hermes.mjs");
+  assert.equal(packageJson.scripts["hermes:configure"], "node scripts/配置Foursday原生Hermes.mjs");
+  assert.equal(packageJson.scripts["hermes:gateway"], "node scripts/管理Foursday原生Gateway.mjs");
+  assert.equal(packageJson.scripts["hermes:legacy:setup"], "node scripts/一键安装Hermes.mjs");
 });
 
 test("PRD 以通用 Agent Loop 为个人默认而把旧治理降级为企业模式", async () => {
   const requirements = await projectText("docs/产品需求文档.md");
-  assert.match(requirements, /V3\.0 Hermes 候选/u);
+  assert.match(requirements, /V3\.1 原生 Hermes Profile 候选/u);
   assert.match(requirements, /个人记忆驱动的 AI 工作分身/u);
   assert.match(requirements, /默认个人模式/u);
   assert.match(requirements, /可选 Enterprise \/ Governed Mode/u);
@@ -101,10 +103,11 @@ test("设计总览为文档角色和模块导航的唯一地图", async () => {
 
 test("状态矩阵维护 Gate 2、生产边界和删除区", async () => {
   const status = await projectText("docs/完成度矩阵.md");
-  assert.match(status, /12 项 PoC 和十项生产 shadow 门槛全部通过/u);
-  assert.match(status, /Hermes `active` 是唯一消息写入者/u);
+  assert.match(status, /历史 12 项 PoC 和十项生产 shadow 门槛曾通过/u);
+  assert.match(status, /没有消息写入者|无消息写入者|无消息发送者/u);
   assert.match(status, /active → legacy → active 真实回退演练/u);
-  assert.match(status, /旧 listener\/worker\/executor\/proactive 全部停止/u);
+  assert.match(status, /listener\/worker\/executor\/proactive/u);
+  assert.match(status, /stopped\/disabled/u);
   for (const removed of [
     "project_evidence_read",
     "produced_questions",
@@ -117,22 +120,20 @@ test("状态矩阵维护 Gate 2、生产边界和删除区", async () => {
   assert.match(status, /Enterprise \/ Governed Mode/u);
 });
 
-test("技术设计绑定精确上游、三文件补丁和薄发行层", async () => {
-  const [technical, lock, patchLock] = await Promise.all([
+test("技术设计绑定精确官方安装器、零核心补丁和原生 Profile", async () => {
+  const [technical, lock] = await Promise.all([
     projectText("docs/技术设计文档.md"),
     projectText("hermes/upstream.lock.json"),
-    projectText("hermes/patches.lock.json"),
   ]);
   const upstream = JSON.parse(lock);
-  const patches = JSON.parse(patchLock);
   assert.match(technical, new RegExp(upstream.release.replace(".", "\\."), "u"));
   assert.match(technical, new RegExp(upstream.version.replaceAll(".", "\\."), "u"));
   assert.match(technical, new RegExp(upstream.commit, "u"));
-  assert.equal(patches.patches.length, 1);
-  for (const file of ["gateway/session.py", "gateway/platforms/base.py", "gateway/run.py"]) {
-    assert.match(technical, new RegExp(file.replace(/[./]/g, "\\$&"), "u"));
-  }
-  assert.match(technical, /--no-allow-tool-override/u);
+  assert.match(technical, new RegExp(upstream.installerSha256, "u"));
+  assert.match(technical, /ContextVar/u);
+  assert.match(technical, /pre_tool_call/u);
+  assert.match(technical, /零核心补丁/u);
+  assert.match(technical, /profile install/u);
 });
 
 test("技术设计覆盖 DWS 个人身份、发送未知、接管和恢复", async () => {
@@ -151,11 +152,11 @@ test("技术设计覆盖 DWS 个人身份、发送未知、接管和恢复", asy
 test("技术设计覆盖常驻 shadow 与单写者切换门禁", async () => {
   const technical = await projectText("docs/技术设计文档.md");
   for (const phrase of [
-    "Application Support",
-    "Node supervisor",
+    "Profile distribution",
     "send=false",
-    "src/hermes-cutover.mjs",
-    "先停 Hermes",
+    "src/foursday-native-gateway.mjs",
+    "先停原生 Gateway",
+    "旧写入者",
   ]) assert.match(technical, new RegExp(phrase, "u"));
 });
 
@@ -192,7 +193,7 @@ test("技术设计和能力文档把高风险控制放在程序边界", async ()
 });
 
 test("Gate 2 报告十二项门槛全部通过且不冒充生产健康", async () => {
-  const report = await projectText("docs/自主工作分身迁移验收报告.md");
+  const report = await projectText("docs/历史/自主工作分身迁移验收报告.md");
   const rows = report.split("\n").filter((line) => /^\| \d+ \|/u.test(line));
   assert.equal(rows.length, 12);
   assert.ok(rows.every((line) => line.split("|").at(-2).trim() === "通过"));
@@ -206,17 +207,17 @@ test("Gate 2 报告十二项门槛全部通过且不冒充生产健康", async (
 test("旧运维、验收、审查和图 ADR 都标明兼容范围", async () => {
   const documents = await Promise.all([
     projectText("docs/生产运维手册.md"),
-    projectText("docs/验收报告.md"),
-    projectText("docs/统一审查报告.md"),
-    projectText("docs/架构决策受治理工作图存储.md"),
+    projectText("docs/历史/验收报告.md"),
+    projectText("docs/历史/统一审查报告.md"),
+    projectText("docs/历史/架构决策受治理工作图存储.md"),
     projectText("docs/en/deployment.md"),
     projectText("docs/en/adr-001-governed-work-graph-storage.md"),
   ]);
-  assert.match(documents[0], /旧 Node\.js Governed Runtime/u);
+  assert.match(documents[0], /Enterprise\/回退层/u);
   assert.match(documents[1], /历史\/兼容快照/u);
   assert.match(documents[2], /历史\/兼容审查/u);
   assert.match(documents[3], /Enterprise \/ Governed Mode/u);
-  assert.match(documents[4], /legacy Node\.js governed production/iu);
+  assert.match(documents[4], /currently deployed managed Gateway/iu);
   assert.match(documents[5], /optional Enterprise \/ Governed Mode/iu);
 });
 
@@ -235,13 +236,13 @@ test("英文核心文档同步 V3 产品、架构、能力和部署边界", asyn
   assert.match(requirements, /general Agent Loop/u);
   assert.match(architecture, /thin distribution/u);
   assert.match(capability, /Personal default/u);
-  assert.match(deployment, /legacy Node\.js governed production/iu);
+  assert.match(deployment, /intentionally paused installation/iu);
 });
 
 test("中英文 README 和核心文档的本地链接全部存在", async () => {
   const files = [
     "README.md",
-    "README_ZH.md",
+    "docs/指南/中文首页.md",
     "docs/设计总览.md",
     "docs/产品需求文档.md",
     "docs/技术设计文档.md",
@@ -274,7 +275,7 @@ test("docs 根目录继续使用中文文件名", async () => {
 test("核心文档使用 Mermaid 展示产品和技术主流程", async () => {
   for (const file of [
     "README.md",
-    "README_ZH.md",
+    "docs/指南/中文首页.md",
     "docs/产品需求文档.md",
     "docs/设计总览.md",
     "docs/技术设计文档.md",
@@ -295,9 +296,9 @@ test("公开社交预览资源保持 GitHub 推荐尺寸", async () => {
 
 test("公开文档不包含常见真实密钥格式", async () => {
   const files = [
-    "README.md", "README_ZH.md", "docs/产品需求文档.md",
+    "README.md", "docs/指南/中文首页.md", "docs/产品需求文档.md",
     "docs/设计总览.md", "docs/技术设计文档.md", "docs/完成度矩阵.md",
-    "docs/自主工作分身架构迁移方案.md", "docs/自主工作分身迁移验收报告.md",
+    "docs/历史/自主工作分身架构迁移方案.md", "docs/历史/自主工作分身迁移验收报告.md",
   ];
   const secret = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})/u;
   for (const file of files) assert.doesNotMatch(await projectText(file), secret);

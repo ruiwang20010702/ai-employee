@@ -31,6 +31,7 @@ test("Hermes distribution install defaults to a zero-write bounded plan", async 
       "dws-personal",
       "project-router",
       "high-risk-boundary",
+      "personal-gbrain-memory",
       "profile",
       "project-work-skill",
     ],

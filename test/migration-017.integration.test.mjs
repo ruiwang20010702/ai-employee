@@ -265,8 +265,11 @@ integration("服务回退只阻止活动等待链而不阻止历史终态链", a
     activeContinuationTasks: 0,
     migrationPresent: true,
     capabilityBudgetMigrationPresent: false,
+    hermesMemoryCandidateMigrationPresent: false,
+    hermesMemoryCandidateRows: 0,
     targetSupportsContinuation: false,
     targetSupportsCapabilityBudget: false,
+    targetSupportsHermesMemoryCandidates: false,
   });
 
   await insertTask(pool, {
@@ -280,7 +283,10 @@ integration("服务回退只阻止活动等待链而不阻止历史终态链", a
     activeContinuationTasks: 1,
     migrationPresent: true,
     capabilityBudgetMigrationPresent: false,
+    hermesMemoryCandidateMigrationPresent: false,
+    hermesMemoryCandidateRows: 0,
     targetSupportsContinuation: false,
     targetSupportsCapabilityBudget: false,
+    targetSupportsHermesMemoryCandidates: false,
   });
 });

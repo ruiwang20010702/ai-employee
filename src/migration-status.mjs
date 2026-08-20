@@ -74,6 +74,7 @@ export function validateMigrationCompatibility(migrations, policy) {
     const supportedStateGuards = new Set([
       "waiting_information_states_absent",
       "capability_budget_target_support_required",
+      "hermes_memory_candidate_state_absent",
     ]);
     const rollbackIsSupported = entry?.rollback === "service_only" ||
       (

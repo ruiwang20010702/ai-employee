@@ -4615,6 +4615,7 @@ export class PostgresStore {
     const [
       database,
       taskCounts,
+      hermesMemoryCandidateCounts,
       workPlanCounts,
       expiredExecutionLeases,
       pendingMessages,
@@ -4630,6 +4631,14 @@ export class PostgresStore {
           WHERE tenant_id = $1 AND privacy_erased_at IS NULL
           GROUP BY status
         `,
+          [this.tenantId],
+        ),
+        this.pool.query(
+          `SELECT status, COUNT(*)::bigint AS count
+           FROM hermes_memory_candidates
+           WHERE tenant_id = $1
+             AND status IN ('retirement_pending','retiring','blocked')
+           GROUP BY status`,
           [this.tenantId],
         ),
         this.pool.query(
@@ -4681,6 +4690,9 @@ export class PostgresStore {
       ),
       expiredExecutionLeases: Number(expiredExecutionLeases.rows[0].count),
       pendingMessages: Number(pendingMessages.rows[0].count),
+      hermesMemoryCandidates: Object.fromEntries(
+        hermesMemoryCandidateCounts.rows.map((row) => [row.status, Number(row.count)]),
+      ),
       checkpoints: checkpoints.rows,
       heartbeats: Object.fromEntries(
         heartbeats.rows.map((row) => [
@@ -4873,6 +4885,36 @@ export class PostgresStore {
       };
     }
     const workTriggerRows = workTriggerResult.rows;
+    let hermesMemoryCandidateResult;
+    if (selector.type === "person") {
+      hermesMemoryCandidateResult = await client.query(
+        `SELECT * FROM hermes_memory_candidates candidate
+         WHERE candidate.tenant_id = $1 AND candidate.privacy_erased_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM hermes_memory_candidate_sources source
+             WHERE source.tenant_id = candidate.tenant_id
+               AND source.candidate_id = candidate.id
+               AND source.source_principal_key = $2
+           )${suffix}`,
+        [this.tenantId, this.cipher.fingerprint(selector.value)],
+      );
+    } else if (selector.type === "project") {
+      hermesMemoryCandidateResult = await client.query(
+        `SELECT * FROM hermes_memory_candidates
+         WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+           AND project_id = $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    } else {
+      hermesMemoryCandidateResult = await client.query(
+        `SELECT * FROM hermes_memory_candidates
+         WHERE tenant_id = $1 AND privacy_erased_at IS NULL
+           AND updated_at < $2${suffix}`,
+        [this.tenantId, selector.value],
+      );
+    }
+    const hermesMemoryCandidateRows = hermesMemoryCandidateResult.rows;
+    const blockedHermesMemoryCandidateStatuses = new Set(["processing", "retiring"]);
     const taskById = new Map(taskRows.map((row) => [row.id, row]));
     const eligibleTaskIds = new Set(
       taskRows.filter((row) => taskStatus.has(row.status)).map((row) => row.id),
@@ -4967,6 +5009,7 @@ export class PostgresStore {
       ...timeReturnRows.map((row) => row.id),
       ...shadowTimeReturnRows.map((row) => row.id),
       ...workTriggerRows.map((row) => row.id),
+      ...hermesMemoryCandidateRows.map((row) => row.id),
     ]);
     if (selector.type !== "time") relatedValues.add(selector.value);
     const auditRows = selector.type === "time"
@@ -5025,6 +5068,9 @@ export class PostgresStore {
         })),
       ].map(token),
       workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map(token),
+      hermesMemoryCandidates: hermesMemoryCandidateRows
+        .filter((row) => !blockedHermesMemoryCandidateStatuses.has(row.status))
+        .map(token),
       auditEvents: auditRows.map(token),
       graphNodes: graphNodeResult.rows.map(token),
       graphEdges: graphEdgeResult.rows.map(token),
@@ -5035,6 +5081,9 @@ export class PostgresStore {
       messages: blockedMessages.map((row) => token(row, row.platform_message_id)),
       workPlans: planRows.filter((row) => !planStatus.has(row.status)).map(token),
       workTriggers: workTriggerRows.filter((row) => row.status !== "disabled").map(token),
+      hermesMemoryCandidates: hermesMemoryCandidateRows
+        .filter((row) => blockedHermesMemoryCandidateStatuses.has(row.status))
+        .map(token),
       scopedPauses: blockedCheckpoints.map((row) => `${row.key}:${row.updated_at.toISOString()}`),
     };
     return {
@@ -5058,6 +5107,9 @@ export class PostgresStore {
         timeReturns: timeReturnRows.map((row) => row.id),
         shadowTimeReturns: shadowTimeReturnRows.map((row) => row.id),
         workTriggers: workTriggerRows.filter((row) => row.status === "disabled").map((row) => row.id),
+        hermesMemoryCandidates: hermesMemoryCandidateRows
+          .filter((row) => !blockedHermesMemoryCandidateStatuses.has(row.status))
+          .map((row) => ({ id: row.id, status: row.status })),
         auditEvents: auditRows.map((row) => row.id),
         graphProjects: [...graphProjectIds].sort(),
         checkpointRewrites,
@@ -5079,7 +5131,9 @@ export class PostgresStore {
            work_plan_steps, capability_budget_usage, time_return_entries,
            shadow_time_return_entries,
            work_trigger_runs, work_triggers,
-           memory_items, memory_authority_cleanup_jobs, checkpoints, audit_events,
+           memory_items, memory_authority_cleanup_jobs, hermes_memory_candidate_sources,
+           hermes_memory_candidates,
+           checkpoints, audit_events,
            governed_graph_edges, governed_graph_nodes
          IN SHARE ROW EXCLUSIVE MODE`,
       );
@@ -5217,6 +5271,33 @@ export class PostgresStore {
           `DELETE FROM work_triggers
            WHERE tenant_id = $1 AND id = ANY($2::text[])`,
           [this.tenantId, candidates.ids.workTriggers],
+        );
+      }
+      for (const candidate of candidates.ids.hermesMemoryCandidates) {
+        await client.query(
+          `UPDATE hermes_memory_candidates
+           SET candidate_key = $3, project_id = 'deleted', fact_key = 'deleted',
+               title_ciphertext = $4, statement_ciphertext = $4,
+               evidence_ciphertext = $5, sensitivity = 'internal', confidence = 0.97,
+               source_session_hash = $6,
+               status = CASE WHEN status = 'promoted' THEN 'retirement_pending' ELSE 'revoked' END,
+               lease_owner = NULL, lease_expires_at = NULL, last_error_code = NULL,
+               privacy_erased_at = $2, updated_at = $2
+           WHERE tenant_id = $1 AND id = $7 AND privacy_erased_at IS NULL`,
+          [
+            this.tenantId,
+            now,
+            this.cipher.fingerprint(`deleted-hermes-candidate:${candidate.id}:${randomUUID()}`),
+            encryptedEmpty,
+            this.cipher.encrypt("[]"),
+            this.cipher.fingerprint(`deleted-hermes-session:${candidate.id}:${randomUUID()}`),
+            candidate.id,
+          ],
+        );
+        await client.query(
+          `DELETE FROM hermes_memory_candidate_sources
+           WHERE tenant_id = $1 AND candidate_id = $2`,
+          [this.tenantId, candidate.id],
         );
       }
       for (const id of candidates.ids.memories) {

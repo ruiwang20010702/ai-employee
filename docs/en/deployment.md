@@ -1,6 +1,6 @@
 # Deployment
 
-> Scope: legacy Node.js governed production plus the send-disabled Hermes shadow service. The shadow is not the active sender. Review the Chinese status matrix and Gate 2 report before any single-writer migration.
+> Scope: an intentionally paused installation plus a send-disabled native Hermes candidate. Neither Gateway is an active sender. Review the Chinese status matrix and Gate 2 report before any single-writer migration.
 
 > Rename compatibility: new installations use the Foursday CLI, plugin,
 > service labels, release root, and Keychain namespace. Existing `0.x`
@@ -47,48 +47,52 @@ git clone https://github.com/ruiwang20010702/foursday.git && cd foursday && npm 
 ```
 
 For an existing checkout, `npm run hermes:setup` is a zero-write preview and
-`npm run hermes:setup -- --apply` performs the complete idempotent local
-installation. It verifies macOS, Node.js, system Git, and `uv`, then prepares
-the pinned upstream, isolated Python runtime, locked patch layer, plugins,
-Profile, and Skill in `.runtime/hermes-poc`.
+`npm run hermes:setup -- --apply` verifies and runs the official Hermes
+installer from the locked full upstream commit. It then installs the isolated
+`foursday` Profile distribution through `hermes profile install` and validates
+all four plugins through the native doctor surface. Foursday no longer vendors
+or patches the Hermes core.
 
 Credentials are deliberately outside the installer. Codex login, message
 adapter authentication, and personal-memory authorization belong to the user
 and cannot be safely copied or invented. The installer never starts the
 Gateway, sends a message, changes production, or enables active mode.
 
-Manual recovery retains the same three independently repeatable stages:
+Configure and install the native send-disabled service as separate stages:
 
 ```bash
-npm run hermes:prepare -- --apply
-npm run hermes:patch -- --apply
-npm run hermes:install -- --apply
+npm run hermes:configure -- --apply --registry /absolute/private/projects.json --cron
+npm run hermes:gateway -- install-shadow --apply
+npm run hermes:gateway -- start-shadow --apply
 ```
 
-## Install an immutable revision
+Profile updates fail closed while the Gateway is running. Before replacing an
+existing Profile, the installer creates a private official export and restores
+it with `hermes profile import` if any install, dependency, or doctor step
+fails. Use `npm run hermes:gateway -- remove-profile` for a zero-write uninstall
+preview and append `--apply` to remove only the Foursday service, alias, Profile,
+and bundled plugins. Native Hermes, production configuration, and personal
+gbrain are preserved. Activation additionally requires a private, non-stale
+shadow acceptance receipt, the same full release SHA, and the derived
+`ACTIVATE-HERMES:...` confirmation. Profile removal apply requires the separate
+`REMOVE-FOURSDAY-PROFILE` confirmation.
 
-Never deploy from a mutable branch name. Install a reviewed full commit SHA in a clean workspace:
+The former `hermes:prepare`, `hermes:patch`, and `hermes:install` commands are
+temporary rollback compatibility for the currently deployed managed Gateway,
+not the new installation path.
 
-```bash
-npm init -y
-npm install "github:ruiwang20010702/foursday#REPLACE_WITH_APPROVED_FULL_SHA"
-npx --no-install foursday check
-npx --no-install foursday init
-npx --no-install foursday init --apply
-npx --no-install foursday secrets
-npx --no-install foursday secrets --apply
-```
+## Legacy governed-runtime compatibility
 
-The preview writes nothing. `init --apply` creates the protected production
-configuration plus a seven-directory Markdown skeleton in an independent Git
-repository. Each installation receives a unique `foursday-<suffix>` gbrain
-source ID. If gbrain is available it is registered as non-federated; otherwise
-the result reports `registrationPending` and preflight remains blocked. Memory
-writes and auto-confirm stay disabled in both cases.
+The old package initializer, independent Markdown overlay, non-federated
+`foursday-*` gbrain source, Node listener/worker/executor, and versioned local
+release controller are retained only for recovery of existing `0.x`
+installations. They are not part of a new native Profile install and must not be
+used to create a second long-term knowledge base. New installations read the
+owner's `default` personal gbrain through the host bridge; durable automatic
+facts enter an encrypted candidate queue and are promoted through a dedicated
+checkout of the same PRIVATE personal gbrain Git repository.
 
-Mutating setup commands are preview-only without `--apply`. Initialization refuses to overwrite an existing configuration and stores only workspace-specific Keychain references in a mode-`600` file.
-
-## Production safety sequence
+## Legacy governed-runtime production sequence
 
 The manual sequence below documents the gates. Prefer the versioned local release controller for an actual production upgrade.
 

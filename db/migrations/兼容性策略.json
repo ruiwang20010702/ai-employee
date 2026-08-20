@@ -48,6 +48,12 @@
       "backwardCompatible": true,
       "rollback": "service_only",
       "evidence": "只增加独立且加密的记忆权威回收作业表与索引；旧服务不读写新表，既有记忆和任务语义不变"
+    },
+    "024_Hermes个人记忆候选.sql": {
+      "backwardCompatible": true,
+      "rollback": "service_only_with_state_guard",
+      "guard": "hermes_memory_candidate_state_absent",
+      "evidence": "只增加独立且加密的 Hermes 长期记忆候选与来源表；目标服务不支持第024号迁移时，表中任一候选、晋升、回收或隐私墓碑记录都会阻止回退，避免旧隐私删除遗漏个人 gbrain 页面"
     }
   }
 }

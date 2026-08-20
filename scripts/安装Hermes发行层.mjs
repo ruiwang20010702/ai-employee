@@ -48,6 +48,12 @@ const components = [
     plugin: "foursday-high-risk-boundary",
   },
   {
+    id: "personal-gbrain-memory",
+    source: join(projectRoot, "hermes/plugins/gbrain_memory"),
+    target: join(hermesHome, "plugins/foursday-gbrain-memory"),
+    plugin: "foursday-gbrain-memory",
+  },
+  {
     id: "profile",
     source: join(projectRoot, "hermes/profile/SOUL.md"),
     target: join(hermesHome, "SOUL.md"),

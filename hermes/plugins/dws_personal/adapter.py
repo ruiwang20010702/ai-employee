@@ -350,7 +350,6 @@ class DwsPersonalAdapter(BasePlatformAdapter):
             user_id_alt=open_id or None,
             user_name=str(latest.get("senderName") or "").strip() or user_id,
             message_id=message_ids[-1],
-            workspace_path=route.workspace_path,
         )
         event = MessageEvent(
             text=content,
@@ -382,7 +381,10 @@ class DwsPersonalAdapter(BasePlatformAdapter):
             "bundleSize": len(records),
             "occurredAt": timestamp.isoformat(),
         })
-        await self.handle_message(event)
+        from project_router.runtime_context import routed_project_scope
+
+        with routed_project_scope(route, principal_id=user_id):
+            await self.handle_message(event)
 
     async def _on_record(self, record: Dict[str, Any]) -> None:
         if not isinstance(record, dict):

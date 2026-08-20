@@ -285,6 +285,18 @@ export function loadConfig({
     "AI_EMPLOYEE_PERSONAL_MEMORY_MAX_RESULTS",
     8,
   );
+  const personalMemoryWriteEnabled = boolean(
+    "AI_EMPLOYEE_PERSONAL_MEMORY_WRITE_ENABLED",
+    false,
+  );
+  const personalMemoryGitRemote =
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_GIT_REMOTE?.trim() || null;
+  const personalMemoryGitBranch =
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_GIT_BRANCH?.trim() || "main";
+  const personalMemoryWriterRoot =
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_WRITER_ROOT?.trim() || null;
+  const personalMemoryGbrainPath =
+    process.env.AI_EMPLOYEE_PERSONAL_MEMORY_GBRAIN_PATH?.trim() || null;
   if (personalMemoryTimeoutMs < 1_000 || personalMemoryTimeoutMs > 60_000) {
     throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_TIMEOUT_MS must be 1000-60000");
   }
@@ -327,6 +339,34 @@ export function loadConfig({
     }
     if (personalMemoryClientSecret.length < 24) {
       throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET is invalid");
+    }
+  }
+  if (personalMemoryWriteEnabled) {
+    if (!personalMemoryEnabled) {
+      throw new Error("Personal memory writes require the personal gbrain read base");
+    }
+    let remote;
+    try {
+      remote = new URL(personalMemoryGitRemote);
+    } catch {
+      throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_GIT_REMOTE is invalid");
+    }
+    if (
+      remote.protocol !== "https:" ||
+      remote.hostname !== "github.com" ||
+      remote.username || remote.password || remote.search || remote.hash
+    ) {
+      throw new Error("Personal memory Git remote must be credential-free GitHub HTTPS");
+    }
+    if (
+      !/^[A-Za-z0-9._/-]{1,120}$/u.test(personalMemoryGitBranch) ||
+      personalMemoryGitBranch.includes("..")
+    ) throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_GIT_BRANCH is invalid");
+    if (!personalMemoryWriterRoot || !isAbsolute(personalMemoryWriterRoot)) {
+      throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_WRITER_ROOT must be absolute");
+    }
+    if (!personalMemoryGbrainPath || !isAbsolute(personalMemoryGbrainPath)) {
+      throw new Error("AI_EMPLOYEE_PERSONAL_MEMORY_GBRAIN_PATH must be absolute");
     }
   }
   const alertIntervalMs = positiveNumber(
@@ -569,6 +609,11 @@ export function loadConfig({
     personalMemoryClientSecret,
     personalMemoryTimeoutMs,
     personalMemoryMaxResults,
+    personalMemoryWriteEnabled,
+    personalMemoryGitRemote,
+    personalMemoryGitBranch,
+    personalMemoryWriterRoot,
+    personalMemoryGbrainPath,
     requireMessageReconciliation: boolean(
       "AI_EMPLOYEE_REQUIRE_MESSAGE_RECONCILIATION",
       false,

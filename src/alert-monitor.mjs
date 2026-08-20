@@ -4,6 +4,10 @@ import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { loadConfig } from "./config.mjs";
 import { evaluateHealth } from "./health-check.mjs";
+import {
+  evaluateFoursdayHealth,
+  inspectFoursdayRuntimeStatus,
+} from "./foursday-runtime-status.mjs";
 import { applyProductionConfigFile } from "./production-config-file.mjs";
 import { createProductionStore } from "./production-store.mjs";
 import { isMainModule } from "./main-module.mjs";
@@ -14,12 +18,17 @@ function alertCodes(health) {
   if (!checks.database) codes.push("database_unavailable");
   if (!checks.dwsExecutable) codes.push("dws_unavailable");
   if (!checks.codexExecutable) codes.push("codex_unavailable");
+  if (checks.runtime?.splitBrain) codes.push("runtime_split_brain");
+  else if (checks.runtime?.intentionallyStopped) codes.push("runtime_intentionally_stopped");
+  else if (checks.runtime && !checks.runtime.ready) codes.push("hermes_runtime_unhealthy");
   if (checks.paused) codes.push("system_paused");
   if (checks.deadTasks > 0) codes.push("dead_tasks");
   if (checks.unknownSends > 0) codes.push("unknown_sends");
   if (checks.failedWorkPlans > 0) codes.push("failed_work_plans");
   if (checks.executingWorkPlans > 0) codes.push("executing_work_plans");
   if (checks.expiredExecutionLeases > 0) codes.push("expired_execution_leases");
+  if (checks.pendingMemoryRetirements > 0) codes.push("pending_memory_retirements");
+  if (checks.blockedMemoryCandidates > 0) codes.push("blocked_memory_candidates");
   for (const [component, value] of Object.entries(checks.heartbeats ?? {})) {
     if (!value.healthy) codes.push(`heartbeat_stale:${component}`);
   }
@@ -46,6 +55,8 @@ function alertPayload(health, codes, now) {
       expiredExecutionLeases: Number(
         health.checks.expiredExecutionLeases ?? 0,
       ),
+      pendingMemoryRetirements: Number(health.checks.pendingMemoryRetirements ?? 0),
+      blockedMemoryCandidates: Number(health.checks.blockedMemoryCandidates ?? 0),
       pendingMessages: Number(health.checks.pendingMessages ?? 0),
       remainingMissingMessages: Number(
         health.checks.messageCoverage?.remainingMissing ?? 0,
@@ -194,11 +205,14 @@ export async function runAlertCheck({
   fetchImpl = null,
   lookupImpl = dnsLookup,
   requestImpl = httpsRequest,
+  runtimeStatusProvider = null,
 } = {}) {
   if (config.alertWebhookUrl && !config.alertWebhookSecret) {
     throw new Error("Alert webhook secret is required when webhook is configured");
   }
-  const health = await evaluateHealth({ store, config, now });
+  const health = runtimeStatusProvider
+    ? await evaluateFoursdayHealth({ store, config, now, runtimeStatusProvider })
+    : await evaluateHealth({ store, config, now });
   await store.recordAvailabilitySample?.(health.ready, {
     now,
     intervalMs: config.availabilitySampleIntervalMs,
@@ -274,13 +288,14 @@ export async function runAlertCheck({
 export async function startAlertMonitor({
   config = loadConfig({ requireTargets: false, production: true }),
   store = null,
+  runtimeStatusProvider = inspectFoursdayRuntimeStatus,
 } = {}) {
   store = store ?? (await createProductionStore(config));
   let stopped = false;
   let timer = null;
   const check = async () => {
     try {
-      await runAlertCheck({ store, config });
+      await runAlertCheck({ store, config, runtimeStatusProvider });
     } catch (error) {
       console.error(JSON.stringify({ type: "alert.check_failed", error: error.message }));
     }

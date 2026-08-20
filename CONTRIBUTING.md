@@ -1,6 +1,6 @@
 # Contributing to Foursday
 
-**English** · [简体中文](./CONTRIBUTING_ZH.md)
+**English** · [简体中文](./docs/指南/参与贡献.md)
 
 Thank you for helping improve Foursday. This project treats workplace messaging and external actions as production systems, so authorization boundaries, failure paths, and verifiable evidence are first-class requirements.
 

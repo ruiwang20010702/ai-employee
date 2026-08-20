@@ -1,6 +1,6 @@
 # Foursday V3 Architecture
 
-Status: Gate 2 complete. The production service still uses the legacy Node.js governed runtime; the Hermes production migration is not active.
+Status: Gate 2 complete. Production is intentionally paused with both managed and native Gateways stopped and disabled; the native Hermes migration is not active.
 
 ## Decision
 
@@ -8,8 +8,8 @@ Foursday is a thin distribution on exact Hermes upstream `v2026.8.18` / `0.20.4`
 
 ```text
 Pinned Hermes upstream
-+ one locked three-file Session workspace patch
-+ external Foursday plugins
++ zero Hermes core patches
++ one Foursday composition plugin with four profile-scoped components
 + Foursday Profile and Skills
 + product UI and independent high-risk exits
 ```
@@ -36,17 +36,18 @@ flowchart LR
 
 The host owns DWS, gbrain OAuth, and future high-risk credentials. Agent tool subprocesses own none of them.
 
-## Upstream and patch
+## Upstream and extension boundary
 
 `hermes/upstream.lock.json` binds the official credential-free HTTPS repository, full commit, release, Python range, MIT license, and license digest.
 
-The single patch changes only:
-
-- `gateway/session.py` — persist `workspace_path`;
-- `gateway/platforms/base.py` — create sources with a workspace;
-- `gateway/run.py` — bind the workspace as Session cwd.
-
-Patch digest and file list are locked. Upstream Session/Platform/env/merge/interrupt tests pass 202 with one conditional upstream skip.
+The native path does not modify `gateway/session.py`,
+`gateway/platforms/base.py`, `gateway/run.py`, or any other Hermes core file.
+The DWS adapter routes each turn and opens a Python `ContextVar` scope around
+the official `handle_message` call. The Foursday `pre_tool_call` Hook reads that
+scope, canonicalizes terminal and file paths into the registered project, and
+blocks escape. The scope is reset after the turn, so concurrent sessions do not
+share workspaces. The old locked three-file patch remains only in the stopped
+managed-runtime recovery tree and is not packaged by the native Profile.
 
 ## DWS personal DingTalk
 
@@ -119,22 +120,22 @@ npm run hermes:setup
 npm run hermes:setup -- --apply
 ```
 
-The one-command installer validates prerequisites and runs the pinned upstream, isolated environment, patch layer, and Foursday distribution as three idempotent stages confined to `.runtime/hermes-poc`. Each stage remains independently available for recovery. The installer is rollback-safe, denies built-in tool override permission, and never starts the Gateway or copies credentials.
+The one-command installer verifies the official installer from the pinned full upstream commit, installs native Hermes, and installs a `foursday` Profile distribution. The Profile contains the DWS, project-router, personal-gbrain and hard-boundary plugins, Profile-owned host bridges and Skills. Project cwd is applied per turn through ContextVar plus the official `pre_tool_call` Hook, so the new path has zero Hermes core patches.
 
-The persistent shadow Gateway now uses an Application Support release, a Node launchd supervisor, a venv-bound Hermes child, a private DWS checkpoint, and a read-only registry. Active migration still requires task drain, DWS single-writer ownership, cursor continuity, a cutover receipt, and verified rollback. New and legacy runtimes must never auto-send to the same conversation concurrently.
+The currently deployed managed Gateway still uses the prior Application Support release and custom supervisor. The target uses the native profile-scoped `ai.hermes.gateway-foursday` service. Active migration still requires a send-disabled native shadow, DWS single-writer ownership, cursor continuity, evidence, and verified rollback. New and current Gateways must never auto-send to the same conversation concurrently.
 
 ## Module map
 
 | Concern | Source |
 |---|---|
 | Upstream lock | `src/hermes-upstream.mjs`, `hermes/upstream.lock.json` |
-| Candidate/patch/install | `src/hermes-candidate.mjs`, `src/hermes-patches.mjs`, `scripts/*Hermes*.mjs` |
+| Native install/profile | `src/foursday-hermes-native-install.mjs`, `src/foursday-native-profile-config.mjs` |
 | DWS sidecar/plugin | `src/hermes-dws-sidecar.mjs`, `hermes/plugins/dws_personal/` |
 | Project router | `hermes/plugins/project_router/` |
-| gbrain bridge | `src/hermes-personal-memory-context.mjs` |
+| gbrain bridge/write lifecycle | `src/hermes-personal-memory-context.mjs`, `hermes/plugins/gbrain_memory/`, `src/personal-gbrain-*.mjs` |
 | Hard boundary | `hermes/plugins/foursday_boundary/` |
-| Persistent shadow service | `src/hermes-production-service.mjs`, `src/hermes-gateway-launcher.mjs`, `scripts/管理Hermes常驻服务.mjs` |
-| Shadow acceptance / cutover | `src/hermes-shadow-acceptance.mjs`, `scripts/生成Hermes影子验收.mjs`, `src/hermes-cutover.mjs`, `scripts/切换Hermes生产运行时.mjs` |
+| Native Gateway | `src/foursday-native-gateway.mjs`, `scripts/管理Foursday原生Gateway.mjs` |
+| Shadow acceptance / native cutover | `src/hermes-shadow-acceptance.mjs`, `scripts/生成Hermes影子验收.mjs`, `src/foursday-native-cutover.mjs`, `scripts/管理Foursday原生Gateway.mjs` |
 | Profile/Skill | `hermes/profile/`, `hermes/skills/` |
 | Shadow/evidence tests | `hermes/shadow_runner.py`, `hermes/tests/`, `test/hermes-*.test.mjs` |
 

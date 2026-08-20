@@ -24,6 +24,13 @@ export async function previousReleaseSupportsCapabilityBudget(previousRelease) {
   );
 }
 
+export async function previousReleaseSupportsHermesMemoryCandidates(previousRelease) {
+  return previousReleaseIncludesMigration(
+    previousRelease,
+    "024_Hermes个人记忆候选.sql",
+  );
+}
+
 async function previousReleaseIncludesMigration(previousRelease, filename) {
   if (!previousRelease) return false;
   const migration = join(
@@ -50,13 +57,16 @@ export async function verifyServiceRollbackState({
     const [
       targetSupportsContinuation,
       targetSupportsCapabilityBudget,
+      targetSupportsHermesMemoryCandidates,
     ] = await Promise.all([
       previousReleaseSupportsContinuation(previousRelease),
       previousReleaseSupportsCapabilityBudget(previousRelease),
+      previousReleaseSupportsHermesMemoryCandidates(previousRelease),
     ]);
     return assertServiceRollbackState(await inspectServiceRollbackState(pool, {
       targetSupportsContinuation,
       targetSupportsCapabilityBudget,
+      targetSupportsHermesMemoryCandidates,
     }));
   } finally {
     if (ownedPool) await pool.end();
@@ -84,6 +94,9 @@ if (isMainModule(import.meta.url)) {
       compatible: false,
       errorCode: error.code ?? "service_rollback_guard_failed",
       activeContinuationTasks: error.count ?? null,
+      hermesMemoryCandidateRows: error.code === "service_rollback_hermes_memory_candidates_present"
+        ? error.count ?? null
+        : null,
     }, null, 2));
     process.exitCode = 1;
   }

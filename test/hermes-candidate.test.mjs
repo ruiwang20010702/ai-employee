@@ -17,6 +17,8 @@ const lock = {
   license: "MIT",
   licenseSha256: "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6",
   pythonRequires: ">=3.11,<3.14",
+  installerPath: "scripts/install.sh",
+  installerSha256: "0582d9b1562efcb6e0ac62f4451021667830b830a72ce7d91eaea9fee8b6c09b",
 };
 
 test("Hermes 候选计划只写 Foursday 隔离目录并固定提交", async (t) => {

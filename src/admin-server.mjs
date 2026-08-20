@@ -10,6 +10,10 @@ import { capabilityCatalog } from "./capability-policy.mjs";
 import { loadConfig } from "./config.mjs";
 import { evaluateHealth } from "./health-check.mjs";
 import {
+  evaluateFoursdayHealth,
+  inspectFoursdayRuntimeStatus,
+} from "./foursday-runtime-status.mjs";
+import {
   applyProductionConfigFile,
   defaultProductionConfigPath,
 } from "./production-config-file.mjs";
@@ -427,6 +431,7 @@ const privacyEligibleCountKeys = Object.freeze([
   "capabilityBudgets",
   "timeReturns",
   "workTriggers",
+  "hermesMemoryCandidates",
   "auditEvents",
   "identityReferences",
 ]);
@@ -435,6 +440,7 @@ const privacyBlockedCountKeys = Object.freeze([
   "messages",
   "workPlans",
   "workTriggers",
+  "hermesMemoryCandidates",
   "scopedPauses",
 ]);
 
@@ -606,6 +612,7 @@ export async function startAdminServer({
   manifestLoader = loadProjectManifests,
   recipeLoader = loadWorkRecipes,
   artifactRuntimeFactory = null,
+  runtimeStatusProvider = inspectFoursdayRuntimeStatus,
   adminLoginConfigPath = process.env.AI_EMPLOYEE_CONFIG_FILE ??
     defaultProductionConfigPath(),
 } = {}) {
@@ -945,13 +952,38 @@ export async function startAdminServer({
     try {
       if (request.method === "GET" && url.pathname === "/api/overview") {
         const [health, plans, memories, capabilities] = await Promise.all([
-          evaluateHealth({ store, config }),
+          evaluateFoursdayHealth({ store, config, runtimeStatusProvider }),
           store.listWorkPlans({ limit: 100 }),
           store.listMemories({ status: "confirmed", limit: 100 }),
           capabilitySnapshot(config),
         ]);
         json(response, 200, {
           ready: health.ready,
+          runtime: health.runtime ? {
+            ready: Boolean(health.runtime.ready),
+            splitBrain: Boolean(health.runtime.splitBrain),
+            intentionallyStopped: Boolean(health.runtime.intentionallyStopped),
+            current: health.runtime.current ? {
+              runtime: health.runtime.current.runtime,
+              label: health.runtime.current.label,
+              mode: health.runtime.current.mode,
+              sendEnabled: health.runtime.current.sendEnabled,
+            } : null,
+            native: {
+              installed: Boolean(health.runtime.native?.installed),
+              running: Boolean(health.runtime.native?.running),
+              serviceEnabled: health.runtime.native?.serviceEnabled ?? null,
+              safeStopped: Boolean(health.runtime.native?.safeStopped),
+              mode: health.runtime.native?.mode ?? "unknown",
+            },
+            managed: {
+              installed: Boolean(health.runtime.managed?.installed),
+              running: Boolean(health.runtime.managed?.running),
+              serviceEnabled: health.runtime.managed?.serviceEnabled ?? null,
+              safeStopped: Boolean(health.runtime.managed?.safeStopped),
+              mode: health.runtime.managed?.mode ?? "unknown",
+            },
+          } : null,
           paused: health.state.paused,
           checks: health.checks,
           taskCounts: health.state.tasks,
@@ -965,15 +997,21 @@ export async function startAdminServer({
           confirmedMemoryCount: memories.length,
           memoryAuthority: {
             mode: config.memoryAuthorityMode ?? "gbrain",
-            writeEnabled: config.memoryAuthorityWrite === true,
+            writeEnabled:
+              config.personalMemoryWriteEnabled === true ||
+              config.memoryAuthorityWrite === true,
             autoConfirm: config.memoryAuthorityAutoConfirm === true,
             durableStore: "gbrain_markdown",
             runtimeStore: "postgresql",
           },
           projectCount: capabilities.projects.length,
-          sendMode: config.capabilities.has("send_message")
-            ? "真实发送已启用"
-            : "真实发送关闭",
+          sendMode: health.runtime?.current
+            ? health.runtime.current.sendEnabled
+              ? "Hermes 真实发送已启用"
+              : "Hermes 影子发送关闭"
+            : config.capabilities.has("send_message")
+              ? "真实发送已启用"
+              : "真实发送关闭",
         });
         return;
       }

@@ -36,7 +36,7 @@ Personal PRIVATE gbrain Git is the only durable business-knowledge authority; gb
 
 The host bridge requires `default + read-only OAuth`, retrieves exact routed pages, filters sensitive content, and does not expose the credential to Agent tools.
 
-V3 P0 does not automatically write Session content back to gbrain. Future durable promotion must follow source → dedupe → privacy → conflict → Markdown write-through → exact read-back. Raw messages, approvals, leases, and temporary execution state never promote.
+V3.1 queues only low-risk, file-backed `atom`, `prospective`, and pointer `source` candidates. Durable promotion follows requester/session source binding → dedupe → privacy → conflict → an isolated checkout of the owner's PRIVATE gbrain Git → Markdown write-through → default-source projection → exact read-back. Person, project, or time erasure scrubs the encrypted queue and retires promoted pages through the same Git/read-back path. Raw messages, approvals, leases, and temporary execution state never promote.
 
 ## Removed from the personal default
 
@@ -47,4 +47,4 @@ V3 P0 does not automatically write Session content back to gbrain. Future durabl
 - a second Foursday business-memory repository;
 - a self-built full Agent Loop.
 
-See the [status/delete-zone matrix](../完成度矩阵.md) and [Gate 2 report](../自主工作分身迁移验收报告.md).
+See the [status/delete-zone matrix](../完成度矩阵.md) and [Gate 2 report](../历史/自主工作分身迁移验收报告.md).

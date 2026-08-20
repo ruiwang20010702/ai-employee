@@ -124,6 +124,10 @@ export async function evaluateHealth({
       (state.workPlans?.executing ?? 0) + (state.workPlans?.verifying ?? 0),
     expiredExecutionLeases: state.expiredExecutionLeases ?? 0,
     pendingMessages: state.pendingMessages,
+    pendingMemoryRetirements:
+      (state.hermesMemoryCandidates?.retirement_pending ?? 0) +
+      (state.hermesMemoryCandidates?.retiring ?? 0),
+    blockedMemoryCandidates: state.hermesMemoryCandidates?.blocked ?? 0,
     checkpoints: state.checkpoints.length,
     heartbeats,
     operationalChecks,
@@ -140,6 +144,8 @@ export async function evaluateHealth({
     checks.failedWorkPlans === 0 &&
     checks.executingWorkPlans === 0 &&
     checks.expiredExecutionLeases === 0 &&
+    checks.pendingMemoryRetirements === 0 &&
+    checks.blockedMemoryCandidates === 0 &&
     Object.values(heartbeats).every((heartbeat) => heartbeat.healthy) &&
     Object.values(operationalChecks).every((check) => check.healthy) &&
     (!messageCoverageCheck.required || messageCoverageCheck.healthy);
@@ -157,6 +163,12 @@ export function prometheusMetrics(health) {
     "# HELP ai_employee_unknown_sends Sends requiring manual reconciliation.",
     "# TYPE ai_employee_unknown_sends gauge",
     `ai_employee_unknown_sends ${health.checks.unknownSends}`,
+    "# HELP foursday_pending_memory_retirements Personal gbrain pages awaiting verified retirement.",
+    "# TYPE foursday_pending_memory_retirements gauge",
+    `foursday_pending_memory_retirements ${health.checks.pendingMemoryRetirements}`,
+    "# HELP foursday_blocked_memory_candidates Personal gbrain candidates requiring operator review.",
+    "# TYPE foursday_blocked_memory_candidates gauge",
+    `foursday_blocked_memory_candidates ${health.checks.blockedMemoryCandidates}`,
     "# HELP ai_employee_failed_work_plans Work plans requiring review.",
     "# TYPE ai_employee_failed_work_plans gauge",
     `ai_employee_failed_work_plans ${health.checks.failedWorkPlans}`,

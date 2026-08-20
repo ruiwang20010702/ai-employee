@@ -58,6 +58,13 @@ export function validateHermesUpstreamLock(input) {
   if (input.pythonRequires !== ">=3.11,<3.14") {
     throw new Error("Hermes upstream Python range changed");
   }
+  if (input.installerPath !== "scripts/install.sh") {
+    throw new Error("Hermes upstream installer path changed");
+  }
+  const installerSha256 = exactString(input.installerSha256, "installerSha256");
+  if (!/^[a-f0-9]{64}$/u.test(installerSha256)) {
+    throw new Error("Hermes upstream installer digest is invalid");
+  }
   return {
     schemaVersion: 1,
     repository,
@@ -67,6 +74,8 @@ export function validateHermesUpstreamLock(input) {
     license: "MIT",
     licenseSha256,
     pythonRequires: ">=3.11,<3.14",
+    installerPath: "scripts/install.sh",
+    installerSha256,
   };
 }
 

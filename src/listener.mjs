@@ -1,13 +1,13 @@
 import { watch } from "node:fs";
 import { createHash } from "node:crypto";
-import { access, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { loadConfig } from "./config.mjs";
 import { bindMessagesToSender, DwsAdapter } from "./dws.mjs";
 import { createProductionStore } from "./production-store.mjs";
 import { safeErrorCode } from "./logging.mjs";
 import { isMainModule } from "./main-module.mjs";
 import { processMobileApprovalCommands } from "./mobile-approval.mjs";
+import { discoverWatchDirectories } from "./dingtalk-watch-directories.mjs";
+export { discoverWatchDirectories } from "./dingtalk-watch-directories.mjs";
 
 function log(type, fields = {}) {
   console.log(JSON.stringify({ type, at: new Date().toISOString(), ...fields }));
@@ -38,29 +38,6 @@ export function fetchStart({
     }
   }
   return new Date(now.getTime() - initialLookbackHours * 60 * 60 * 1000);
-}
-
-export async function discoverWatchDirectories(dingtalkRoot) {
-  const entries = await readdir(dingtalkRoot, { withFileTypes: true }).catch(
-    () => [],
-  );
-  const candidates = entries
-    .filter((entry) => entry.isDirectory() && entry.name.endsWith("_v3"))
-    .flatMap((entry) => {
-      const accountDirectory = join(dingtalkRoot, entry.name);
-      return [
-        join(accountDirectory, "DBFiles"),
-        join(accountDirectory, "Sync_v2", "point"),
-        join(accountDirectory, "SyncPoint"),
-      ];
-    });
-  const existing = [];
-  for (const directory of candidates) {
-    if (await access(directory).then(() => true).catch(() => false)) {
-      existing.push(directory);
-    }
-  }
-  return [...new Set(existing)];
 }
 
 export async function ingestTarget({

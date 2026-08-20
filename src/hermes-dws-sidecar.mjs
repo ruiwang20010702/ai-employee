@@ -4,7 +4,7 @@ import { access, chmod, mkdir, readFile, rename, writeFile } from "node:fs/promi
 import { dirname, isAbsolute, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DwsAdapter, isAutomatedSelfMessage } from "./dws.mjs";
-import { discoverWatchDirectories } from "./listener.mjs";
+import { discoverWatchDirectories } from "./dingtalk-watch-directories.mjs";
 import { isMainModule } from "./main-module.mjs";
 
 function csv(value) {

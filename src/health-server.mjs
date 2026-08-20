@@ -1,12 +1,17 @@
 import { createServer } from "node:http";
 import { loadConfig } from "./config.mjs";
-import { evaluateHealth, prometheusMetrics } from "./health-check.mjs";
+import { prometheusMetrics } from "./health-check.mjs";
+import {
+  evaluateFoursdayHealth,
+  inspectFoursdayRuntimeStatus,
+} from "./foursday-runtime-status.mjs";
 import { createProductionStore } from "./production-store.mjs";
 import { isMainModule } from "./main-module.mjs";
 
 export async function startHealthServer({
   config = loadConfig({ requireTargets: false, production: true }),
   store = null,
+  runtimeStatusProvider = inspectFoursdayRuntimeStatus,
 } = {}) {
   if (
     !["127.0.0.1", "::1", "localhost"].includes(config.healthHost) &&
@@ -33,9 +38,10 @@ export async function startHealthServer({
       return;
     }
     try {
-      const health = await evaluateHealth({
+      const health = await evaluateFoursdayHealth({
         store,
         config,
+        runtimeStatusProvider,
         includeOperationalMetrics: request.url === "/metrics",
       });
       if (request.url === "/ready") {

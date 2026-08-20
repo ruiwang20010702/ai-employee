@@ -20,6 +20,7 @@ const defaultRoot = fileURLToPath(new URL("../", import.meta.url));
 const schemaVersion = "ai-employee-rollback-baseline/v1";
 const continuationMigration = "017_等待信息任务链.sql";
 const capabilityBudgetMigration = "018_能力次数预算.sql";
+const hermesMemoryCandidateMigration = "024_Hermes个人记忆候选.sql";
 const capabilityBudgetGuard = "capability_budget_target_support_required";
 const capabilityBudgetConstraint = "work_plans_capability_budget_required_check";
 const capabilityBudgetRejectionCode =
@@ -158,11 +159,15 @@ export function buildRollbackVerificationPlan({
   const targetSupportsCapabilityBudget = baselineVersions.has(
     capabilityBudgetMigration,
   );
+  const targetSupportsHermesMemoryCandidates = baselineVersions.has(
+    hermesMemoryCandidateMigration,
+  );
   return {
     legacyTestMigrations,
     guardedMigrations,
     targetSupportsContinuation,
     targetSupportsCapabilityBudget,
+    targetSupportsHermesMemoryCandidates,
     requiresCapabilityBudgetPersistenceProbe: migrations.some(
       (migration) =>
         migration.version === capabilityBudgetMigration &&
@@ -540,6 +545,8 @@ export async function verifyRollbackCompatibility({
             verificationPlan.targetSupportsContinuation,
           targetSupportsCapabilityBudget:
             verificationPlan.targetSupportsCapabilityBudget,
+          targetSupportsHermesMemoryCandidates:
+            verificationPlan.targetSupportsHermesMemoryCandidates,
         });
         const expectedRejectionCode =
           guardedMigration.guard === capabilityBudgetGuard &&
@@ -603,30 +610,78 @@ export async function verifyRollbackCompatibility({
         const applied = await migrate(pool, {
           migrationLoader: async () => postGuardVerificationPlan.legacyTestMigrations,
         });
-        const status = await inspectMigrationStatus(pool, { migrationsDirectory });
-        assertMigrationStatus(status);
-        assertLegacyCompatibilityBoundary(status, postGuardVerificationPlan);
+        const legacyStatus = await inspectMigrationStatus(pool, { migrationsDirectory });
+        assertMigrationStatus(legacyStatus, { allowPending: true });
+        const baselineServiceTestRuns = [];
+        assertLegacyCompatibilityBoundary(legacyStatus, postGuardVerificationPlan);
         await runBaselineServiceTests({
           projectRoot,
           databaseUrl: scopedDatabaseUrl,
           manifest: manifest.postGuardBaseline,
           runner,
         });
+        baselineServiceTestRuns.push({
+          passed: true,
+          throughMigration: postGuardVerificationPlan.legacyTestMigrations.at(-1)?.version,
+          schemaMigrations: postGuardVerificationPlan.legacyTestMigrations.length,
+          reason: "post_guard_backward_compatibility",
+        });
+        const guardedApplied = [];
+        const serviceRollbackGuards = [];
+        for (const guardedMigration of postGuardVerificationPlan.guardedMigrations) {
+          const migrationIndex = migrations.findIndex(
+            (migration) => migration.version === guardedMigration.version,
+          );
+          const newlyApplied = await migrate(pool, {
+            migrationLoader: async () => migrations.slice(0, migrationIndex + 1),
+          });
+          guardedApplied.push(...newlyApplied);
+          const rollbackState = await inspectServiceRollbackState(pool, {
+            targetSupportsContinuation:
+              postGuardVerificationPlan.targetSupportsContinuation,
+            targetSupportsCapabilityBudget:
+              postGuardVerificationPlan.targetSupportsCapabilityBudget,
+            targetSupportsHermesMemoryCandidates:
+              postGuardVerificationPlan.targetSupportsHermesMemoryCandidates,
+          });
+          const guardEvidence = {
+            version: guardedMigration.version,
+            guard: guardedMigration.guard,
+            ...verifyServiceRollbackGuardEvidence(rollbackState),
+          };
+          serviceRollbackGuards.push(guardEvidence);
+          if (guardEvidence.rollbackAllowed) {
+            await runBaselineServiceTests({
+              projectRoot,
+              databaseUrl: scopedDatabaseUrl,
+              manifest: manifest.postGuardBaseline,
+              runner,
+            });
+            baselineServiceTestRuns.push({
+              passed: true,
+              throughMigration: guardedMigration.version,
+              schemaMigrations: migrationIndex + 1,
+              reason: "post_guard_state_guard_allowed",
+            });
+          }
+        }
+        const status = await inspectMigrationStatus(pool, { migrationsDirectory });
+        assertMigrationStatus(status);
         return {
-          applied,
+          applied: [...applied, ...guardedApplied],
           currentMigrationCount: status.applied,
-          baselineServiceTestRun: {
-            passed: true,
-            throughMigration: migrations.at(-1)?.version,
-            schemaMigrations: status.applied,
-            reason: "post_guard_backward_compatibility",
-          },
+          baselineServiceTestRuns,
+          serviceRollbackGuards,
         };
       },
     });
   }
 
-  const rollbackAllowed = verification.serviceRollbackGuards.every(
+  const allServiceRollbackGuards = [
+    ...verification.serviceRollbackGuards,
+    ...(postGuardVerification?.serviceRollbackGuards ?? []),
+  ];
+  const rollbackAllowed = allServiceRollbackGuards.every(
     (guard) => guard.rollbackAllowed,
   );
   return {
@@ -644,12 +699,15 @@ export async function verifyRollbackCompatibility({
     baselineServiceTestRuns: postGuardVerification
       ? [
         ...verification.baselineServiceTestRuns,
-        postGuardVerification.baselineServiceTestRun,
+        ...postGuardVerification.baselineServiceTestRuns,
       ]
       : verification.baselineServiceTestRuns,
-    guardedMigrations: verificationPlan.guardedMigrations,
+    guardedMigrations: [
+      ...verificationPlan.guardedMigrations,
+      ...(postGuardVerificationPlan?.guardedMigrations ?? []),
+    ],
     capabilityBudgetPersistence: verification.capabilityBudgetPersistence,
-    serviceRollbackGuards: verification.serviceRollbackGuards,
+    serviceRollbackGuards: allServiceRollbackGuards,
     rollbackAllowed,
     rollbackOutcome: rollbackOutcome(rollbackAllowed),
     testFile: manifest.testFile,

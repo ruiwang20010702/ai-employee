@@ -193,14 +193,31 @@ def _profile_path(project: dict[str, str]) -> str:
     return str(target)
 
 
+def _routed_project() -> Optional[dict[str, str]]:
+    try:
+        from project_router.runtime_context import current_routed_project
+
+        project = current_routed_project()
+    except Exception:
+        return None
+    if project is None:
+        return None
+    return {
+        "id": project.id,
+        "root": project.root,
+        "isolation": project.isolation,
+    }
+
+
 def _sandbox_tool_call(tool_name: str, args: Any):
     normalized = str(tool_name or "").strip().lower()
-    if not isinstance(args, dict) or not _projects():
+    routed = _routed_project()
+    if not isinstance(args, dict) or (not routed and not _projects()):
         return None
     if normalized in _COMMAND_TOOLS:
         command = args.get("command") or args.get("cmd")
         cwd = str(args.get("cwd") or "")
-        project = _project_for_path(cwd)
+        project = routed or _project_for_path(cwd)
         if not isinstance(command, str) or not project:
             return {
                 "action": "block",
@@ -208,6 +225,20 @@ def _sandbox_tool_call(tool_name: str, args: Any):
             }
         profile = _profile_path(project)
         rewritten = dict(args)
+        if routed:
+            if cwd:
+                requested = Path(cwd)
+                candidate = requested if requested.is_absolute() else Path(project["root"]) / requested
+                try:
+                    candidate.resolve(strict=False).relative_to(Path(project["root"]))
+                except ValueError:
+                    return {
+                        "action": "block",
+                        "message": "Foursday blocked a command that tried to leave the routed project.",
+                    }
+                rewritten["cwd"] = str(candidate.resolve(strict=False))
+            else:
+                rewritten["cwd"] = project["root"]
         rewritten["command" if "command" in args else "cmd"] = (
             f"/usr/bin/sandbox-exec -f {shlex.quote(profile)} "
             f"/bin/zsh -lc {shlex.quote(command)}"
@@ -215,7 +246,12 @@ def _sandbox_tool_call(tool_name: str, args: Any):
         return {"action": "modify", "args": rewritten}
     if normalized in _READ_FILE_TOOLS | _WRITE_FILE_TOOLS:
         path = str(args.get("path") or "")
-        project = _project_for_path(path)
+        project = routed or _project_for_path(path)
+        if routed and path and not Path(path).is_absolute():
+            rewritten = dict(args)
+            rewritten["path"] = str((Path(project["root"]) / path).resolve(strict=False))
+            args = rewritten
+            path = rewritten["path"]
         if not project:
             return {
                 "action": "block",
@@ -232,6 +268,8 @@ def _sandbox_tool_call(tool_name: str, args: Any):
                 "action": "block",
                 "message": "Foursday blocked a write in a read-only project workspace.",
             }
+        if routed:
+            return {"action": "modify", "args": args}
     if normalized in _WEB_TOOLS and _SECRET_MATERIAL.search(_text_args(args)):
         return {
             "action": "block",

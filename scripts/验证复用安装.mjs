@@ -80,7 +80,7 @@ async function packageFileGate(files, root) {
     "README.md",
     "docs/产品需求文档.md",
     "docs/完成度矩阵.md",
-    "docs/统一审查报告.md",
+    "docs/历史/统一审查报告.md",
     "scripts/初始化生产配置.mjs",
     "scripts/初始化钥匙串密钥.mjs",
     "scripts/新环境向导.mjs",
@@ -445,7 +445,9 @@ export async function verifyReusableInstallation({
     )).stdout);
     assert(
       Array.isArray(guideHelp.usage) &&
-      guideHelp.boundary.includes("不连接钉钉、AgentRuntime 或数据库"),
+      guideHelp.boundary.includes("不会启动 Gateway") &&
+      guideHelp.boundary.includes("所有预览零写") &&
+      Array.isArray(guideHelp.legacyGovernedSequence),
       "Installed reusable environment guide lost its read-only boundary",
     );
     const workspaceConfigA = join(workspaceA, ".runtime", "production.json");
@@ -655,6 +657,20 @@ export async function verifyReusableInstallation({
       !JSON.stringify(configuredGuideCheck).includes("reuse-target-user") &&
       !JSON.stringify(configuredGuideCheck).includes("reuse-self-user"),
       "Installed reusable environment guide exposed values or misread safe defaults",
+    );
+
+    const nativeInstallPreview = JSON.parse((await run(
+      installedGuide,
+      ["install"],
+      { cwd: runtimeDirectory },
+    )).stdout);
+    assert(
+      nativeInstallPreview.schema === "foursday-native-hermes-install/v1" &&
+      nativeInstallPreview.apply === false &&
+      nativeInstallPreview.installed === false &&
+      nativeInstallPreview.legacyRuntimeTouched === false &&
+      nativeInstallPreview.profile?.plugins?.includes("foursday_work_twin"),
+      "Installed Foursday CLI did not default to the native Hermes Profile plan",
     );
 
     const lifecycleDryRuns = [

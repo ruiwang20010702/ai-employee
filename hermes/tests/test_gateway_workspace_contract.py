@@ -1,48 +1,38 @@
-import os
-import tempfile
+from types import SimpleNamespace
 import unittest
 
-from agent.runtime_cwd import clear_session_cwd, resolve_agent_cwd
 from gateway.config import Platform
-from gateway.run import GatewayRunner
-from gateway.session import SessionContext, SessionSource
+from gateway.session import SessionSource
+from project_router.runtime_context import (
+    current_routed_principal_id,
+    current_routed_project,
+    routed_project_scope,
+)
 
 
 class GatewayWorkspaceContractTest(unittest.TestCase):
-    def test_session_source_roundtrip_preserves_project_workspace(self):
-        with tempfile.TemporaryDirectory() as workspace:
-            source = SessionSource(
-                platform=Platform.DINGTALK,
-                chat_id="direct-1",
-                chat_type="dm",
-                user_id="trusted-user",
-                workspace_path=workspace,
-            )
-            restored = SessionSource.from_dict(source.to_dict())
-            self.assertEqual(restored.workspace_path, os.path.realpath(workspace))
+    def test_native_session_source_remains_unpatched(self):
+        source = SessionSource(
+            platform=Platform.DINGTALK,
+            chat_id="direct-1",
+            chat_type="dm",
+            user_id="trusted-user",
+        )
+        restored = SessionSource.from_dict(source.to_dict())
+        self.assertEqual(restored.chat_id, "direct-1")
+        self.assertEqual(restored.user_id, "trusted-user")
+        self.assertFalse(hasattr(restored, "workspace_path"))
 
-    def test_gateway_binds_project_workspace_to_runtime_cwd(self):
-        with tempfile.TemporaryDirectory() as workspace:
-            source = SessionSource(
-                platform=Platform.DINGTALK,
-                chat_id="direct-1",
-                chat_type="dm",
-                user_id="trusted-user",
-                workspace_path=workspace,
-            )
-            runner = object.__new__(GatewayRunner)
-            runner.adapters = {}
-            tokens = runner._set_session_env(SessionContext(
-                source=source,
-                connected_platforms=[],
-                home_channels={},
-                session_key="agent:main:dws_personal:dm:direct-1",
-            ))
-            try:
-                self.assertEqual(str(resolve_agent_cwd()), os.path.realpath(workspace))
-            finally:
-                runner._clear_session_env(tokens)
-                clear_session_cwd()
+    def test_plugin_context_binds_project_and_principal_only_for_one_turn(self):
+        project = SimpleNamespace(id="project", root="/private/project")
+        route = SimpleNamespace(project=project)
+        self.assertIsNone(current_routed_project())
+        self.assertIsNone(current_routed_principal_id())
+        with routed_project_scope(route, principal_id="trusted-user"):
+            self.assertIs(current_routed_project(), project)
+            self.assertEqual(current_routed_principal_id(), "trusted-user")
+        self.assertIsNone(current_routed_project())
+        self.assertIsNone(current_routed_principal_id())
 
 
 if __name__ == "__main__":

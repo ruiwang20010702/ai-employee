@@ -9,8 +9,8 @@ Foursday is a personal-memory-driven Hermes work twin. This page maps canonical 
 | What is the product and how is it accepted? | [Product requirements](./product-requirements.md) |
 | What exists and how does it work? | [Architecture](./architecture.md) |
 | What is currently complete or intentionally removed? | [Chinese status matrix](../完成度矩阵.md) |
-| What passed Gate 2? | [Gate 2 report](../自主工作分身迁移验收报告.md) |
-| Why did the runtime change? | [Migration decision](../自主工作分身架构迁移方案.md) |
+| What passed Gate 2? | [Gate 2 report](../历史/自主工作分身迁移验收报告.md) |
+| Why did the runtime change? | [Migration decision](../历史/自主工作分身架构迁移方案.md) |
 | How does current production run? | [Legacy production runbook](../生产运维手册.md) |
 | What rules must contributors obey? | [Security](../../SECURITY.md), [Contributing](../../CONTRIBUTING.md) |
 
@@ -31,18 +31,18 @@ flowchart LR
 
 | Need | Source |
 |---|---|
-| Hermes upstream/patch | `src/hermes-upstream.mjs`, `src/hermes-patches.mjs`, `hermes/patches/` |
+| Native Hermes compatibility/install | `src/hermes-upstream.mjs`, `src/foursday-hermes-native-install.mjs` |
 | DWS personal DingTalk | `src/hermes-dws-sidecar.mjs`, `hermes/plugins/dws_personal/` |
 | Project routing | `hermes/plugins/project_router/` |
-| Personal gbrain | `src/hermes-personal-memory-context.mjs` |
+| Personal gbrain | `src/hermes-personal-memory-context.mjs`, `hermes/plugins/gbrain_memory/`, `src/personal-gbrain-*.mjs` |
 | Tool isolation/high risk | `hermes/plugins/foursday_boundary/` |
 | Profile and Skills | `hermes/profile/`, `hermes/skills/` |
-| Candidate install | `scripts/准备Hermes候选.mjs`, `scripts/准备Hermes补丁层.mjs`, `scripts/安装Hermes发行层.mjs` |
+| Native Profile/Gateway | `scripts/安装Foursday原生Hermes.mjs`, `scripts/配置Foursday原生Hermes.mjs`, `scripts/管理Foursday原生Gateway.mjs` |
 | Legacy production | `src/listener.mjs`, `src/worker.mjs`, `src/plan-executor.mjs` |
 
 ## State boundary
 
-- Tagged public preview and production still use the legacy Node.js runtime.
-- The local Hermes V3 candidate has complete P0/Gate 2 evidence.
-- A send-disabled, read-only Hermes shadow Gateway is running from an isolated Application Support release.
-- The legacy runtime remains the only sender and currently passes service readiness; active cutover is not authorized.
+- Production is intentionally paused; both Gateways are stopped and disabled, so there is currently no production sender.
+- The native Hermes Profile candidate has passed isolated profile installation and plugin validation only.
+- The native profile-scoped Gateway is not yet installed or running in production.
+- Production send authority does not transfer until a new shadow and single-writer cutover are explicitly authorized.

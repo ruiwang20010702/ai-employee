@@ -30,6 +30,9 @@ test("管理台内嵌脚本可以被浏览器解析", () => {
   assert.match(script, /plan-revise/u);
   assert.match(script, /\/api\/targets\//u);
   assert.match(script, /\/api\/privacy\/preview/u);
+  assert.match(script, /Hermes 记忆候选/u);
+  assert.match(script, /无待回收个人记忆/u);
+  assert.match(script, /Hermes 已安全停机/u);
   assert.match(script, /AbortSignal\.timeout\(10000\)/u);
   assert.match(script, /请求超时，请确认服务状态后重试/u);
   assert.match(script, /memoryRows\(\)\)\+'<\/section>'/u);
@@ -274,7 +277,17 @@ test("个人工作台历史项目导入先只读预览，再按摘要创建待�
   const store = await new Store(join(root, ".runtime", "admin.sqlite")).open();
   const { config } = fixture();
   config.projectsDirectory = projectsDirectory;
-  const service = await startAdminServer({ store, config });
+  const service = await startAdminServer({
+    store,
+    config,
+    runtimeStatusProvider: async () => ({
+      ready: false,
+      splitBrain: false,
+      current: null,
+      native: { installed: false, running: false, mode: "unknown" },
+      managed: { installed: false, running: false, mode: "unknown" },
+    }),
+  });
   const base = `http://127.0.0.1:${service.server.address().port}`;
   const readHeaders = {
     authorization: "Bearer read-secret",
@@ -978,7 +991,17 @@ function fixture({ taskReply = "准备回复" } = {}) {
 
 test("管理台强制读取和写入令牌，并返回安全页面", async () => {
   const { store, config, plan, task } = fixture();
-  const service = await startAdminServer({ store, config });
+  const service = await startAdminServer({
+    store,
+    config,
+    runtimeStatusProvider: async () => ({
+      ready: false,
+      splitBrain: false,
+      current: null,
+      native: { installed: false, running: false, mode: "unknown" },
+      managed: { installed: false, running: false, mode: "unknown" },
+    }),
+  });
   const { port } = service.server.address();
   const base = `http://127.0.0.1:${port}`;
   try {

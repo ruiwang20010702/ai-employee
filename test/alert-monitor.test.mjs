@@ -110,6 +110,7 @@ test("所有导致未就绪的工作计划状态都有明确告警原因", async
   store.state.tasks = {};
   store.state.workPlans = { failed: 2, executing: 1, verifying: 1 };
   store.state.expiredExecutionLeases = 3;
+  store.state.hermesMemoryCandidates = { retirement_pending: 1, blocked: 2 };
   const requests = [];
   const fetchImpl = async (_url, init) => {
     requests.push(init);
@@ -123,9 +124,11 @@ test("所有导致未就绪的工作计划状态都有明确告警原因", async
   });
   assert.equal(result.ready, false);
   assert.deepEqual(result.codes, [
+    "blocked_memory_candidates",
     "executing_work_plans",
     "expired_execution_leases",
     "failed_work_plans",
+    "pending_memory_retirements",
   ]);
   const payload = JSON.parse(requests[0].body);
   assert.deepEqual(payload.counts, {
@@ -134,6 +137,8 @@ test("所有导致未就绪的工作计划状态都有明确告警原因", async
     failedWorkPlans: 2,
     executingWorkPlans: 2,
     expiredExecutionLeases: 3,
+    pendingMemoryRetirements: 1,
+    blockedMemoryCandidates: 2,
     pendingMessages: 3,
     remainingMissingMessages: 0,
   });

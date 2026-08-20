@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 import foursday_boundary
 from foursday_boundary import classify_high_risk, on_pre_tool_call
+from project_router.registry import Project, RouteResult
+from project_router.runtime_context import routed_project_scope
 
 
 class FoursdayBoundaryTest(unittest.TestCase):
@@ -40,6 +42,36 @@ class FoursdayBoundaryTest(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertIsNone(classify_high_risk(tool, args))
                 self.assertIsNone(on_pre_tool_call(tool, args))
+
+    def test_routed_project_rewrites_relative_tools_without_core_workspace_patch(self):
+        with tempfile.TemporaryDirectory() as root:
+            project_root = str(Path(root).resolve())
+            hermes_home = str((Path(root) / "hermes").resolve())
+            Path(hermes_home).mkdir()
+            project = Project(
+                id="fixture",
+                name="Fixture",
+                aliases=("fixture",),
+                root=project_root,
+                git_remote=None,
+                gbrain_slugs=(),
+                run_instructions="",
+                isolation="workspace-write",
+            )
+            route = RouteResult("matched", project, project_root)
+            with patch.dict(os.environ, {"HERMES_HOME": hermes_home}, clear=False):
+                with routed_project_scope(route):
+                    command = on_pre_tool_call("exec_command", {"command": "pwd"})
+                    file_read = on_pre_tool_call("read_file", {"path": "README.md"})
+                    escaped = on_pre_tool_call(
+                        "exec_command",
+                        {"command": "pwd", "cwd": "/private"},
+                    )
+            self.assertEqual(command["action"], "modify")
+            self.assertEqual(command["args"]["cwd"], project_root)
+            self.assertEqual(file_read["action"], "modify")
+            self.assertEqual(file_read["args"]["path"], str(Path(project_root, "README.md")))
+            self.assertEqual(escaped["action"], "block")
 
     @unittest.skipUnless(sys.platform == "darwin", "macOS sandbox contract")
     def test_registered_workspace_command_cannot_read_an_unmounted_sibling(self):

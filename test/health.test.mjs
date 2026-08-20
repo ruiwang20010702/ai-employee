@@ -94,6 +94,22 @@ test("过期计划执行租约阻断就绪并进入指标", async () => {
   assert.match(prometheusMetrics(health), /ai_employee_expired_execution_leases 1/u);
 });
 
+test("个人 gbrain 回收积压和阻塞候选阻断就绪并进入指标", async () => {
+  const health = await evaluateHealth({
+    store: store({
+      hermesMemoryCandidates: { retirement_pending: 2, retiring: 1, blocked: 4 },
+    }),
+    config: { ...config, requiredComponents: [], requiredOperationalChecks: [] },
+    now: new Date("2026-07-31T10:00:00.000Z"),
+  });
+  assert.equal(health.ready, false);
+  assert.equal(health.checks.pendingMemoryRetirements, 3);
+  assert.equal(health.checks.blockedMemoryCandidates, 4);
+  const metrics = prometheusMetrics(health);
+  assert.match(metrics, /foursday_pending_memory_retirements 3/u);
+  assert.match(metrics, /foursday_blocked_memory_candidates 4/u);
+});
+
 test("失败或执行中的计划阻断严格业务就绪", async () => {
   for (const workPlans of [{ failed: 1 }, { executing: 1 }, { verifying: 1 }]) {
     const health = await evaluateHealth({

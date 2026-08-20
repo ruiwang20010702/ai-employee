@@ -1,6 +1,6 @@
 # Code of Conduct
 
-**English** · [简体中文](./CODE_OF_CONDUCT_ZH.md)
+**English** · [简体中文](./docs/指南/社区行为准则.md)
 
 ## Our pledge
 

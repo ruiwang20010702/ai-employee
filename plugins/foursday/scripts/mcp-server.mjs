@@ -168,6 +168,26 @@ function projectStatus(value) {
     : {};
   return {
     ready: Boolean(value.ready),
+    runtime: value.runtime && typeof value.runtime === "object" ? {
+      ready: Boolean(value.runtime.ready),
+      splitBrain: Boolean(value.runtime.splitBrain),
+      current: value.runtime.current ? {
+        runtime: String(value.runtime.current.runtime ?? "unknown").slice(0, 80),
+        label: String(value.runtime.current.label ?? "").slice(0, 100),
+        mode: String(value.runtime.current.mode ?? "unknown").slice(0, 20),
+        sendEnabled: Boolean(value.runtime.current.sendEnabled),
+      } : null,
+      native: {
+        installed: Boolean(value.runtime.native?.installed),
+        running: Boolean(value.runtime.native?.running),
+        mode: String(value.runtime.native?.mode ?? "unknown").slice(0, 20),
+      },
+      managed: {
+        installed: Boolean(value.runtime.managed?.installed),
+        running: Boolean(value.runtime.managed?.running),
+        mode: String(value.runtime.managed?.mode ?? "unknown").slice(0, 20),
+      },
+    } : null,
     paused: Boolean(value.paused),
     sendMode: String(value.sendMode ?? "状态未知").slice(0, 80),
     taskCounts: counts(value.taskCounts),

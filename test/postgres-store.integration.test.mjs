@@ -11,11 +11,16 @@ import { memoryDeletionConfirmation } from "../src/memory-portability.mjs";
 import { migrate } from "../src/migrate.mjs";
 import { createPostgresPool } from "../src/postgres.mjs";
 import { PostgresStore } from "../src/postgres-store.mjs";
+import { PersonalGbrainCandidateStore } from "../src/personal-gbrain-candidate-store.mjs";
 import { assessWorkPlan } from "../src/work-plan.mjs";
 import { workPlanMemoryEvidenceScope } from "../src/work-evidence.mjs";
 import { capabilityBudgetForPlan } from "../src/capability-budget.mjs";
 import { buildGraphProjection, createGraphEdge, createGraphNode } from "../src/governed-work-graph.mjs";
 import { draftSha256 } from "../src/decision-quality.mjs";
+import {
+  assertServiceRollbackState,
+  inspectServiceRollbackState,
+} from "../src/rollback-state-guard.mjs";
 import {
   applyProjectMemorySync,
   previewProjectMemorySync,
@@ -61,6 +66,7 @@ async function fixture(t) {
   await migrate(pool);
   const store = await new PostgresStore(settings, { pool }).open();
   t.after(async () => {
+    await pool.query("DELETE FROM hermes_memory_candidates WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM governed_graph_edges WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM governed_graph_nodes WHERE tenant_id = $1", [tenantId]);
     await pool.query("DELETE FROM shadow_time_return_entries WHERE tenant_id = $1", [tenantId]);
@@ -146,6 +152,159 @@ integration("PostgreSQL 项目记忆自动同步按固定来源授权并自动�
   const [memory] = await store.listMemories({ projectId: project.projectId });
   assert.equal(memory.status, "confirmed");
   assert.equal(memory.updated_by, "system:project-memory-sync");
+});
+
+integration("PostgreSQL Hermes 记忆候选加密、幂等且并发租约只领取一次", async (t) => {
+  const store = await fixture(t);
+  const candidates = await new PersonalGbrainCandidateStore({
+    pool: store.pool,
+    tenantId: store.tenantId,
+    dataKey: store.config.dataKey,
+  }).open();
+  const input = {
+    schema: "foursday-personal-gbrain-candidate/v1",
+    type: "atom",
+    projectId: "vocab_2_2",
+    factKey: "production.formal_question_count",
+    title: "正式试题口径",
+    statement: "正式题目数量必须依据项目当前汇总文件。",
+    sensitivity: "internal",
+    confidence: 0.99,
+    observedAt: "2026-08-20T00:00:00Z",
+    sourceSessionHash: "a".repeat(64),
+    evidence: [{
+      relativePath: "summary.json",
+      contentSha256: "b".repeat(64),
+      description: "项目汇总",
+    }],
+  };
+  const proposed = await Promise.all([
+    candidates.propose(input, new Date(), { sourcePrincipalId: "trusted-user" }),
+    candidates.propose(input, new Date(), { sourcePrincipalId: "trusted-user" }),
+  ]);
+  assert.equal(proposed[0].id, proposed[1].id);
+  const raw = await store.pool.query(
+    `SELECT statement_ciphertext, evidence_ciphertext
+     FROM hermes_memory_candidates WHERE tenant_id = $1`,
+    [store.tenantId],
+  );
+  assert.equal(raw.rows.length, 1);
+  assert.match(raw.rows[0].statement_ciphertext, /^enc:v1:/u);
+  assert.doesNotMatch(JSON.stringify(raw.rows[0]), /正式题目数量/u);
+  const leased = await Promise.all([
+    candidates.leaseNext({ owner: "promoter:one" }),
+    candidates.leaseNext({ owner: "promoter:two" }),
+  ]);
+  assert.equal(leased.filter(Boolean).length, 1);
+  const winner = leased.find(Boolean);
+  await candidates.complete(winner.id, winner.leaseOwner, {
+    slug: "atoms/agents/foursday/vocab_2_2/key",
+    commit: "c".repeat(40),
+    contentSha256: "d".repeat(64),
+  });
+  assert.equal((await candidates.list({ status: "promoted" })).length, 1);
+});
+
+integration("PostgreSQL 隐私擦除按请求人覆盖 Hermes 候选并排队回收已晋升页面", async (t) => {
+  const store = await fixture(t);
+  const candidates = await new PersonalGbrainCandidateStore({
+    pool: store.pool,
+    tenantId: store.tenantId,
+    dataKey: store.config.dataKey,
+  }).open();
+  const base = {
+    schema: "foursday-personal-gbrain-candidate/v1",
+    type: "atom",
+    projectId: "privacy_hermes_project",
+    title: "稳定项目事实",
+    statement: "该事实只能由绑定来源晋升。",
+    sensitivity: "internal",
+    confidence: 0.99,
+    observedAt: "2026-08-20T00:00:00Z",
+    sourceSessionHash: "a".repeat(64),
+    evidence: [{
+      relativePath: "summary.json",
+      contentSha256: "b".repeat(64),
+      description: "项目汇总",
+    }],
+  };
+  const promoted = await candidates.propose({
+    ...base,
+    factKey: "project.promoted_fact",
+  }, new Date("2026-08-20T00:00:00Z"), { sourcePrincipalId: "privacy-user" });
+  const lease = await candidates.leaseNext({
+    owner: "promoter:privacy",
+    now: new Date("2026-08-20T00:01:00Z"),
+  });
+  await candidates.complete(lease.id, lease.leaseOwner, {
+    slug: "atoms/agents/foursday/privacy_hermes_project/promoted_fact",
+    commit: "c".repeat(40),
+    contentSha256: "d".repeat(64),
+  }, new Date("2026-08-20T00:02:00Z"));
+  const proposed = await candidates.propose({
+    ...base,
+    factKey: "project.proposed_fact",
+    statement: "另一条仍在队列中的事实。",
+  }, new Date("2026-08-20T00:03:00Z"), { sourcePrincipalId: "privacy-user" });
+
+  const rollbackState = await inspectServiceRollbackState(store.pool, {
+    targetSupportsContinuation: true,
+    targetSupportsCapabilityBudget: true,
+    targetSupportsHermesMemoryCandidates: false,
+  });
+  assert.equal(rollbackState.hermesMemoryCandidateRows, 2);
+  assert.throws(
+    () => assertServiceRollbackState(rollbackState),
+    { code: "service_rollback_hermes_memory_candidates_present" },
+  );
+
+  const preview = await store.previewPrivacyErasure(
+    { personId: "privacy-user" },
+    new Date("2026-08-20T00:04:00Z"),
+  );
+  assert.equal(preview.counts.hermesMemoryCandidates, 2);
+  assert.equal(preview.blocked.hermesMemoryCandidates, 0);
+  await store.erasePrivacyData(
+    { personId: "privacy-user" },
+    preview.confirmation,
+    "privacy-operator",
+    new Date("2026-08-20T00:04:00Z"),
+  );
+
+  const rows = await store.pool.query(
+    `SELECT id, project_id, title_ciphertext, statement_ciphertext,
+            evidence_ciphertext, status, authority_slug, privacy_erased_at
+     FROM hermes_memory_candidates WHERE tenant_id = $1 ORDER BY id`,
+    [store.tenantId],
+  );
+  const byId = new Map(rows.rows.map((row) => [row.id, row]));
+  assert.equal(byId.get(promoted.id).status, "retirement_pending");
+  assert.equal(byId.get(promoted.id).authority_slug, "atoms/agents/foursday/privacy_hermes_project/promoted_fact");
+  assert.equal(byId.get(proposed.id).status, "revoked");
+  for (const row of rows.rows) {
+    assert.equal(row.project_id, "deleted");
+    assert.equal(store.cipher.decrypt(row.title_ciphertext), "");
+    assert.equal(store.cipher.decrypt(row.statement_ciphertext), "");
+    assert.deepEqual(JSON.parse(store.cipher.decrypt(row.evidence_ciphertext)), []);
+    assert.ok(row.privacy_erased_at);
+  }
+  assert.equal((await store.health()).hermesMemoryCandidates.retirement_pending, 1);
+  const after = await store.previewPrivacyErasure(
+    { personId: "privacy-user" },
+    new Date("2026-08-20T00:05:00Z"),
+  );
+  assert.equal(after.counts.hermesMemoryCandidates, 0);
+  const retirement = await candidates.leaseRetirement({
+    owner: "promoter:privacy",
+    now: new Date("2026-08-20T00:05:00Z"),
+  });
+  assert.equal(retirement.id, promoted.id);
+  await candidates.completeRetirement(retirement.id, retirement.leaseOwner, {
+    commit: "e".repeat(40),
+    contentSha256: "f".repeat(64),
+  }, new Date("2026-08-20T00:06:00Z"));
+  assert.equal((await candidates.list({ status: "retirement_pending" })).length, 0);
+  assert.equal((await store.health()).hermesMemoryCandidates.retirement_pending ?? 0, 0);
 });
 
 function graphFixture(tenantId, projectId = "graph_project") {
