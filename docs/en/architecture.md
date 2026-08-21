@@ -2,6 +2,8 @@
 
 Foursday is a work-twin product with one Codex Agent Loop. A pinned, minimally installed Hermes runtime supplies the internal Gateway, session lifecycle, scheduling, and future channel adapters; it does not plan work or write the final reply.
 
+The current public version is the `v0.7.0-rc.1` release candidate. This document describes the target architecture; it is not evidence that a production instance has been deployed or activated. The detailed product contract lives in the [PRD](../产品需求文档.md).
+
 ```mermaid
 flowchart LR
     M["DWS / messaging channels"] --> A["Foursday Gateway + session"]
@@ -33,6 +35,10 @@ flowchart LR
 | Memory promotion queue | minimal Foursday PostgreSQL schema |
 
 Foursday has no Hermes fork, core patch, second Agent Loop, capability-manifest workflow, or second business-memory repository.
+
+## Version scope
+
+P0 covers personal DingTalk through DWS, allowlist enforcement, project routing, personal gbrain context, the Codex work loop, read-back, owner takeover, safety boundaries, and shadow verification. Feishu, Slack, Teams, cross-platform Session recovery, scheduled work, and proactive work are P1. Enterprise governance and ecosystem features are P2. P1 and P2 are roadmap scope, not current release claims.
 
 Installation verifies the locked upstream source still bypasses its foreground tool loop in `codex_app_server` mode. The Foursday Profile disables upstream built-in memory, memory/skill nudges, background-review forks, automatic title generation, and the curator so no post-turn auxiliary model or Agent Loop reappears behind Codex.
 

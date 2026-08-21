@@ -1,5 +1,7 @@
 # Install and run
 
+> Current release: `v0.7.0-rc.1`. This is a breaking preview, not an in-place upgrade for the legacy `0.6.x` Runtime. For the production cutover, rollback, and single-writer checklist, see the [Chinese production migration runbook](../指南/生产迁移与回滚.md).
+
 ## 1. Install Foursday
 
 ```bash
@@ -72,6 +74,8 @@ npx --no-install foursday gateway activate \
 ```
 
 Activation is intentionally not part of installation. It refuses a stale or incomplete receipt, a changed Profile or Hermes checkout, a mismatched commit, or another known writer still running.
+
+The GitHub Release does not deploy production. A production cutover requires a separate authorization, a new isolated database, a private Profile/config backup, send-disabled shadow evidence, and an exact read-back. Do not apply `db/schema.sql` to a legacy `0.6.x` production database.
 
 ## Stop or remove
 

@@ -28,4 +28,6 @@ Use synthetic identities and data. Never commit `.runtime/`, credentials, real m
 
 Every behavioral change should cover the allowed path, denied path, timeout/failure, duplicate/restart behavior, and final read-back. A merge does not authorize deployment or message sending.
 
+Every user-visible behavior change must reference an existing requirement or acceptance scenario in the [PRD](./docs/产品需求文档.md). If the requirement does not exist, update the PRD first, then keep the technical design, public overview, and implementation in the same change.
+
 By contributing, you agree that your contribution is provided under the [MIT License](./LICENSE).

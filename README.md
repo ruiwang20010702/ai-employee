@@ -12,6 +12,7 @@ Trusted message → personal context → real workspace → verified work → na
 
 [![Checks](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![Security](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
+[![Release](https://img.shields.io/github/v/release/ruiwang20010702/foursday?include_prereleases&sort=semver)](https://github.com/ruiwang20010702/foursday/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-53a7ff.svg)](./LICENSE)
 
 </div>
@@ -110,7 +111,9 @@ Foursday does not create a second knowledge repository or copy personal pages in
 
 ## Status
 
-The repository now targets the Foursday control-plane distribution with one Codex Agent Loop. The local production instance is intentionally stopped; installing this repository does not inherit its authority, credentials, allowlist, or send permission.
+The current public preview is `v0.7.0-rc.1`. It establishes the one-Codex-loop architecture and the install, routing, memory, safety, and shadow-verification contracts. It is a release candidate, not evidence that a production instance has been deployed or activated.
+
+The local production instance is intentionally stopped. Installing this repository does not inherit its authority, credentials, allowlist, send permission, or production state.
 
 Run the verified checks locally:
 
@@ -125,6 +128,7 @@ npm run check:security
 
 - [Architecture](./docs/en/architecture.md)
 - [Deployment](./docs/en/deployment.md)
+- [生产迁移与回滚](./docs/指南/生产迁移与回滚.md)
 - [Integration guide](./docs/en/integrations.md)
 - [产品需求文档](./docs/产品需求文档.md)
 - [技术设计文档](./docs/技术设计文档.md)
