@@ -45,7 +45,7 @@ function completeEvents() {
   ];
 }
 
-test("Hermes shadow 十项证据完整时生成不含正文的 acceptance", () => {
+test("Foursday shadow 十项证据完整时生成不含正文的 acceptance", () => {
   const result = evaluateHermesShadowAcceptance({
     releaseSha,
     events: completeEvents(),
@@ -55,14 +55,14 @@ test("Hermes shadow 十项证据完整时生成不含正文的 acceptance", () =
   });
   assert.equal(result.valid, true);
   assert.deepEqual(result.missing, []);
-  assert.equal(result.receipt.schema, "foursday-hermes-shadow-acceptance/v1");
+  assert.equal(result.receipt.schema, "foursday-shadow-acceptance/v1");
   assert.equal(result.receipt.releaseSha, releaseSha);
   assert.match(result.receipt.evidenceDigest, /^[a-f0-9]{64}$/u);
   assert.equal(Object.values(result.receipt.scenarios).every(Boolean), true);
   assert.doesNotMatch(JSON.stringify(result), /message body|natural reply/u);
 });
 
-test("Hermes shadow 缺追问、接管或代码证据时只返回缺口", () => {
+test("Foursday shadow 缺追问、接管或代码证据时只返回缺口", () => {
   const events = completeEvents().filter((event, index) => index < 2);
   const result = evaluateHermesShadowAcceptance({
     releaseSha,
@@ -77,7 +77,7 @@ test("Hermes shadow 缺追问、接管或代码证据时只返回缺口", () => 
   assert.ok(result.missing.includes("codeWork"));
 });
 
-test("Hermes shadow 重复消息哈希和错提交证据不能通过", () => {
+test("Foursday shadow 重复消息哈希和错提交证据不能通过", () => {
   const events = completeEvents();
   events[2].messageHashes = ["message-hash-1"];
   const result = evaluateHermesShadowAcceptance({
@@ -91,7 +91,7 @@ test("Hermes shadow 重复消息哈希和错提交证据不能通过", () => {
   assert.ok(result.missing.includes("noDuplicate"));
 });
 
-test("Hermes shadow 同一自然回复被重试时不能通过无重复门禁", () => {
+test("Foursday shadow 同一自然回复被重试时不能通过无重复门禁", () => {
   const events = completeEvents();
   events.push({ ...events[1] });
   const result = evaluateHermesShadowAcceptance({

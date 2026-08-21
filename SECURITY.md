@@ -1,34 +1,21 @@
 # Security Policy
 
-[中文版安全说明](./docs/指南/安全说明.md)
+[中文版](./docs/指南/安全说明.md)
 
-Foursday can process workplace messages and execute approved external actions. Please report security issues privately and avoid exposing real users or business data.
+Report vulnerabilities through a private GitHub Security Advisory. Do not publish credentials, message content, personal identifiers, database URLs, private gbrain pages, or internal project files.
 
-## Reporting a vulnerability
+## Current boundaries
 
-Use the repository's **GitHub Security Advisory** to send a private report. Do not open a public issue for vulnerabilities that involve credentials, authorization bypasses, message content, personal information, remote execution, or production deployment.
+- Unknown users and unmentioned groups are rejected before a Foursday Session is created.
+- A Foursday App Server proxy forces the routed project permission profile on every Codex thread and turn, strips caller overrides, and refuses permission escalation.
+- The App Server receives only runtime essentials and three host-owned MCP path bindings; the project shell excludes Foursday, DWS, identity, database, proxy, and secret variables.
+- The routed project is the only writable workspace; host reads, `.env`, `.runtime`, and command network are denied.
+- Project terminal commands have no network and cannot access credentials, `.env`, `.runtime`, Keychain, or other projects.
+- gbrain and DWS credentials remain in narrow host-side bridges.
+- Git push, merge, publish, deployment, production writes, service control, payments, contracts, HR decisions, irreversible deletion, and secret disclosure are hard-blocked.
+- DWS sends require exact receipt/read-back; unknown results are not retried.
+- Owner takeover interrupts in-flight work.
+- Installation and configuration do not start a Gateway or enable sending.
+- Install and activation verify the full pinned runtime commit, official remote, index flags, and every tracked diff; only the official installer's contributor-email stamp is tolerated.
 
-Include, when possible:
-
-- affected version or full commit SHA;
-- impact and preconditions;
-- minimal reproduction using synthetic data;
-- whether external side effects occurred;
-- a suggested mitigation, if known.
-
-Never include production secrets, real DingTalk messages, user identifiers, cookies, database dumps, Keychain values, or internal company documents.
-
-## Supported versions
-
-Security fixes are developed on the latest `main` revision. Production installations should pin a reviewed full commit SHA; mutable branch references are not a supported deployment boundary.
-
-## Security boundaries
-
-- Sending and work-plan execution are disabled independently and are off by default.
-- Chat content and model output cannot grant new capabilities.
-- High-risk plans require approval bound to the complete plan and authorization snapshot.
-- External effects require idempotency records and target-system read-back.
-- Unknown external outcomes fail closed and are not automatically retried.
-- Production secrets must be injected at runtime and must not be committed to the repository.
-
-For the complete Chinese threat model, secret-handling rules, and operational controls, see [安全说明.md](./docs/指南/安全说明.md).
+Pin deployments to reviewed full commit SHAs. Mutable branch names are not a production trust boundary.

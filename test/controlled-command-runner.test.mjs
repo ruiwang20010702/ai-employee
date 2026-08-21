@@ -3,7 +3,6 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { runCodexArtifact } from "../src/codex-artifact-runner.mjs";
 import { runControlledCommand } from "../src/controlled-command-runner.mjs";
 
 test("受控命令收到人工中断后终止进程组并留下确认凭据", async (t) => {
@@ -45,36 +44,4 @@ test("受控命令收到人工中断后终止进程组并留下确认凭据", as
     return true;
   });
   assert.ok(Date.now() - startedAt < 2_000);
-});
-
-test("只读 Codex 步骤收到人工中断后终止整个进程组", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "ai-codex-interrupt-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const executable = join(directory, "fake-codex");
-  await writeFile(
-    executable,
-    [
-      "#!/bin/sh",
-      "trap 'exit 143' TERM",
-      "cat >/dev/null",
-      "while :; do sleep 1; done",
-      "",
-    ].join("\n"),
-    { mode: 0o700 },
-  );
-  await chmod(executable, 0o700);
-  const controller = new AbortController();
-  const running = runCodexArtifact({
-    codexPath: executable,
-    workingDirectory: directory,
-    prompt: "只读测试",
-    timeoutMs: 30_000,
-    signal: controller.signal,
-  });
-  setTimeout(() => controller.abort(), 50).unref();
-  await assert.rejects(running, (error) => {
-    assert.equal(error.code, "WORK_PLAN_CANCELLED");
-    assert.match(error.message, /interrupted by operator/u);
-    return true;
-  });
 });

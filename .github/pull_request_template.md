@@ -8,7 +8,7 @@
 
 ## Authority, data, and side effects
 
-<!-- Explain changes to message scope, capabilities, external writes, migrations, or rollback. Write "None" when unchanged. -->
+<!-- Explain changes to allowlists, workspaces, secrets, external writes, or irreversible actions. Write "None" when unchanged. -->
 
 ## Verification evidence
 
@@ -17,8 +17,8 @@
 - [ ] Allowed path covered
 - [ ] Denied, timeout, or failure path covered
 - [ ] External effects are idempotent and read back from the target, or this PR has no external effects
-- [ ] SQLite/PostgreSQL parity verified, or this PR does not affect storage
-- [ ] Documentation and migration/rollback notes updated, or no update is required
+- [ ] PostgreSQL queue changes verified in an isolated database, or this PR does not affect storage
+- [ ] Current documentation updated, or no update is required
 - [ ] No real messages, personal data, credentials, databases, logs, backups, or machine-specific paths included
 
 ## Release boundary

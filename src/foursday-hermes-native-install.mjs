@@ -23,8 +23,6 @@ const execFileAsync = promisify(execFile);
 const componentPluginDirectories = Object.freeze([
   "dws_personal",
   "project_router",
-  "foursday_boundary",
-  "gbrain_memory",
 ]);
 const pluginDirectories = Object.freeze([
   "foursday_work_twin",
@@ -33,7 +31,15 @@ const hostEntrypoints = Object.freeze([
   "src/hermes-dws-sidecar.mjs",
   "src/hermes-personal-memory-context.mjs",
   "src/hermes-memory-candidate-sidecar.mjs",
+  "src/foursday-codex-mcp.mjs",
+  "src/foursday-codex-proxy.mjs",
   "src/personal-gbrain-promoter.mjs",
+]);
+const optionalNodeDependencyPaths = Object.freeze([
+  "node_modules",
+  "apps/desktop/node_modules",
+  "ui-tui/node_modules",
+  "tests-js/node_modules",
 ]);
 
 function absolute(value, label) {
@@ -59,7 +65,7 @@ export function foursdayNativeHermesLayout({
     hermesHome: nativeHome,
     installDirectory: join(nativeHome, "hermes-agent"),
     hermesCommand: join(home, ".local", "bin", "hermes"),
-    profileAlias: join(home, ".local", "bin", "hermes-foursday"),
+    profileAlias: join(home, ".local", "bin", "foursday-runtime"),
     profileStage: join(project, ".runtime", "hermes-profile", "foursday"),
     profileDirectory: join(nativeHome, "profiles", "foursday"),
   };
@@ -137,8 +143,8 @@ export function buildFoursdayNativeInstallPlan({
       gatewayInstallRequested: Boolean(installGateway),
       gatewayStartRequested: false,
     },
-    legacyRuntimeTouched: false,
     messagesSent: 0,
+    optionalNodeDependenciesPruned: false,
     productionWrite: false,
   };
 }
@@ -162,6 +168,105 @@ async function assertRegularTree(path, root = path) {
     if (entry === "__pycache__" || entry.endsWith(".pyc")) continue;
     await assertRegularTree(join(path, entry), root);
   }
+}
+
+async function trustedRuntimeText(layout, relativePath) {
+  const root = await realpath(layout.installDirectory);
+  const path = join(root, relativePath);
+  const metadata = await lstat(path);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 8 * 1024 * 1024) {
+    throw new Error("Embedded runtime contract source is unsafe");
+  }
+  const canonical = await realpath(path);
+  if (relative(root, canonical).startsWith("..")) {
+    throw new Error("Embedded runtime contract source escaped the locked checkout");
+  }
+  return readFile(canonical, "utf8");
+}
+
+export async function verifyFoursdaySingleAgentLoopContract(layout) {
+  const [loop, codexRuntime, initialization, backgroundReview, titleGenerator, curator] = await Promise.all([
+    trustedRuntimeText(layout, "agent/conversation_loop.py"),
+    trustedRuntimeText(layout, "agent/codex_runtime.py"),
+    trustedRuntimeText(layout, "agent/agent_init.py"),
+    trustedRuntimeText(layout, "agent/background_review.py"),
+    trustedRuntimeText(layout, "agent/title_generator.py"),
+    trustedRuntimeText(layout, "agent/curator.py"),
+  ]);
+  const checks = [
+    /if agent\.api_mode == ["']codex_app_server["']:[\s\S]{0,300}return agent\._run_codex_app_server_turn\(/u.test(loop),
+    /Hands the entire turn to a `codex[\s\S]{0,160}app-server` subprocess/u.test(codexRuntime),
+    /CodexAppServerSession/u.test(codexRuntime),
+    /auto_approve_exec=auto_approve_requests/u.test(codexRuntime),
+    /is_approval_bypass_active/u.test(codexRuntime),
+    /mem_config\.get\(["']nudge_interval["']/u.test(initialization),
+    /skills_config\.get\(["']creation_nudge_interval["']/u.test(initialization),
+    /task\.get\(["']enabled["']\), default=True/u.test(backgroundReview),
+    /title_config\.get\(["']enabled["']\), default=True/u.test(titleGenerator),
+    /cfg\.get\(["']enabled["'], True\)/u.test(curator),
+  ];
+  if (checks.some((valid) => !valid)) {
+    throw new Error("Locked embedded runtime no longer satisfies the single Codex loop contract");
+  }
+  return { valid: true, runtime: "codex_app_server", backgroundLoopsConfigurable: true };
+}
+
+export async function assertFoursdayEmbeddedRuntimeIdentity(layout, {
+  expectedCommit,
+  expectedRepository,
+  run = execFileAsync,
+} = {}) {
+  const git = (...args) => run("/usr/bin/git", [
+    "-C", layout.installDirectory,
+    "-c", "core.fsmonitor=false",
+    "-c", "core.hooksPath=/dev/null",
+    ...args,
+  ], {
+    env: nativeEnvironment(layout),
+    timeout: 30_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  const [{ stdout: head }, { stdout: remote }, { stdout: status }, { stdout: indexFlags }] =
+    await Promise.all([
+      git("rev-parse", "HEAD"),
+      git("remote", "get-url", "origin"),
+      git("status", "--porcelain=v1", "--untracked-files=no"),
+      git("ls-files", "-v"),
+    ]);
+  const changes = String(status).split("\n").map((line) => line.trimEnd()).filter(Boolean);
+  const allowedInstallerNoise = /^ M contributors\/emails\/agent@[^/\s]+\.local$/u;
+  if (
+    String(head).trim() !== expectedCommit ||
+    String(remote).trim() !== expectedRepository ||
+    changes.some((line) => !allowedInstallerNoise.test(line)) ||
+    String(indexFlags).split("\n").some((line) => /^[a-zS]/u.test(line))
+  ) throw new Error("Installed embedded runtime does not match its immutable Foursday lock");
+  return { commit: expectedCommit, installerNoiseFiles: changes.length };
+}
+
+async function verifyInstalledSingleLoopProfile(layout) {
+  const configPath = join(layout.profileDirectory, "config.yaml");
+  const metadata = await lstat(configPath);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
+    throw new Error("Installed Foursday profile config is unsafe");
+  }
+  const config = await readFile(configPath, "utf8");
+  for (const required of [
+    "openai_runtime: codex_app_server",
+    "approvals:\n  mode: 'off'",
+    "background_review:\n    enabled: false",
+    "title_generation:\n    enabled: false",
+    "memory_enabled: false",
+    "user_profile_enabled: false",
+    "nudge_interval: 0",
+    "creation_nudge_interval: 0",
+    "curator:\n  enabled: false",
+  ]) {
+    if (!config.includes(required)) {
+      throw new Error("Installed Foursday profile could enable a second agent loop");
+    }
+  }
+  return { valid: true };
 }
 
 export async function collectFoursdayHostModules(projectRoot) {
@@ -204,6 +309,20 @@ function profileConfig() {
     "  openai_runtime: codex_app_server",
     "approvals:",
     "  mode: 'off'",
+    "auxiliary:",
+    "  background_review:",
+    "    enabled: false",
+    "  title_generation:",
+    "    enabled: false",
+    "memory:",
+    "  memory_enabled: false",
+    "  user_profile_enabled: false",
+    "  nudge_interval: 0",
+    "  flush_min_turns: 0",
+    "skills:",
+    "  creation_nudge_interval: 0",
+    "curator:",
+    "  enabled: false",
     "plugins:",
     "  enabled:",
     "    - foursday-work-twin",
@@ -262,29 +381,36 @@ export async function stageFoursdayProfileDistribution({
   await rm(temporary, { recursive: true, force: true });
   await mkdir(temporary, { mode: 0o700 });
   try {
-    await cp(join(projectRoot, "hermes", "profile", "SOUL.md"), join(temporary, "SOUL.md"), {
+    await cp(join(projectRoot, "distribution", "profile", "SOUL.md"), join(temporary, "SOUL.md"), {
       errorOnExist: true,
       force: false,
     });
-    await cp(join(projectRoot, "hermes", "skills"), join(temporary, "skills"), {
+    await cp(join(projectRoot, "distribution", "skills"), join(temporary, "skills"), {
       recursive: true,
       errorOnExist: true,
       force: false,
       filter: (source) => !source.includes("/__pycache__") && !source.endsWith(".pyc"),
     });
     await mkdir(join(temporary, "host"), { mode: 0o700 });
+    await mkdir(join(temporary, "host", "bin"), { mode: 0o700 });
     const hostModules = await collectFoursdayHostModules(projectRoot);
     for (const source of hostModules) {
       const destination = join(temporary, "host", relative(projectRoot, source));
       await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
       await cp(source, destination, { errorOnExist: true, force: false });
     }
+    await writeFile(join(temporary, "host", "bin", "codex"), [
+      "#!/bin/sh",
+      'exec "$FOURSDAY_NODE_PATH" "$(dirname "$0")/../src/foursday-codex-proxy.mjs" "$@"',
+      "",
+    ].join("\n"), { mode: 0o700 });
+    await chmod(join(temporary, "host", "bin", "codex"), 0o700);
     await Promise.all([
-      cp(join(projectRoot, "hermes", "host", "package.json"), join(temporary, "host", "package.json"), {
+      cp(join(projectRoot, "distribution", "host", "package.json"), join(temporary, "host", "package.json"), {
         errorOnExist: true,
         force: false,
       }),
-      cp(join(projectRoot, "hermes", "host", "package-lock.json"), join(temporary, "host", "package-lock.json"), {
+      cp(join(projectRoot, "distribution", "host", "package-lock.json"), join(temporary, "host", "package-lock.json"), {
         errorOnExist: true,
         force: false,
       }),
@@ -305,7 +431,7 @@ export async function stageFoursdayProfileDistribution({
     ].join("\n"), { mode: 0o700 });
     await mkdir(join(temporary, "plugins"), { mode: 0o700 });
     for (const name of pluginDirectories) {
-      const source = join(projectRoot, "hermes", "plugins", name);
+      const source = join(projectRoot, "distribution", "plugins", name);
       await assertRegularTree(source);
       await cp(source, join(temporary, "plugins", name), {
         recursive: true,
@@ -323,7 +449,7 @@ export async function stageFoursdayProfileDistribution({
       mode: 0o600,
     });
     for (const name of componentPluginDirectories) {
-      const source = join(projectRoot, "hermes", "plugins", name);
+      const source = join(projectRoot, "distribution", "plugins", name);
       await assertRegularTree(source);
       await cp(source, join(componentRoot, name), {
         recursive: true,
@@ -418,6 +544,14 @@ async function downloadVerifiedInstaller(lock, {
 }
 
 export async function prepareNativeHermesInstallDirectory(layout, lock) {
+  const parent = dirname(layout.installDirectory);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  const parentMetadata = await lstat(parent);
+  if (
+    !parentMetadata.isDirectory() || parentMetadata.isSymbolicLink() ||
+    (parentMetadata.mode & 0o077) !== 0 || await realpath(parent) !== parent
+  ) throw new Error("Native Hermes install parent is unsafe");
+  await chmod(parent, 0o700);
   const metadata = await lstat(layout.installDirectory).catch((error) => {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -440,6 +574,86 @@ export async function prepareNativeHermesInstallDirectory(layout, lock) {
     .toISOString().replace(/[:.]/gu, "-")}`;
   await rename(layout.installDirectory, backup);
   return { backup, existingGitCheckout: false };
+}
+
+export async function pruneFoursdayOptionalNodeDependencies(layout, {
+  apply = false,
+  verify = async () => {},
+} = {}) {
+  const targets = [];
+  for (const relativePath of optionalNodeDependencyPaths) {
+    const path = join(layout.installDirectory, relativePath);
+    const metadata = await lstat(path).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!metadata) continue;
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error("Optional runtime dependency target is unsafe");
+    }
+    targets.push({ relativePath, path });
+  }
+  const plan = {
+    schema: "foursday-runtime-prune/v1",
+    apply,
+    targets: targets.map(({ relativePath }) => relativePath),
+    sourceFilesRemoved: 0,
+    gitTrackedFilesRemoved: 0,
+  };
+  if (!apply || targets.length === 0) return plan;
+  const moved = [];
+  try {
+    for (const target of targets) {
+      const backup = `${target.path}.foursday-prune-${process.pid}`;
+      if (await lstat(backup).catch((error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      })) {
+        throw new Error("Optional runtime dependency backup already exists");
+      }
+      await rename(target.path, backup);
+      moved.push({ ...target, backup });
+    }
+    await verify();
+    for (const { backup } of moved) await rm(backup, { recursive: true, force: false });
+    return { ...plan, pruned: true, verified: true };
+  } catch (error) {
+    for (const { path, backup } of moved.reverse()) {
+      const backupMetadata = await lstat(backup).catch((failure) => {
+        if (failure.code === "ENOENT") return null;
+        throw failure;
+      });
+      if (backupMetadata) await rename(backup, path);
+    }
+    throw error;
+  }
+}
+
+async function verifyPrunedFoursdayRuntime(layout, { run = execFileAsync } = {}) {
+  await run(layout.hermesCommand, ["--version"], {
+    cwd: layout.projectRoot,
+    env: nativeEnvironment(layout),
+    timeout: 30_000,
+    maxBuffer: 1024 * 1024,
+  });
+  await run(layout.profileAlias, [
+    "plugins", "doctor",
+    join(layout.profileDirectory, "plugins", "foursday_work_twin"),
+    "--ci",
+  ], {
+    cwd: layout.profileDirectory,
+    env: { ...nativeEnvironment(layout), HERMES_HOME: layout.profileDirectory },
+    timeout: 120_000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  const { stdout } = await run("/usr/bin/git", [
+    "-C", layout.installDirectory,
+    "ls-files", "--",
+    ...optionalNodeDependencyPaths,
+  ], {
+    env: nativeEnvironment(layout), timeout: 30_000, maxBuffer: 1024 * 1024,
+  });
+  if (String(stdout).trim()) throw new Error("Runtime pruning target contains tracked upstream files");
 }
 
 function installJournalPath(layout) {
@@ -641,8 +855,16 @@ export async function runFoursdayNativeHermesInstall({
       stageProfile,
       installHostDependencies,
     });
+    const pruning = await pruneFoursdayOptionalNodeDependencies(layout, {
+      apply: true,
+      verify: () => verifyPrunedFoursdayRuntime(layout, { run }),
+    });
     await unlink(installJournalPath(layout)).catch(() => {});
-    return { ...plan, ...finished, apply: true, profileOnly: true };
+    return {
+      ...plan, ...finished, apply: true, profileOnly: true,
+      optionalNodeDependenciesPruned: pruning.pruned === true,
+      prunedTargets: pruning.targets,
+    };
   }
   await recoverInterruptedNativeHermesInstall(layout);
   const fallbackInstaller = join(layout.installDirectory, lock.installerPath);
@@ -673,6 +895,8 @@ export async function runFoursdayNativeHermesInstall({
       "--dir", layout.installDirectory,
       "--hermes-home", layout.hermesHome,
       "--skip-setup",
+      "--skip-browser",
+      "--skip-computer-use",
       "--no-skills",
       "--non-interactive",
     ], { cwd: layout.projectRoot, env, timeout: 30 * 60_000, maxBuffer: 16 * 1024 * 1024 });
@@ -717,10 +941,16 @@ export async function runFoursdayNativeHermesInstall({
     stageProfile,
     installHostDependencies,
   });
+  const pruning = await pruneFoursdayOptionalNodeDependencies(layout, {
+    apply: true,
+    verify: () => verifyPrunedFoursdayRuntime(layout, { run }),
+  });
   if (prepared.backup) await unlink(installJournalPath(layout)).catch(() => {});
   return {
     ...plan,
     ...finished,
+    optionalNodeDependenciesPruned: pruning.pruned === true,
+    prunedTargets: pruning.targets,
     apply: true,
     previousUntrackedInstallBackedUp: Boolean(prepared.backup),
   };
@@ -747,6 +977,12 @@ export async function finishFoursdayNativeProfileInstall({
   if (!String(versionOutput).includes(lock.version)) {
     throw new Error("Native Hermes version does not match the compatibility lock");
   }
+  await assertFoursdayEmbeddedRuntimeIdentity(layout, {
+    expectedCommit: lock.commit,
+    expectedRepository: lock.repository,
+    run,
+  });
+  await verifyFoursdaySingleAgentLoopContract(layout);
   const existingProfile = await lstat(layout.profileDirectory).catch((error) => {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -800,9 +1036,13 @@ export async function finishFoursdayNativeProfileInstall({
       "profile", "update", "foursday", "--force-config", "--yes",
     ], { cwd: layout.projectRoot, env, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
     await run(layout.hermesCommand, [
-      "profile", "alias", "foursday", "--name", "hermes-foursday",
+      "profile", "alias", "foursday", "--name", "foursday-runtime",
     ], { cwd: layout.projectRoot, env, timeout: 30_000, maxBuffer: 1024 * 1024 });
     await access(layout.profileAlias, constants.X_OK);
+    await run(layout.hermesCommand, [
+      "profile", "alias", "foursday", "--remove", "--name", "hermes-foursday",
+    ], { cwd: layout.projectRoot, env, timeout: 30_000, maxBuffer: 1024 * 1024 }).catch(() => {});
+    await verifyInstalledSingleLoopProfile(layout);
     if (installHostDependencies) {
       await installHostDependencies({ layout, env, run });
     } else {
@@ -842,7 +1082,7 @@ export async function finishFoursdayNativeProfileInstall({
     }
   } catch (error) {
     await run(layout.hermesCommand, [
-      "profile", "alias", "foursday", "--remove", "--name", "hermes-foursday",
+      "profile", "alias", "foursday", "--remove", "--name", "foursday-runtime",
     ], { cwd: layout.projectRoot, env, timeout: 30_000, maxBuffer: 1024 * 1024 }).catch(() => {});
     await run(layout.hermesCommand, ["profile", "delete", "foursday", "--yes"], {
       cwd: layout.projectRoot, env, timeout: 120_000, maxBuffer: 8 * 1024 * 1024,
@@ -852,7 +1092,7 @@ export async function finishFoursdayNativeProfileInstall({
         "profile", "import", profileBackup.archive, "--name", "foursday",
       ], { cwd: layout.projectRoot, env, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
       await run(layout.hermesCommand, [
-        "profile", "alias", "foursday", "--name", "hermes-foursday",
+        "profile", "alias", "foursday", "--name", "foursday-runtime",
       ], { cwd: layout.projectRoot, env, timeout: 30_000, maxBuffer: 1024 * 1024 });
       await access(layout.profileAlias, constants.X_OK);
     }

@@ -9,10 +9,13 @@ import {
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { authorizeFoursdayNativeGatewayAction } from "./foursday-native-cutover.mjs";
+import { assertFoursdayEmbeddedRuntimeIdentity } from "./foursday-hermes-native-install.mjs";
 
 const execFileAsync = promisify(execFile);
+// The embedded runtime owns this macOS-internal label. Public Foursday status
+// deliberately does not expose it, and changing it would require a core fork.
 export const nativeFoursdayGatewayLabel = "ai.hermes.gateway-foursday";
-export const legacyFoursdayGatewayLabel = "com.foursday.hermes-gateway";
+export const conflictingFoursdayGatewayLabel = "com.foursday.hermes-gateway";
 
 async function setNativeGatewayServiceEnabled(enabled, { run = execFileAsync } = {}) {
   await run("/bin/launchctl", [
@@ -47,24 +50,17 @@ async function assertInstalledProfileRelease(profileDirectory, releaseSha) {
   if (
     !/^[a-f0-9]{40}$/u.test(String(document.hermesCommit ?? "")) ||
     document.hermesRepository !== "https://github.com/NousResearch/hermes-agent.git"
-  ) throw new Error("Installed Foursday profile has an invalid Hermes runtime identity");
+  ) throw new Error("Installed Foursday profile has an invalid embedded runtime identity");
   return document;
 }
 
 async function assertInstalledHermesRuntime(layout, release, run) {
-  const [{ stdout: head }, { stdout: remote }] = await Promise.all([
-    run("/usr/bin/git", ["-C", layout.installDirectory, "rev-parse", "HEAD"], {
-      timeout: 30_000, maxBuffer: 1024 * 1024,
-    }),
-    run("/usr/bin/git", ["-C", layout.installDirectory, "remote", "get-url", "origin"], {
-      timeout: 30_000, maxBuffer: 1024 * 1024,
-    }),
-  ]);
-  if (
-    String(head).trim() !== release.hermesCommit ||
-    String(remote).trim() !== release.hermesRepository
-  ) throw new Error("Installed Hermes runtime does not match the Foursday profile lock");
-  return release.hermesCommit;
+  const result = await assertFoursdayEmbeddedRuntimeIdentity(layout, {
+    expectedCommit: release.hermesCommit,
+    expectedRepository: release.hermesRepository,
+    run,
+  });
+  return result.commit;
 }
 
 function parseEnv(text) {
@@ -111,7 +107,7 @@ async function setFoursdayGatewayMode(profileDirectory, mode, {
   }
   const path = join(profileDirectory, ".env");
   const { values } = await privateEnv(path);
-  values.set("FOURSDAY_HERMES_MODE", mode);
+  values.set("FOURSDAY_MODE", mode);
   values.set("DWS_PERSONAL_SEND_ENABLED", mode === "active" ? "true" : "false");
   const content = serializeEnv(values);
   if (!apply) {
@@ -162,7 +158,7 @@ export async function inspectFoursdayNativeGateway({
   uid = process.getuid?.(),
 } = {}) {
   const envDocument = await privateEnv(join(layout.profileDirectory, ".env"));
-  const mode = envDocument.values.get("FOURSDAY_HERMES_MODE") ?? "unknown";
+  const mode = envDocument.values.get("FOURSDAY_MODE") ?? "unknown";
   const sendEnabled = envDocument.values.get("DWS_PERSONAL_SEND_ENABLED") === "true";
   let stdout = "";
   let running = false;
@@ -217,7 +213,7 @@ export async function inspectFoursdayNativeGateway({
   return {
     schema: "foursday-native-gateway-status/v1",
     label: nativeFoursdayGatewayLabel,
-    runtime: "native_hermes_profile",
+    runtime: "foursday_profile",
     installed: true,
     profile: "foursday",
     mode,
@@ -231,14 +227,14 @@ export async function inspectFoursdayNativeGateway({
   };
 }
 
-export async function legacyGatewayRunning({
+export async function conflictingGatewayRunning({
   uid = process.getuid?.(),
   run = execFileAsync,
 } = {}) {
   if (!Number.isSafeInteger(uid) || uid < 1) throw new Error("macOS user id is invalid");
   try {
     const { stdout } = await run("/bin/launchctl", [
-      "print", `gui/${uid}/${legacyFoursdayGatewayLabel}`,
+      "print", `gui/${uid}/${conflictingFoursdayGatewayLabel}`,
     ], { timeout: 10_000, maxBuffer: 512 * 1024 });
     return /state\s*=\s*running/u.test(String(stdout));
   } catch {
@@ -250,7 +246,7 @@ export async function runFoursdayNativeGatewayAction(action, {
   layout,
   apply = false,
   run = execFileAsync,
-  legacyRunning = legacyGatewayRunning,
+  conflictingWriterRunning = conflictingGatewayRunning,
   inspect = inspectFoursdayNativeGateway,
   setServiceEnabled = (enabled) => setNativeGatewayServiceEnabled(enabled, { run }),
   wait = (milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)),
@@ -274,7 +270,7 @@ export async function runFoursdayNativeGatewayAction(action, {
   const profileRelease = action === "activate"
     ? await assertInstalledProfileRelease(layout.profileDirectory, gate.releaseSha)
     : null;
-  const hermesRuntimeSha = profileRelease
+  const embeddedRuntimeSha = profileRelease
     ? await assertInstalledHermesRuntime(layout, profileRelease, run)
     : null;
   const plan = {
@@ -286,7 +282,7 @@ export async function runFoursdayNativeGatewayAction(action, {
     messagesSent: 0,
     gate,
     ...(profileRelease ? { profileReleaseSha: profileRelease.foursdayCommit } : {}),
-    ...(hermesRuntimeSha ? { hermesRuntimeSha } : {}),
+    ...(embeddedRuntimeSha ? { embeddedRuntimeSha } : {}),
   };
   if (!apply) return { ...plan, apply: false };
   const env = nativeEnvironment(layout);
@@ -303,7 +299,7 @@ export async function runFoursdayNativeGatewayAction(action, {
       cwd: layout.profileDirectory, env, timeout: 120_000, maxBuffer: 8 * 1024 * 1024,
     });
   } else if (action === "activate") {
-    if (await legacyRunning()) {
+    if (await conflictingWriterRunning()) {
       throw new Error("Foursday native Gateway cannot become active while the prior writer is running");
     }
     await setFoursdayGatewayMode(layout.profileDirectory, "active", { apply: true });
@@ -347,8 +343,11 @@ export async function runFoursdayNativeGatewayAction(action, {
     });
     await setServiceEnabled(false);
     await run(layout.hermesCommand, [
-      "profile", "alias", "foursday", "--remove", "--name", "hermes-foursday",
+      "profile", "alias", "foursday", "--remove", "--name", "foursday-runtime",
     ], { cwd: layout.userHome, env, timeout: 30_000, maxBuffer: 1024 * 1024 });
+    await run(layout.hermesCommand, [
+      "profile", "alias", "foursday", "--remove", "--name", "hermes-foursday",
+    ], { cwd: layout.userHome, env, timeout: 30_000, maxBuffer: 1024 * 1024 }).catch(() => {});
     await run(layout.hermesCommand, ["profile", "delete", "foursday", "--yes"], {
       cwd: layout.userHome, env, timeout: 120_000, maxBuffer: 8 * 1024 * 1024,
     });
@@ -388,7 +387,7 @@ export async function runFoursdayNativeGatewayAction(action, {
     productionWrite: true,
     ...(action === "remove-profile" ? {
       profileRemoved: true,
-      nativeHermesPreserved: true,
+      embeddedRuntimePreserved: true,
       productionConfigPreserved: true,
       personalGbrainPreserved: true,
     } : {}),

@@ -25,10 +25,10 @@ export function evaluateHermesShadowAcceptance({
   now = new Date(),
 }) {
   if (!fullSha.test(String(releaseSha ?? ""))) {
-    throw new Error("Hermes shadow acceptance requires an exact release SHA");
+    throw new Error("Foursday shadow acceptance requires an exact release SHA");
   }
   if (!Array.isArray(events) || events.length > 100_000) {
-    throw new Error("Hermes shadow events must be a bounded array");
+    throw new Error("Foursday shadow events must be a bounded array");
   }
   const inbound = events.filter((event) => event?.type === "inbound");
   const replies = events.filter((event) => event?.type === "reply_attempt");
@@ -108,7 +108,7 @@ export function evaluateHermesShadowAcceptance({
     summary,
     receipt: missing.length === 0
       ? {
-          schema: "foursday-hermes-shadow-acceptance/v1",
+          schema: "foursday-shadow-acceptance/v1",
           releaseSha,
           evidenceDigest,
           createdAt: now.toISOString(),

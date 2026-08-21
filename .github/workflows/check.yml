@@ -20,13 +20,13 @@ jobs:
       postgres:
         image: postgres:16.14-alpine3.23
         env:
-          POSTGRES_DB: ai_employee_test
+          POSTGRES_DB: foursday_test
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d ai_employee_test"
+          --health-cmd "pg_isready -U postgres -d foursday_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -45,9 +45,8 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run check
         env:
-          TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/ai_employee_test
-      - run: npm run rollback:verify
-        env:
-          TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/ai_employee_test
+          TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/foursday_test
+      - run: npm run runtime:setup -- --apply
+      - run: npm run check:python
       - run: npm pack --dry-run
       - run: npm run reuse:verify

@@ -35,7 +35,7 @@ function validateSlugs(slugs) {
 }
 
 export async function createHermesPersonalMemoryClient({
-  configPath = process.env.AI_EMPLOYEE_CONFIG_FILE ?? defaultProductionConfigPath(),
+  configPath = process.env.FOURSDAY_CONFIG_FILE ?? defaultProductionConfigPath(),
   secretResolver = resolveSecretReference,
   fetchImpl = fetch,
 } = {}) {
@@ -48,22 +48,22 @@ export async function createHermesPersonalMemoryClient({
   if (!values || Array.isArray(values) || typeof values !== "object") {
     throw new Error("Personal memory config is invalid");
   }
-  if (!configuredBoolean(values.AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED)) {
+  if (!configuredBoolean(values.FOURSDAY_GBRAIN_ENABLED)) {
     throw new Error("Personal memory is not enabled");
   }
-  const reference = scalar(values, "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET");
+  const reference = scalar(values, "FOURSDAY_GBRAIN_CLIENT_SECRET");
   if (!reference || !isSecretReference(reference)) {
     throw new Error("Personal memory client secret must use an external reference");
   }
   const resolvedSecret = await secretResolver(reference);
   const client = createPersonalMemoryClient({
     personalMemoryEnabled: true,
-    personalMemoryMcpUrl: scalar(values, "AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL"),
-    personalMemoryIssuerUrl: scalar(values, "AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL"),
-    personalMemoryClientId: scalar(values, "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID"),
+    personalMemoryMcpUrl: scalar(values, "FOURSDAY_GBRAIN_MCP_URL"),
+    personalMemoryIssuerUrl: scalar(values, "FOURSDAY_GBRAIN_ISSUER_URL"),
+    personalMemoryClientId: scalar(values, "FOURSDAY_GBRAIN_CLIENT_ID"),
     personalMemoryClientSecret: resolvedSecret.value,
     personalMemoryTimeoutMs: Number(
-      values.AI_EMPLOYEE_PERSONAL_MEMORY_TIMEOUT_MS ?? 10_000,
+      values.FOURSDAY_GBRAIN_TIMEOUT_MS ?? 10_000,
     ),
   }, { fetchImpl });
   if (!client) throw new Error("Personal memory client is unavailable");

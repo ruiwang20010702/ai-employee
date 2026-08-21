@@ -1,7 +1,0 @@
-DROP TABLE IF EXISTS audit_events;
-DROP TABLE IF EXISTS checkpoints;
-DROP TABLE IF EXISTS side_effects;
-DROP TABLE IF EXISTS approvals;
-DROP TABLE IF EXISTS messages;
-DROP TABLE IF EXISTS tasks;
-DROP TABLE IF EXISTS settings;

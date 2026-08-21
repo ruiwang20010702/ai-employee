@@ -56,8 +56,8 @@ export class PersonalGbrainCandidateStore {
 
   async open() {
     this.cipher = await DataCipher.create({ encodedKey: this.dataKey, ephemeral: false });
-    await this.pool.query("SELECT 1 FROM hermes_memory_candidates LIMIT 0");
-    await this.pool.query("SELECT 1 FROM hermes_memory_candidate_sources LIMIT 0");
+    await this.pool.query("SELECT 1 FROM foursday_memory_candidates LIMIT 0");
+    await this.pool.query("SELECT 1 FROM foursday_memory_candidate_sources LIMIT 0");
     return this;
   }
 
@@ -89,7 +89,7 @@ export class PersonalGbrainCandidateStore {
     try {
       await client.query("BEGIN");
       await client.query(
-        `INSERT INTO hermes_memory_candidates(
+        `INSERT INTO foursday_memory_candidates(
            tenant_id, id, candidate_key, project_id, type, fact_key,
            title_ciphertext, statement_ciphertext, evidence_ciphertext,
            sensitivity, confidence, source_session_hash, created_at, updated_at
@@ -100,13 +100,13 @@ export class PersonalGbrainCandidateStore {
         values,
       );
       const result = await client.query(
-        `SELECT * FROM hermes_memory_candidates
+        `SELECT * FROM foursday_memory_candidates
          WHERE tenant_id = $1 AND candidate_key = $2 FOR UPDATE`,
         [this.tenantId, candidateKey],
       );
       if (!result.rows[0]) throw new Error("personal gbrain candidate insert did not read back");
       await client.query(
-        `INSERT INTO hermes_memory_candidate_sources(
+        `INSERT INTO foursday_memory_candidate_sources(
            tenant_id, candidate_id, source_principal_key, source_session_hash, created_at
          ) VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT DO NOTHING`,
@@ -139,7 +139,7 @@ export class PersonalGbrainCandidateStore {
     try {
       await client.query("BEGIN");
       const selected = await client.query(
-        `SELECT id FROM hermes_memory_candidates
+        `SELECT id FROM foursday_memory_candidates
          WHERE tenant_id = $1
            AND status IN ('proposed', 'retry', 'processing')
            AND (status <> 'processing' OR lease_expires_at <= $2)
@@ -153,7 +153,7 @@ export class PersonalGbrainCandidateStore {
         return null;
       }
       const result = await client.query(
-        `UPDATE hermes_memory_candidates
+        `UPDATE foursday_memory_candidates
          SET status = 'processing', lease_owner = $3,
              lease_expires_at = $4, attempt_count = attempt_count + 1,
              updated_at = $2
@@ -179,7 +179,7 @@ export class PersonalGbrainCandidateStore {
 
   async complete(id, owner, promotion, now = new Date()) {
     const result = await this.pool.query(
-      `UPDATE hermes_memory_candidates
+      `UPDATE foursday_memory_candidates
        SET status = 'promoted', authority_slug = $4, authority_commit = $5,
            authority_sha256 = $6, promoted_at = $3, updated_at = $3,
            lease_owner = NULL, lease_expires_at = NULL, last_error_code = NULL
@@ -204,7 +204,7 @@ export class PersonalGbrainCandidateStore {
       throw new Error("personal gbrain candidate max attempts is invalid");
     }
     const result = await this.pool.query(
-      `UPDATE hermes_memory_candidates
+      `UPDATE foursday_memory_candidates
        SET status = CASE WHEN attempt_count >= $4 THEN 'blocked' ELSE 'retry' END,
            last_error_code = $5, updated_at = $3,
            lease_owner = NULL, lease_expires_at = NULL
@@ -218,7 +218,7 @@ export class PersonalGbrainCandidateStore {
 
   async revoke(id, retirement, now = new Date()) {
     const result = await this.pool.query(
-      `UPDATE hermes_memory_candidates
+      `UPDATE foursday_memory_candidates
        SET status = 'revoked', authority_commit = $3, authority_sha256 = $4,
            updated_at = $5, lease_owner = NULL, lease_expires_at = NULL
        WHERE tenant_id = $1 AND id = $2 AND status = 'promoted'
@@ -231,7 +231,7 @@ export class PersonalGbrainCandidateStore {
 
   async completeRetirement(id, owner, retirement, now = new Date()) {
     const result = await this.pool.query(
-      `UPDATE hermes_memory_candidates
+      `UPDATE foursday_memory_candidates
        SET status = 'revoked', authority_commit = $4, authority_sha256 = $5,
            updated_at = $3, lease_owner = NULL, lease_expires_at = NULL,
            last_error_code = NULL
@@ -251,11 +251,11 @@ export class PersonalGbrainCandidateStore {
       throw new Error("personal gbrain retirement lease is invalid");
     }
     const result = await this.pool.query(
-      `UPDATE hermes_memory_candidates
+      `UPDATE foursday_memory_candidates
        SET status = 'retiring', lease_owner = $3, lease_expires_at = $4,
            attempt_count = attempt_count + 1, updated_at = $2
        WHERE tenant_id = $1 AND id = (
-         SELECT id FROM hermes_memory_candidates
+         SELECT id FROM foursday_memory_candidates
          WHERE tenant_id = $1
            AND status IN ('retirement_pending', 'retiring')
            AND (status <> 'retiring' OR lease_expires_at <= $2)
@@ -270,7 +270,7 @@ export class PersonalGbrainCandidateStore {
 
   async failRetirement(id, owner, error, now = new Date()) {
     const result = await this.pool.query(
-      `UPDATE hermes_memory_candidates
+      `UPDATE foursday_memory_candidates
        SET status = 'retirement_pending', last_error_code = $5, updated_at = $3,
            lease_owner = NULL, lease_expires_at = NULL
        WHERE tenant_id = $1 AND id = $2 AND status = 'retiring' AND lease_owner = $4
@@ -286,7 +286,7 @@ export class PersonalGbrainCandidateStore {
       throw new Error("personal gbrain candidate list limit is invalid");
     }
     const result = await this.pool.query(
-      `SELECT * FROM hermes_memory_candidates
+      `SELECT * FROM foursday_memory_candidates
        WHERE tenant_id = $1 AND ($2::text IS NULL OR status = $2)
        ORDER BY updated_at DESC, id DESC LIMIT $3`,
       [this.tenantId, status, limit],

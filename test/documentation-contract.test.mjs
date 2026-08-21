@@ -1,305 +1,92 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir, stat } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-async function projectText(path) {
-  return readFile(new URL(`../${path}`, import.meta.url), "utf8");
-}
+const root = fileURLToPath(new URL("../", import.meta.url));
+const text = (path) => readFile(resolve(root, path), "utf8");
 
-test("README 中英文首页统一定位为个人记忆驱动的 Hermes 工作分身", async () => {
-  const [english, chinese] = await Promise.all([
-    projectText("README.md"),
-    projectText("docs/指南/中文首页.md"),
+test("README presents Foursday as the product and Codex as the only work loop", async () => {
+  const readme = await text("README.md");
+  assert.match(readme, /Codex Agent Loop/u);
+  assert.match(readme, /pinned, minimally installed.*Hermes.*control plane/isu);
+  assert.match(readme, /personal-memory-driven work twin/iu);
+  assert.doesNotMatch(readme, /Native Hermes Agent Loop|Hermes \+ Codex|Gate 2|legacy runtime runbook|production deployments/iu);
+});
+
+test("package maintenance scripts use the Foursday runtime namespace", async () => {
+  const packageJson = JSON.parse(await text("package.json"));
+  assert.deepEqual(packageJson.bin, { foursday: "scripts/新环境向导.mjs" });
+  assert.deepEqual(Object.keys(packageJson.scripts).sort(), [
+    "check",
+    "check:full",
+    "check:python",
+    "check:security",
+    "memory:promote",
+    "reuse:verify",
+    "runtime:accept",
+    "runtime:activate",
+    "runtime:configure",
+    "runtime:gateway",
+    "runtime:setup",
   ]);
-  assert.match(english, /personal-memory-driven work twin/u);
-  assert.match(english, /Hermes Agent Loop/u);
-  assert.match(chinese, /个人记忆驱动/u);
-  assert.match(chinese, /Hermes Agent Loop/u);
-  for (const text of [english, chinese]) {
-    assert.match(text, /68,786/u);
-    assert.match(text, /81,088/u);
-    assert.match(text, /Gate 2/u);
-    assert.doesNotMatch(text, /project_evidence_read/u);
-    assert.doesNotMatch(text, /produced_questions/u);
-  }
+  assert.equal(packageJson.dependencies["@larksuiteoapi/node-sdk"], undefined);
 });
 
-test("README 准确声明 Hermes 安全停机与未授权迁移边界", async () => {
-  const [english, chinese] = await Promise.all([
-    projectText("README.md"),
-    projectText("docs/指南/中文首页.md"),
-  ]);
-  for (const text of [english, chinese]) {
-    assert.match(text, /Hermes.*active/iu);
-    assert.match(text, /rollback|回退/iu);
-    assert.match(text, /Gate 2/u);
-    assert.doesNotMatch(text, /v0\.6\.0-rc\.1/u);
-  }
-  assert.match(english, /safe review stop/iu);
-  assert.match(chinese, /安全停机审阅态/u);
-  assert.match(english, /has not received production authority/iu);
-  assert.match(chinese, /尚未取得生产权限/u);
+test("documentation tree has one small current set and no history mirror", async () => {
+  const files = async (directory) => (await readdir(resolve(root, directory), { withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(await files("docs"), ["产品需求文档.md", "技术设计文档.md", "设计总览.md"]);
+  assert.deepEqual(await files("docs/en"), ["architecture.md", "deployment.md", "integrations.md"]);
+  assert.deepEqual(await files("docs/指南"), ["中文首页.md", "参与贡献.md", "安全说明.md", "集成扩展指南.md"]);
+  const history = await readdir(resolve(root, "docs/历史")).catch((error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  assert.deepEqual(history, []);
 });
 
-test("README 提供默认零写的原生 Hermes Profile 与 Gateway 安装入口", async () => {
-  const [english, chinese, manifest] = await Promise.all([
-    projectText("README.md"),
-    projectText("docs/指南/中文首页.md"),
-    projectText("package.json"),
-  ]);
-  for (const text of [english, chinese]) {
-    assert.match(text, /hermes:setup/u);
-    assert.match(text, /hermes:configure/u);
-    assert.match(text, /hermes:gateway/u);
-    assert.match(text, /Profile/iu);
-    assert.match(text, /official|官方/iu);
-  }
-  const packageJson = JSON.parse(manifest);
-  assert.equal(packageJson.scripts["hermes:setup"], "node scripts/安装Foursday原生Hermes.mjs");
-  assert.equal(packageJson.scripts["hermes:configure"], "node scripts/配置Foursday原生Hermes.mjs");
-  assert.equal(packageJson.scripts["hermes:gateway"], "node scripts/管理Foursday原生Gateway.mjs");
-  assert.equal(packageJson.scripts["hermes:legacy:setup"], "node scripts/一键安装Hermes.mjs");
-});
-
-test("PRD 以通用 Agent Loop 为个人默认而把旧治理降级为企业模式", async () => {
-  const requirements = await projectText("docs/产品需求文档.md");
-  assert.match(requirements, /V3\.1 原生 Hermes Profile 候选/u);
-  assert.match(requirements, /个人记忆驱动的 AI 工作分身/u);
-  assert.match(requirements, /默认个人模式/u);
-  assert.match(requirements, /可选 Enterprise \/ Governed Mode/u);
-  assert.match(requirements, /可信联系人提出普通可恢复工作后[^\n]*默认自主执行/u);
-  assert.match(requirements, /不得为这个问题新增 `produced_questions`/u);
-  assert.match(requirements, /当前 12 项均已通过/u);
-});
-
-test("PRD 覆盖真实事实、连续追问、项目工作和人工接管", async () => {
-  const requirements = await projectText("docs/产品需求文档.md");
-  for (const phrase of [
-    "新项目事实问题",
-    "连续追问",
-    "文档、分析和代码工作",
-    "人工接管",
-    "81,088",
-    "68,786",
-  ]) assert.match(requirements, new RegExp(phrase, "u"));
-  assert.match(requirements, /安静窗口 3 秒/u);
-  assert.match(requirements, /总等待 ≤ 8 秒/u);
-});
-
-test("设计总览为文档角色和模块导航的唯一地图", async () => {
-  const overview = await projectText("docs/设计总览.md");
-  for (const role of ["产品宪法", "架构地图", "技术权威", "当前状态", "生产运维", "历史决策"]) {
-    assert.match(overview, new RegExp(role, "u"));
-  }
-  for (const path of [
-    "src/hermes-upstream.mjs",
-    "src/hermes-dws-sidecar.mjs",
-    "hermes/plugins/project_router/",
-    "src/hermes-personal-memory-context.mjs",
-    "hermes/plugins/foursday_boundary/",
-  ]) assert.match(overview, new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
-  assert.match(overview, /同一事实只在一个权威文档维护/u);
-});
-
-test("状态矩阵维护 Gate 2、生产边界和删除区", async () => {
-  const status = await projectText("docs/完成度矩阵.md");
-  assert.match(status, /历史 12 项 PoC 和十项生产 shadow 门槛曾通过/u);
-  assert.match(status, /没有消息写入者|无消息写入者|无消息发送者/u);
-  assert.match(status, /active → legacy → active 真实回退演练/u);
-  assert.match(status, /listener\/worker\/executor\/proactive/u);
-  assert.match(status, /stopped\/disabled/u);
-  for (const removed of [
-    "project_evidence_read",
-    "produced_questions",
-    "固定 JSON Pointer",
-    "逐联系人项目 requester",
-    "自研完整 Agent Loop",
-    "独立 Foursday 长期知识库",
-  ]) assert.match(status, new RegExp(removed, "u"));
-  assert.match(status, /兼容保留区/u);
-  assert.match(status, /Enterprise \/ Governed Mode/u);
-});
-
-test("技术设计绑定精确官方安装器、零核心补丁和原生 Profile", async () => {
-  const [technical, lock] = await Promise.all([
-    projectText("docs/技术设计文档.md"),
-    projectText("hermes/upstream.lock.json"),
-  ]);
-  const upstream = JSON.parse(lock);
-  assert.match(technical, new RegExp(upstream.release.replace(".", "\\."), "u"));
-  assert.match(technical, new RegExp(upstream.version.replaceAll(".", "\\."), "u"));
-  assert.match(technical, new RegExp(upstream.commit, "u"));
-  assert.match(technical, new RegExp(upstream.installerSha256, "u"));
-  assert.match(technical, /ContextVar/u);
-  assert.match(technical, /pre_tool_call/u);
-  assert.match(technical, /零核心补丁/u);
-  assert.match(technical, /profile install/u);
-});
-
-test("技术设计覆盖 DWS 个人身份、发送未知、接管和恢复", async () => {
-  const technical = await projectText("docs/技术设计文档.md");
-  for (const phrase of [
-    "OpenDingTalk ID 类型显式传递",
-    "3 秒安静窗口",
-    "最近 5,000 个消息 ID",
-    "outcomeUnknown=true",
-    "human_takeover",
-    "interrupt_session_activity",
-    "撤回事件",
-  ]) assert.match(technical, new RegExp(phrase, "u"));
-});
-
-test("技术设计覆盖常驻 shadow 与单写者切换门禁", async () => {
-  const technical = await projectText("docs/技术设计文档.md");
-  for (const phrase of [
-    "Profile distribution",
-    "send=false",
-    "src/foursday-native-gateway.mjs",
-    "先停原生 Gateway",
-    "旧写入者",
-  ]) assert.match(technical, new RegExp(phrase, "u"));
-});
-
-test("技术设计明确个人 gbrain 唯一权威且凭据不进入 Agent", async () => {
-  const [technical, memory] = await Promise.all([
-    projectText("docs/技术设计文档.md"),
-    projectText("docs/能力清单与正式记忆.md"),
-  ]);
-  for (const text of [technical, memory]) {
-    assert.match(text, /个人 PRIVATE gbrain Git/u);
-    assert.match(text, /唯一.*权威/u);
-    assert.match(text, /default \+ read-only/u);
-    assert.match(text, /Hermes Session DB/u);
-    assert.doesNotMatch(text, /独立 Foursday 长期知识库[^\n]*当前默认/u);
-  }
-});
-
-test("技术设计和能力文档把高风险控制放在程序边界", async () => {
-  const [technical, capability] = await Promise.all([
-    projectText("docs/技术设计文档.md"),
-    projectText("docs/能力清单与正式记忆.md"),
-  ]);
-  for (const text of [technical, capability]) {
-    assert.match(text, /Git push/u);
-    assert.match(text, /生产部署/u);
-    assert.match(text, /付款/u);
-    assert.match(text, /合同/u);
-    assert.match(text, /人事/u);
-    assert.match(text, /秘密/u);
-    assert.match(text, /失败关闭|fail.*closed/iu);
-  }
-  assert.match(technical, /终端无网络/u);
-  assert.match(technical, /\.runtime/u);
-});
-
-test("Gate 2 报告十二项门槛全部通过且不冒充生产健康", async () => {
-  const report = await projectText("docs/历史/自主工作分身迁移验收报告.md");
-  const rows = report.split("\n").filter((line) => /^\| \d+ \|/u.test(line));
-  assert.equal(rows.length, 12);
-  assert.ok(rows.every((line) => line.split("|").at(-2).trim() === "通过"));
-  assert.match(report, /Gate 2 就绪/u);
-  assert.match(report, /871 通过、0 失败/u);
-  assert.match(report, /202 通过、1 条条件跳过/u);
-  assert.match(report, /\/ready.*503/u);
-  assert.match(report, /提交、推送仍需负责人另行授权/u);
-});
-
-test("旧运维、验收、审查和图 ADR 都标明兼容范围", async () => {
-  const documents = await Promise.all([
-    projectText("docs/生产运维手册.md"),
-    projectText("docs/历史/验收报告.md"),
-    projectText("docs/历史/统一审查报告.md"),
-    projectText("docs/历史/架构决策受治理工作图存储.md"),
-    projectText("docs/en/deployment.md"),
-    projectText("docs/en/adr-001-governed-work-graph-storage.md"),
-  ]);
-  assert.match(documents[0], /Enterprise\/回退层/u);
-  assert.match(documents[1], /历史\/兼容快照/u);
-  assert.match(documents[2], /历史\/兼容审查/u);
-  assert.match(documents[3], /Enterprise \/ Governed Mode/u);
-  assert.match(documents[4], /currently deployed managed Gateway/iu);
-  assert.match(documents[5], /optional Enterprise \/ Governed Mode/iu);
-});
-
-test("英文核心文档同步 V3 产品、架构、能力和部署边界", async () => {
-  const [readme, overview, requirements, architecture, capability, deployment] =
-    await Promise.all([
-      projectText("README.md"),
-      projectText("docs/en/overview.md"),
-      projectText("docs/en/product-requirements.md"),
-      projectText("docs/en/architecture.md"),
-      projectText("docs/en/capabilities.md"),
-      projectText("docs/en/deployment.md"),
-    ]);
-  assert.match(readme, /personal-memory-driven work twin/u);
-  assert.match(overview, /Canonical owners/u);
-  assert.match(requirements, /general Agent Loop/u);
-  assert.match(architecture, /thin distribution/u);
-  assert.match(capability, /Personal default/u);
-  assert.match(deployment, /intentionally paused installation/iu);
-});
-
-test("中英文 README 和核心文档的本地链接全部存在", async () => {
-  const files = [
-    "README.md",
-    "docs/指南/中文首页.md",
-    "docs/设计总览.md",
-    "docs/产品需求文档.md",
-    "docs/技术设计文档.md",
-    "docs/完成度矩阵.md",
-    "docs/en/overview.md",
-    "docs/en/product-requirements.md",
-    "docs/en/architecture.md",
-    "docs/en/capabilities.md",
+test("current Markdown links resolve locally", async () => {
+  const paths = [
+    "README.md", "CONTRIBUTING.md", "SECURITY.md",
+    "docs/产品需求文档.md", "docs/技术设计文档.md", "docs/设计总览.md",
+    "docs/en/architecture.md", "docs/en/deployment.md", "docs/en/integrations.md",
+    "docs/指南/中文首页.md", "docs/指南/参与贡献.md", "docs/指南/安全说明.md",
+    "docs/指南/集成扩展指南.md",
   ];
-  for (const file of files) {
-    const text = await projectText(file);
-    for (const match of text.matchAll(/\[[^\]]+\]\(([^)]+)\)/gu)) {
-      const target = match[1].split("#")[0];
-      if (!target || /^(?:https?:|mailto:)/u.test(target)) continue;
-      await access(new URL(target, new URL(`../${file}`, import.meta.url)));
+  for (const path of paths) {
+    const document = await text(path);
+    for (const match of document.matchAll(/\[[^\]]+\]\(([^)]+)\)/gu)) {
+      const target = match[1];
+      if (/^(?:https?:|mailto:|#)/u.test(target)) continue;
+      const clean = decodeURIComponent(target.split("#")[0]);
+      await access(resolve(root, dirname(path), clean));
     }
   }
 });
 
-test("docs 根目录继续使用中文文件名", async () => {
-  const entries = await readdir(new URL("../docs/", import.meta.url), {
-    withFileTypes: true,
-  });
-  for (const entry of entries.filter((item) => item.isFile())) {
-    assert.match(entry.name, /^[\p{Script=Han}]+\.md$/u);
+test("architecture docs use diagrams and the minimal storage model", async () => {
+  for (const path of ["README.md", "docs/技术设计文档.md", "docs/设计总览.md"]) {
+    assert.match(await text(path), /```mermaid/u);
   }
-  assert.ok(entries.some((entry) => entry.isDirectory() && entry.name === "en"));
+  const design = await text("docs/技术设计文档.md");
+  assert.match(design, /db\/schema\.sql/u);
+  assert.doesNotMatch(design, /listener\.mjs|worker\.mjs|plan-executor\.mjs|hermes\/patches/u);
 });
 
-test("核心文档使用 Mermaid 展示产品和技术主流程", async () => {
-  for (const file of [
-    "README.md",
-    "docs/指南/中文首页.md",
-    "docs/产品需求文档.md",
-    "docs/设计总览.md",
-    "docs/技术设计文档.md",
-    "docs/en/architecture.md",
-  ]) {
-    assert.match(await projectText(file), /```mermaid/u);
-  }
+test("public examples use the minimal FOURSDAY configuration contract", async () => {
+  const example = JSON.parse(await text("deploy/foursday.example.json"));
+  assert.ok(Object.keys(example).every((key) => key.startsWith("FOURSDAY_")));
+  assert.equal(example.FOURSDAY_GBRAIN_WRITE_ENABLED, false);
+  assert.match(example.FOURSDAY_DATABASE_URL, /^keychain:\/\//u);
+  assert.doesNotMatch(JSON.stringify(example), /AI_EMPLOYEE_|"DATABASE_URL":/u);
 });
 
-test("公开社交预览资源保持 GitHub 推荐尺寸", async () => {
-  const asset = new URL("../assets/foursday-social-preview.png", import.meta.url);
-  const [image, metadata] = await Promise.all([readFile(asset), stat(asset)]);
-  assert.equal(image.subarray(1, 4).toString("ascii"), "PNG");
+test("social preview remains the GitHub recommended size", async () => {
+  const image = await readFile(resolve(root, "assets/foursday-social-preview.png"));
   assert.equal(image.readUInt32BE(16), 1280);
   assert.equal(image.readUInt32BE(20), 640);
-  assert.ok(metadata.size < 1024 * 1024);
-});
-
-test("公开文档不包含常见真实密钥格式", async () => {
-  const files = [
-    "README.md", "docs/指南/中文首页.md", "docs/产品需求文档.md",
-    "docs/设计总览.md", "docs/技术设计文档.md", "docs/完成度矩阵.md",
-    "docs/历史/自主工作分身架构迁移方案.md", "docs/历史/自主工作分身迁移验收报告.md",
-  ];
-  const secret = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})/u;
-  for (const file of files) assert.doesNotMatch(await projectText(file), secret);
 });

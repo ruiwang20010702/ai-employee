@@ -8,10 +8,9 @@ test("Codex child receives runtime essentials but no business secrets", () => {
     CODEX_HOME: "/Users/example/.codex",
     LANG: "zh_CN.UTF-8",
     HTTPS_PROXY: "https://proxy.example",
-    DATABASE_URL: "postgresql://secret",
-    AI_EMPLOYEE_DATA_KEY: "data-secret",
-    AI_EMPLOYEE_ADMIN_WRITE_TOKEN: "admin-secret",
-    DINGTALK_SELF_USER_ID: "private-user",
+    FOURSDAY_DATABASE_URL: "postgresql://secret",
+    FOURSDAY_DATA_KEY: "data-secret",
+    FOURSDAY_DINGTALK_SELF_USER: "private-user",
     OPENAI_API_KEY: "model-secret",
   });
 
@@ -22,10 +21,9 @@ test("Codex child receives runtime essentials but no business secrets", () => {
   assert.equal(environment.CI, "1");
   assert.equal(environment.TERM, "xterm-256color");
   for (const forbidden of [
-    "DATABASE_URL",
-    "AI_EMPLOYEE_DATA_KEY",
-    "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
-    "DINGTALK_SELF_USER_ID",
+    "FOURSDAY_DATABASE_URL",
+    "FOURSDAY_DATA_KEY",
+    "FOURSDAY_DINGTALK_SELF_USER",
     "OPENAI_API_KEY",
   ]) {
     assert.equal(environment[forbidden], undefined);

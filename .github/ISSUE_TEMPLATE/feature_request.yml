@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a bounded capability with a verification and failure strategy
+description: Propose a Hermes plugin, Hook, Skill, or product improvement
 title: "[Feature] "
 labels:
   - enhancement
@@ -20,8 +20,8 @@ body:
   - type: textarea
     id: boundary
     attributes:
-      label: Authority and capability boundary
-      description: Who may trigger it, what may it access, and when must it refuse or require approval?
+      label: Trust and workspace boundary
+      description: Who may trigger it, what workspace or service may it access, and which external or irreversible actions remain blocked?
     validations:
       required: true
   - type: textarea

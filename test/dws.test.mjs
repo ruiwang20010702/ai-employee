@@ -6,9 +6,8 @@ import {
   DwsAdapter,
   isAutomatedSelfMessage,
 } from "../src/dws.mjs";
-import { fetchStart, startListener } from "../src/listener.mjs";
 
-test("兼容 DWS 会话嵌套消息结构", () => {
+test("DWS 解析会话嵌套消息结构", () => {
   const messages = collectMessages(
     {
       result: {
@@ -40,27 +39,6 @@ test("兼容 DWS 会话嵌套消息结构", () => {
   );
 });
 
-test("增量抓取从检查点前重叠一段时间", () => {
-  const now = new Date("2026-07-31T12:00:00Z");
-  assert.equal(
-    fetchStart({
-      checkpoint: "2026-07-31T11:00:00Z",
-      now,
-      overlapMs: 600_000,
-      initialLookbackHours: 72,
-    }).toISOString(),
-    "2026-07-31T10:50:00.000Z",
-  );
-  assert.equal(
-    fetchStart({
-      checkpoint: null,
-      now,
-      overlapMs: 600_000,
-      initialLookbackHours: 72,
-    }).toISOString(),
-    "2026-07-28T12:00:00.000Z",
-  );
-});
 
 test("发送回执必须明确成功，失败或空回执不能冒充已发送", () => {
   assert.deepEqual(
@@ -98,9 +76,9 @@ test("DWS 子进程只接收工具运行白名单环境", async () => {
       LANG: "zh_CN.UTF-8",
       SSL_CERT_FILE: "/safe/cert.pem",
       HTTPS_PROXY: "https://proxy.example",
-      DATABASE_URL: "postgresql://secret",
-      AI_EMPLOYEE_ADMIN_TOKEN: "admin-secret",
-      AI_EMPLOYEE_DATA_KEY: "data-secret",
+      FOURSDAY_DATABASE_URL: "postgresql://secret",
+      FOURSDAY_ADMIN_TOKEN: "admin-secret",
+      FOURSDAY_DATA_KEY: "data-secret",
       ALERT_WEBHOOK_URL: "https://secret.example/hook",
       DINGTALK_ACCESS_TOKEN: "dingtalk-secret",
       UNRELATED_SECRET: "extra-secret",
@@ -125,9 +103,9 @@ test("DWS 子进程只接收工具运行白名单环境", async () => {
   assert.equal(childEnvironment.HTTPS_PROXY, "https://proxy.example");
   assert.ok(childEnvironment.PATH.startsWith("/safe/bin:"));
   for (const name of [
-    "DATABASE_URL",
-    "AI_EMPLOYEE_ADMIN_TOKEN",
-    "AI_EMPLOYEE_DATA_KEY",
+    "FOURSDAY_DATABASE_URL",
+    "FOURSDAY_ADMIN_TOKEN",
+    "FOURSDAY_DATA_KEY",
     "ALERT_WEBHOOK_URL",
     "DINGTALK_ACCESS_TOKEN",
     "UNRELATED_SECRET",
@@ -148,63 +126,6 @@ test("DWS 子进程只接收工具运行白名单环境", async () => {
   ]) {
     assert.equal(childValues.has(secret), false);
   }
-});
-
-test("移动审批只解析与当前账号精确匹配的本人自聊消息", async () => {
-  const calls = [];
-  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
-  dws.run = async (args) => {
-    calls.push(args);
-    if (args[0] === "contact" && args[2] === "get-self") {
-      return { result: [{ orgEmployeeModel: { userId: "owner", orgUserName: "Owner" } }] };
-    }
-    if (args[0] === "contact" && args[2] === "search") {
-      return { result: [{ userId: "owner", openDingTalkId: "DT-OWNER" }] };
-    }
-    return {
-      result: {
-        messages: [
-          { openMessageId: "self", openConversationId: "self-chat", senderUserId: "owner", direction: "outgoing", createTime: "2026-08-17T10:01:00Z", content: "批准 ABCD1234" },
-          { openMessageId: "other", openConversationId: "self-chat", senderUserId: "other", direction: "incoming", createTime: "2026-08-17T10:02:00Z", content: "批准 ABCD1234" },
-        ],
-      },
-    };
-  };
-  const messages = await dws.fetchMobileApprovalMessages({
-    selfUserId: "owner",
-    start: new Date("2026-08-17T10:00:00Z"),
-    end: new Date("2026-08-17T10:03:00Z"),
-  });
-  assert.deepEqual(messages.map((message) => message.id), ["self"]);
-  assert.equal(messages[0].approvalOwnerVerified, true);
-  const listCall = calls.find((args) => args.includes("list-direct"));
-  assert.ok(listCall.includes("--open-dingtalk-id"));
-  assert.equal(listCall.includes("--user"), false);
-});
-
-test("移动审批通知固定发送给当前认证账号并使用幂等 AI 消息", async () => {
-  const calls = [];
-  const dws = new DwsAdapter({ dwsPath: "/fake/dws" });
-  dws.run = async (args) => {
-    calls.push(args);
-    if (args[0] === "contact" && args[2] === "get-self") {
-      return { result: [{ orgEmployeeModel: { userId: "owner", orgUserName: "Owner" } }] };
-    }
-    if (args[0] === "contact" && args[2] === "search") {
-      return { result: [{ userId: "owner", openDingTalkId: "DT-OWNER" }] };
-    }
-    return { success: true };
-  };
-  await dws.sendMobileApproval({
-    selfUserId: "owner",
-    text: "待审批",
-    idempotencyKey: "mobile-idempotency",
-  });
-  const send = calls.at(-1);
-  assert.deepEqual(send.slice(0, 4), ["chat", "message", "send", "--open-dingtalk-id"]);
-  assert.ok(send.includes("DT-OWNER"));
-  assert.ok(send.includes("--ai-tag"));
-  assert.equal(send[send.indexOf("--uuid") + 1], "mobile-idempotency");
 });
 
 test("人工回复按当前账号发送记录和会话匹配", async () => {
@@ -592,261 +513,4 @@ test("非 DT 前缀的开放账号依靠显式身份类型发送私聊", async (
   });
   assert.ok(args.includes("--open-dingtalk-id"));
   assert.ok(!args.includes("--user"));
-});
-
-function listenerStore() {
-  const checkpoints = new Map();
-  return {
-    closed: false,
-    async open() { return this; },
-    async getCheckpoint(key) { return checkpoints.get(key) ?? null; },
-    async setCheckpoint(key, value) { checkpoints.set(key, value); },
-    async ingestMessages(messages) { return messages.length; },
-    async createReadyTasks() { return []; },
-    async isPaused() { return false; },
-    async recordHeartbeat() {},
-    async close() { this.closed = true; },
-    checkpoints,
-  };
-}
-
-const listenerConfig = {
-  targetUserIds: ["good-user", "bad-user"],
-  targetGroupIds: [],
-  overlapMs: 60_000,
-  initialLookbackHours: 24,
-  quietWindowMs: 1_000,
-  bundleGapMs: 1_000,
-  maxMessagesPerTask: 20,
-  maxTaskAttempts: 3,
-};
-
-test("监听器部分目标失败时保留成功检查点并记录整体失败", async () => {
-  const store = listenerStore();
-  await startListener({
-    store,
-    config: listenerConfig,
-    once: true,
-    dws: {
-      async fetchBySender({ senderUserId }) {
-        if (senderUserId === "bad-user") throw new Error("DWS unavailable");
-        return [];
-      },
-    },
-  });
-  assert.equal(store.closed, true);
-  assert.equal(store.checkpoints.get("listener:last-full-failure"), "target_fetch_failed");
-  assert.equal(store.checkpoints.has("listener:last-full-success"), false);
-  assert.equal(
-    [...store.checkpoints.keys()].some((key) => key.startsWith("dws:last-success:")),
-    true,
-  );
-});
-
-test("监听器全部目标失败时一次运行明确失败且仍关闭存储", async () => {
-  const store = listenerStore();
-  await assert.rejects(
-    startListener({
-      store,
-      config: listenerConfig,
-      once: true,
-      dws: {
-        async fetchBySender() {
-          throw new Error("DWS unavailable");
-        },
-      },
-    }),
-    /failed for every configured target/u,
-  );
-  assert.equal(store.closed, true);
-});
-
-test("监听入库边界拒绝白名单查询返回的其他发送者", async () => {
-  const store = listenerStore();
-  const ingested = [];
-  store.ingestMessages = async (messages) => {
-    ingested.push(...messages);
-    return messages.length;
-  };
-
-  await assert.rejects(
-    startListener({
-      store,
-      config: {
-        ...listenerConfig,
-        targetUserIds: ["allowlisted-user"],
-      },
-      once: true,
-      dws: {
-        async fetchBySender() {
-          return [{
-            id: "unexpected-message",
-            senderUserId: "unexpected-user",
-            conversationId: "direct",
-            createTime: "2026-07-31T10:00:00Z",
-            content: "异常消息",
-          }];
-        },
-      },
-    }),
-    /failed for every configured target/u,
-  );
-  assert.deepEqual(ingested, []);
-  assert.equal(
-    [...store.checkpoints.keys()].some((key) => key.startsWith("dws:last-success:")),
-    false,
-  );
-});
-
-test("监听器并发重算截止时间时旧结果不能清除新定时器", async () => {
-  const store = listenerStore();
-  let createCalls = 0;
-  let deadlineCalls = 0;
-  let resolveOlder;
-  let resolveNewer;
-  const older = new Promise((resolve) => { resolveOlder = resolve; });
-  const newer = new Promise((resolve) => { resolveNewer = resolve; });
-  let observeSweep;
-  const sweepObserved = new Promise((resolve) => { observeSweep = resolve; });
-  store.createReadyTasks = async () => {
-    createCalls += 1;
-    if (createCalls === 4) observeSweep();
-    return [];
-  };
-  store.nextPendingBundleAt = async () => {
-    deadlineCalls += 1;
-    if (deadlineCalls === 1) return null;
-    if (deadlineCalls === 2) return older;
-    if (deadlineCalls === 3) return newer;
-    return null;
-  };
-  const listener = await startListener({
-    store,
-    config: {
-      ...listenerConfig,
-      targetUserIds: [],
-      dingtalkRoot: "/nonexistent/dingtalk",
-      bundleMaxWaitMs: 8_000,
-      bundleGapMs: 1_000,
-      waitingInformationTtlMs: 60_000,
-      fallbackMs: 60_000,
-      heartbeatMs: 60_000,
-      debounceMs: 10,
-    },
-    once: false,
-    dws: {},
-  });
-  const first = listener.createTasks();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(deadlineCalls, 2);
-  const second = listener.createTasks();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(deadlineCalls, 3);
-  resolveNewer(new Date(Date.now() + 30));
-  await second;
-  resolveOlder(null);
-  await first;
-  let timeout;
-  await Promise.race([
-    sweepObserved,
-    new Promise((_, reject) => {
-      timeout = setTimeout(
-        () => reject(new Error("Bundle deadline timer was cleared by a stale result")),
-        1_000,
-      );
-    }),
-  ]).finally(() => clearTimeout(timeout));
-  assert.equal(createCalls, 4);
-  await listener.stop();
-  assert.equal(store.closed, true);
-});
-
-test("截止扫描瞬时失败后仍会自动重试而不等待低频兜底", async () => {
-  const store = listenerStore();
-  let createCalls = 0;
-  let observeRecovery;
-  const recovered = new Promise((resolve) => { observeRecovery = resolve; });
-  store.createReadyTasks = async () => {
-    createCalls += 1;
-    if (createCalls === 2) throw new Error("temporary database failure");
-    if (createCalls === 3) observeRecovery();
-    return [];
-  };
-  let deadlineCalls = 0;
-  store.nextPendingBundleAt = async () => {
-    deadlineCalls += 1;
-    return deadlineCalls === 1 ? new Date(Date.now() + 20) : null;
-  };
-  const listener = await startListener({
-    store,
-    config: {
-      ...listenerConfig,
-      targetUserIds: [],
-      dingtalkRoot: "/nonexistent/dingtalk",
-      bundleMaxWaitMs: 8_000,
-      waitingInformationTtlMs: 60_000,
-      fallbackMs: 60_000,
-      heartbeatMs: 60_000,
-      debounceMs: 10,
-    },
-    once: false,
-    dws: {},
-  });
-  let timeout;
-  await Promise.race([
-    recovered,
-    new Promise((_, reject) => {
-      timeout = setTimeout(
-        () => reject(new Error("Failed bundle sweep was not retried")),
-        1_000,
-      );
-    }),
-  ]).finally(() => clearTimeout(timeout));
-  assert.equal(createCalls, 3);
-  await listener.stop();
-});
-
-test("暂停恢复后无需新消息事件也会重新处理到期消息", async () => {
-  const store = listenerStore();
-  store.paused = true;
-  store.isPaused = async () => store.paused;
-  let createCalls = 0;
-  let observeResume;
-  const resumed = new Promise((resolve) => { observeResume = resolve; });
-  store.createReadyTasks = async () => {
-    createCalls += 1;
-    observeResume();
-    return [];
-  };
-  store.nextPendingBundleAt = async () => null;
-  const listener = await startListener({
-    store,
-    config: {
-      ...listenerConfig,
-      targetUserIds: [],
-      dingtalkRoot: "/nonexistent/dingtalk",
-      bundleMaxWaitMs: 8_000,
-      waitingInformationTtlMs: 60_000,
-      pausedBundleRecheckMs: 20,
-      fallbackMs: 60_000,
-      heartbeatMs: 60_000,
-      debounceMs: 10,
-    },
-    once: false,
-    dws: {},
-  });
-  assert.equal(createCalls, 0);
-  store.paused = false;
-  let timeout;
-  await Promise.race([
-    resumed,
-    new Promise((_, reject) => {
-      timeout = setTimeout(
-        () => reject(new Error("Listener did not wake after pause was removed")),
-        1_000,
-      );
-    }),
-  ]).finally(() => clearTimeout(timeout));
-  assert.equal(createCalls, 1);
-  await listener.stop();
 });

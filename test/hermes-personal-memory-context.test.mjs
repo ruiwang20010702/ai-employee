@@ -38,12 +38,12 @@ test("Hermes personal memory loader resolves only the dedicated OAuth secret", a
   const root = await mkdtemp(join(tmpdir(), "foursday-hermes-memory-"));
   const configPath = join(root, "production.json");
   await writeFile(configPath, JSON.stringify({
-    AI_EMPLOYEE_PERSONAL_MEMORY_ENABLED: "true",
-    AI_EMPLOYEE_PERSONAL_MEMORY_MCP_URL: "https://memory.example.com/mcp",
-    AI_EMPLOYEE_PERSONAL_MEMORY_ISSUER_URL: "https://memory.example.com/oauth",
-    AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_ID: "foursday-read-client",
-    AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET: "keychain://service/account",
-    DATABASE_URL: "keychain://must/not-be-resolved",
+    FOURSDAY_GBRAIN_ENABLED: "true",
+    FOURSDAY_GBRAIN_MCP_URL: "https://memory.example.com/mcp",
+    FOURSDAY_GBRAIN_ISSUER_URL: "https://memory.example.com/oauth",
+    FOURSDAY_GBRAIN_CLIENT_ID: "foursday-read-client",
+    FOURSDAY_GBRAIN_CLIENT_SECRET: "keychain://service/account",
+    FOURSDAY_DATABASE_URL: "keychain://must/not-be-resolved",
   }));
   await chmod(configPath, 0o600);
   const resolved = [];

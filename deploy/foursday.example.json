@@ -1,0 +1,19 @@
+{
+  "FOURSDAY_DATABASE_URL": "keychain://foursday/database-url",
+  "FOURSDAY_DATA_KEY": "keychain://foursday/data-key",
+  "FOURSDAY_TENANT_ID": "personal",
+  "FOURSDAY_DWS_PATH": "/absolute/path/to/dws",
+  "FOURSDAY_CODEX_PATH": "/absolute/path/to/codex",
+  "FOURSDAY_DINGTALK_USERS": "trusted-staff-id",
+  "FOURSDAY_DINGTALK_GROUPS": "",
+  "FOURSDAY_DINGTALK_SELF_USER": "owner-staff-id",
+  "FOURSDAY_DINGTALK_FALLBACK_MS": 300000,
+  "FOURSDAY_DINGTALK_QUIET_MS": 3000,
+  "FOURSDAY_DINGTALK_MAX_WAIT_MS": 8000,
+  "FOURSDAY_GBRAIN_ENABLED": true,
+  "FOURSDAY_GBRAIN_MCP_URL": "https://gbrain.example.com/mcp",
+  "FOURSDAY_GBRAIN_ISSUER_URL": "https://gbrain.example.com/oauth",
+  "FOURSDAY_GBRAIN_CLIENT_ID": "foursday-personal-client",
+  "FOURSDAY_GBRAIN_CLIENT_SECRET": "keychain://foursday/gbrain-client-secret",
+  "FOURSDAY_GBRAIN_WRITE_ENABLED": false
+}

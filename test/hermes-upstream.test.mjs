@@ -12,7 +12,7 @@ const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
 test("Hermes 上游锁定到官方不可变提交并使用独立运行目录", async () => {
   const lock = validateHermesUpstreamLock(JSON.parse(await readFile(
-    join(projectRoot, "hermes", "upstream.lock.json"),
+    join(projectRoot, "distribution", "upstream.lock.json"),
     "utf8",
   )));
   assert.deepEqual(lock, {

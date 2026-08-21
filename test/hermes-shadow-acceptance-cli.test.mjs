@@ -45,7 +45,7 @@ async function fixture(t) {
 
 function args(paths, apply = false) {
   return [
-    "scripts/生成Hermes影子验收.mjs",
+    "scripts/生成Foursday影子验收.mjs",
     "--release-sha",
     releaseSha,
     "--ledger",
@@ -60,7 +60,7 @@ function args(paths, apply = false) {
   ];
 }
 
-test("Hermes shadow 验收默认零写，显式应用才生成私有凭据", async (t) => {
+test("Foursday shadow 验收默认零写，显式应用才生成私有凭据", async (t) => {
   const paths = await fixture(t);
   const preview = JSON.parse((await execFileAsync(process.execPath, args(paths), {
     cwd: new URL("../", import.meta.url),

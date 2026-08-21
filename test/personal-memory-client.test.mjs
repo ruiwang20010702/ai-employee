@@ -88,7 +88,7 @@ test("探针只放行 default source 的只读 OAuth 客户端", async () => {
   assert.equal(calls[2].options.body.includes('"name":"whoami"'), true);
 
   for (const identity of [
-    { transport: "legacy", scopes: ["read"], source_id: "default" },
+    { transport: "unsupported", scopes: ["read"], source_id: "default" },
     { transport: "oauth", scopes: ["read", "write"], source_id: "default" },
     { transport: "oauth", scopes: ["read"], source_id: "foursday" },
   ]) {

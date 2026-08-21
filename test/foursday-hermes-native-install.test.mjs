@@ -1,19 +1,60 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   buildFoursdayNativeInstallPlan,
+  assertFoursdayEmbeddedRuntimeIdentity,
   finishFoursdayNativeProfileInstall,
   foursdayNativeHermesLayout,
   inspectFoursdaySourceCommit,
+  pruneFoursdayOptionalNodeDependencies,
   runFoursdayNativeHermesInstall,
   prepareNativeHermesInstallDirectory,
   recoverInterruptedNativeHermesInstall,
   stageFoursdayProfileDistribution,
+  verifyFoursdaySingleAgentLoopContract,
 } from "../src/foursday-hermes-native-install.mjs";
+
+async function writeSingleLoopRuntime(layout, { bypass = true } = {}) {
+  await mkdir(join(layout.installDirectory, "agent"), { recursive: true, mode: 0o700 });
+  await writeFile(join(layout.installDirectory, "agent", "conversation_loop.py"), bypass
+    ? 'if agent.api_mode == "codex_app_server":\n    return agent._run_codex_app_server_turn(\n'
+    : "while agent.iterates():\n    pass\n");
+  await writeFile(join(layout.installDirectory, "agent", "codex_runtime.py"),
+    '"""Hands the entire turn to a `codex app-server` subprocess."""\nCodexAppServerSession = object\n' +
+    'is_approval_bypass_active()\nauto_approve_exec=auto_approve_requests\n');
+  await writeFile(join(layout.installDirectory, "agent", "agent_init.py"),
+    'mem_config.get("nudge_interval", 10)\nskills_config.get("creation_nudge_interval", 10)\n');
+  await writeFile(join(layout.installDirectory, "agent", "background_review.py"),
+    'task.get("enabled"), default=True\n');
+  await writeFile(join(layout.installDirectory, "agent", "title_generator.py"),
+    'title_config.get("enabled"), default=True\n');
+  await writeFile(join(layout.installDirectory, "agent", "curator.py"),
+    'cfg.get("enabled", True)\n');
+}
+
+async function writeSingleLoopProfile(layout) {
+  await mkdir(layout.profileDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(join(layout.profileDirectory, "config.yaml"), [
+    "openai_runtime: codex_app_server",
+    "approvals:",
+    "  mode: 'off'",
+    "background_review:",
+    "    enabled: false",
+    "title_generation:",
+    "    enabled: false",
+    "memory_enabled: false",
+    "user_profile_enabled: false",
+    "nudge_interval: 0",
+    "creation_nudge_interval: 0",
+    "curator:",
+    "  enabled: false",
+    "",
+  ].join("\n"), { mode: 0o600 });
+}
 
 function lock(body) {
   return {
@@ -26,7 +67,7 @@ function lock(body) {
   };
 }
 
-test("native Hermes plan uses official profile and Gateway surfaces without touching legacy", async (t) => {
+test("native Hermes plan uses only official Profile and Gateway surfaces", async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "foursday-native-plan-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const layout = foursdayNativeHermesLayout({ userHome: root, projectRoot: root });
@@ -34,7 +75,7 @@ test("native Hermes plan uses official profile and Gateway surfaces without touc
   assert.equal(plan.layout.hermesHome, join(root, ".hermes"));
   assert.equal(plan.layout.profile, "foursday");
   assert.equal(plan.profile.gatewayInstallRequested, true);
-  assert.equal(plan.legacyRuntimeTouched, false);
+  assert.equal(plan.messagesSent, 0);
   assert.equal(plan.productionWrite, false);
 });
 
@@ -66,37 +107,127 @@ test("source commit identity requires a clean worktree without hidden index flag
   }), null);
 });
 
+test("embedded runtime identity permits only the official installer contributor stamp", async () => {
+  const expectedCommit = "e".repeat(40);
+  const expectedRepository = "https://github.com/NousResearch/hermes-agent.git";
+  const makeRun = (status, indexFlags = "H agent/conversation_loop.py\n") =>
+    async (_path, args) => {
+      if (args.includes("rev-parse")) return { stdout: `${expectedCommit}\n` };
+      if (args.includes("get-url")) return { stdout: `${expectedRepository}\n` };
+      if (args.includes("status")) return { stdout: status };
+      if (args.includes("ls-files")) return { stdout: indexFlags };
+      throw new Error("unexpected git command");
+    };
+  const layout = {
+    userHome: "/private/home",
+    installDirectory: "/private/runtime",
+    hermesCommand: "/private/bin/runtime",
+  };
+  const valid = await assertFoursdayEmbeddedRuntimeIdentity(layout, {
+    expectedCommit,
+    expectedRepository,
+    run: makeRun(" M contributors/emails/agent@fixture.local\n"),
+  });
+  assert.equal(valid.installerNoiseFiles, 1);
+  await assert.rejects(assertFoursdayEmbeddedRuntimeIdentity(layout, {
+    expectedCommit,
+    expectedRepository,
+    run: makeRun(" M agent/conversation_loop.py\n"),
+  }), /immutable Foursday lock/u);
+  await assert.rejects(assertFoursdayEmbeddedRuntimeIdentity(layout, {
+    expectedCommit,
+    expectedRepository,
+    run: makeRun("", "h agent/conversation_loop.py\n"),
+  }), /immutable Foursday lock/u);
+});
+
+test("locked runtime must bypass its own tool loop and expose switches for all background agent loops", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "foursday-single-loop-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const layout = foursdayNativeHermesLayout({ userHome: root, projectRoot: root });
+  await writeSingleLoopRuntime(layout);
+  assert.equal((await verifyFoursdaySingleAgentLoopContract(layout)).valid, true);
+  await writeFile(join(layout.installDirectory, "agent", "conversation_loop.py"), "while true:\n    pass\n");
+  await assert.rejects(verifyFoursdaySingleAgentLoopContract(layout), /single Codex loop contract/u);
+});
+
+test("fresh install creates a private canonical runtime parent before cloning", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "foursday-native-parent-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const layout = foursdayNativeHermesLayout({ userHome: root, projectRoot: root });
+  const result = await prepareNativeHermesInstallDirectory(layout, lock("x".repeat(10_000)));
+  assert.deepEqual(result, { backup: null, existingGitCheckout: false });
+  const parent = join(root, ".hermes");
+  assert.equal(await realpath(parent), parent);
+  const { mode } = await stat(parent);
+  assert.equal(mode & 0o077, 0);
+});
+
+test("optional Node dependencies are pruned only after verification and restored on failure", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "foursday-runtime-prune-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const layout = foursdayNativeHermesLayout({ userHome: root, projectRoot: root });
+  for (const relative of ["node_modules", "apps/desktop/node_modules"]) {
+    await mkdir(join(layout.installDirectory, relative), { recursive: true, mode: 0o700 });
+    await writeFile(join(layout.installDirectory, relative, "fixture"), "x");
+  }
+  const preview = await pruneFoursdayOptionalNodeDependencies(layout);
+  assert.deepEqual(preview.targets, ["node_modules", "apps/desktop/node_modules"]);
+  await access(join(layout.installDirectory, "node_modules", "fixture"));
+  let verified = false;
+  const applied = await pruneFoursdayOptionalNodeDependencies(layout, {
+    apply: true,
+    verify: async () => {
+      verified = true;
+      await assert.rejects(access(join(layout.installDirectory, "node_modules")));
+    },
+  });
+  assert.equal(verified, true);
+  assert.equal(applied.pruned, true);
+  await assert.rejects(access(join(layout.installDirectory, "node_modules")));
+
+  await mkdir(join(layout.installDirectory, "node_modules"), { mode: 0o700 });
+  await writeFile(join(layout.installDirectory, "node_modules", "restored"), "x");
+  await assert.rejects(pruneFoursdayOptionalNodeDependencies(layout, {
+    apply: true,
+    verify: async () => { throw new Error("verification failed"); },
+  }), /verification failed/u);
+  await access(join(layout.installDirectory, "node_modules", "restored"));
+});
+
 test("profile staging packages plugins, profile and skills without Python caches", async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "foursday-native-stage-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(join(root, "hermes", "profile"), { recursive: true });
-  await mkdir(join(root, "hermes", "skills", "project-work"), { recursive: true });
-  await writeFile(join(root, "hermes", "profile", "SOUL.md"), "# Foursday\n");
-  await writeFile(join(root, "hermes", "skills", "project-work", "SKILL.md"), "# Skill\n");
+  await mkdir(join(root, "distribution", "profile"), { recursive: true });
+  await mkdir(join(root, "distribution", "skills", "project-work"), { recursive: true });
+  await writeFile(join(root, "distribution", "profile", "SOUL.md"), "# Foursday\n");
+  await writeFile(join(root, "distribution", "skills", "project-work", "SKILL.md"), "# Skill\n");
   await mkdir(join(root, "src"));
   await mkdir(join(root, "scripts"));
   for (const name of [
     "hermes-dws-sidecar.mjs",
     "hermes-personal-memory-context.mjs",
     "hermes-memory-candidate-sidecar.mjs",
+    "foursday-codex-mcp.mjs",
+    "foursday-codex-proxy.mjs",
     "personal-gbrain-promoter.mjs",
   ]) await writeFile(join(root, "src", name), "// host\n");
   await writeFile(join(root, "scripts", "运行个人gbrain记忆晋升.mjs"), "// promoter\n");
-  await mkdir(join(root, "hermes", "host"));
-  await writeFile(join(root, "hermes", "host", "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }));
-  await writeFile(join(root, "hermes", "host", "package-lock.json"), JSON.stringify({
+  await mkdir(join(root, "distribution", "host"));
+  await writeFile(join(root, "distribution", "host", "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }));
+  await writeFile(join(root, "distribution", "host", "package-lock.json"), JSON.stringify({
     name: "fixture",
     version: "1.0.0",
     lockfileVersion: 3,
     packages: { "": { name: "fixture", version: "1.0.0" } },
   }));
   for (const name of [
-    "dws_personal", "project_router", "foursday_boundary", "gbrain_memory",
+    "dws_personal", "project_router",
     "foursday_work_twin",
   ]) {
-    await mkdir(join(root, "hermes", "plugins", name), { recursive: true });
-    await writeFile(join(root, "hermes", "plugins", name, "plugin.yaml"), `name: ${name}\n`);
-    await writeFile(join(root, "hermes", "plugins", name, "__init__.py"), "# plugin\n");
+    await mkdir(join(root, "distribution", "plugins", name), { recursive: true });
+    await writeFile(join(root, "distribution", "plugins", name, "plugin.yaml"), `name: ${name}\n`);
+    await writeFile(join(root, "distribution", "plugins", name, "__init__.py"), "# plugin\n");
   }
   const layout = foursdayNativeHermesLayout({ userHome: root, projectRoot: root });
   const result = await stageFoursdayProfileDistribution({
@@ -105,16 +236,29 @@ test("profile staging packages plugins, profile and skills without Python caches
     hermesVersion: "0.20.4",
   });
   assert.equal(result.pluginCount, 1);
-  assert.equal(result.componentPluginCount, 4);
+  assert.equal(result.componentPluginCount, 2);
   const distribution = await readFile(join(result.stage, "distribution.yaml"), "utf8");
   assert.match(distribution, /hermes_requires: '==0\.20\.4'/u);
   assert.match(distribution, /foursday-release\.json/u);
   assert.equal(JSON.parse(
     await readFile(join(result.stage, "foursday-release.json"), "utf8"),
   ).foursdayCommit, null);
-  assert.match(await readFile(join(result.stage, "config.yaml"), "utf8"), /foursday-work-twin/u);
+  const profileConfiguration = await readFile(join(result.stage, "config.yaml"), "utf8");
+  assert.match(profileConfiguration, /foursday-work-twin/u);
+  assert.match(profileConfiguration, /approvals:\n  mode: 'off'/u);
+  assert.match(profileConfiguration, /background_review:\n    enabled: false/u);
+  assert.match(profileConfiguration, /title_generation:\n    enabled: false/u);
+  assert.match(profileConfiguration, /memory_enabled: false/u);
+  assert.match(profileConfiguration, /user_profile_enabled: false/u);
+  assert.match(profileConfiguration, /nudge_interval: 0/u);
+  assert.match(profileConfiguration, /creation_nudge_interval: 0/u);
+  assert.match(profileConfiguration, /curator:\n  enabled: false/u);
   await access(join(result.stage, "skills", "project-work", "SKILL.md"));
   await access(join(result.stage, "host", "src", "hermes-dws-sidecar.mjs"));
+  assert.match(
+    await readFile(join(result.stage, "host", "bin", "codex"), "utf8"),
+    /foursday-codex-proxy\.mjs/u,
+  );
   await assert.rejects(access(join(result.stage, "host", "src", "worker.mjs")));
   assert.match(
     await readFile(join(result.stage, "scripts", "foursday-memory-promoter.sh"), "utf8"),
@@ -147,9 +291,17 @@ test("native apply verifies installer digest, installs profile, doctors plugins 
     if (path === "/usr/bin/git" && args.includes("rev-parse")) {
       return { stdout: `${"e".repeat(40)}\n` };
     }
+    if (path === "/usr/bin/git" && args.includes("get-url")) {
+      return { stdout: "https://github.com/NousResearch/hermes-agent.git\n" };
+    }
+    if (path === "/usr/bin/git" && args.includes("status")) return { stdout: "" };
+    if (path === "/usr/bin/git" && args.includes("ls-files")) {
+      return { stdout: "H agent/conversation_loop.py\n" };
+    }
     if (path === "/bin/bash") {
       await mkdir(join(root, ".local", "bin"), { recursive: true });
       await writeFile(layout.hermesCommand, "#!/bin/sh\n", { mode: 0o700 });
+      await writeSingleLoopRuntime(layout);
       return { stdout: "" };
     }
     if (path === layout.hermesCommand && args[0] === "--version") {
@@ -157,6 +309,7 @@ test("native apply verifies installer digest, installs profile, doctors plugins 
     }
     if (path === layout.hermesCommand && args[0] === "profile") {
       await writeFile(layout.profileAlias, "#!/bin/sh\n", { mode: 0o700 });
+      await writeSingleLoopProfile(layout);
       return { stdout: "" };
     }
     return { stdout: "" };
@@ -175,10 +328,18 @@ test("native apply verifies installer digest, installs profile, doctors plugins 
   assert.equal(result.installed, true);
   assert.equal(result.gatewayInstalled, false);
   assert.equal(result.gatewayStarted, false);
-  assert.deepEqual(calls.map(([path, args]) => [path, args[0]]), [
+  const installerCall = calls.find(([path]) => path === "/bin/bash");
+  for (const flag of [
+    "--skip-setup",
+    "--skip-browser",
+    "--skip-computer-use",
+    "--no-skills",
+    "--non-interactive",
+  ]) assert.ok(installerCall[1].includes(flag), `missing minimal installer flag: ${flag}`);
+  assert.deepEqual(calls.filter(([path]) => path !== "/usr/bin/git").map(([path, args]) => [path, args[0]]), [
     ["/bin/bash", calls[0][1][0]],
-    ["/usr/bin/git", "-C"],
     [layout.hermesCommand, "--version"],
+    [layout.hermesCommand, "profile"],
     [layout.hermesCommand, "profile"],
     [layout.hermesCommand, "profile"],
     [layout.hermesCommand, "profile"],
@@ -234,7 +395,8 @@ test("untracked native installs are moved to a recoverable backup only after exa
   const body = Buffer.from("#!/bin/sh\n" + "#".repeat(10_000));
   const upstream = lock(body);
   const layout = foursdayNativeHermesLayout({ userHome: root, projectRoot: root });
-  await mkdir(join(layout.installDirectory, "scripts"), { recursive: true });
+  await mkdir(join(layout.installDirectory, "scripts"), { recursive: true, mode: 0o700 });
+  await chmod(join(root, ".hermes"), 0o700);
   await writeFile(join(layout.installDirectory, "scripts", "install.sh"), body);
   const result = await prepareNativeHermesInstallDirectory(layout, upstream);
   assert.ok(result.backup);
@@ -250,15 +412,25 @@ test("native profile update refuses a running Gateway before changing files", as
   await mkdir(join(root, ".local", "bin"), { recursive: true });
   await writeFile(layout.hermesCommand, "#!/bin/sh\n", { mode: 0o700 });
   await writeFile(layout.profileAlias, "#!/bin/sh\n", { mode: 0o700 });
+  await writeSingleLoopRuntime(layout);
+  await writeSingleLoopProfile(layout);
   const calls = [];
   await assert.rejects(
     finishFoursdayNativeProfileInstall({
       layout,
-      lock: { version: "0.20.4" },
+      lock: {
+        version: "0.20.4",
+        commit: "e".repeat(40),
+        repository: "https://github.com/NousResearch/hermes-agent.git",
+      },
       foursdayVersion: "0.6.0",
       run: async (path, args) => {
         calls.push([path, args]);
         if (args[0] === "--version") return { stdout: "Hermes Agent 0.20.4\n" };
+        if (path === "/usr/bin/git" && args.includes("rev-parse")) return { stdout: `${"e".repeat(40)}\n` };
+        if (path === "/usr/bin/git" && args.includes("get-url")) return { stdout: "https://github.com/NousResearch/hermes-agent.git\n" };
+        if (path === "/usr/bin/git" && args.includes("status")) return { stdout: "" };
+        if (path === "/usr/bin/git" && args.includes("ls-files")) return { stdout: "H agent/conversation_loop.py\n" };
         if (args[0] === "gateway") return { stdout: "Gateway is running\n" };
         throw new Error("must not mutate profile");
       },
@@ -266,7 +438,7 @@ test("native profile update refuses a running Gateway before changing files", as
     }),
     /Stop the Foursday Gateway/u,
   );
-  assert.equal(calls.length, 2);
+  assert.equal(calls.filter(([, args]) => args[0] === "profile").length, 0);
 });
 
 test("failed native profile update restores the official exported profile", async (t) => {
@@ -277,15 +449,25 @@ test("failed native profile update restores the official exported profile", asyn
   await mkdir(join(root, ".local", "bin"), { recursive: true });
   await writeFile(layout.hermesCommand, "#!/bin/sh\n", { mode: 0o700 });
   await writeFile(layout.profileAlias, "#!/bin/sh\n", { mode: 0o700 });
+  await writeSingleLoopRuntime(layout);
+  await writeSingleLoopProfile(layout);
   const calls = [];
   await assert.rejects(
     finishFoursdayNativeProfileInstall({
       layout,
-      lock: { version: "0.20.4" },
+      lock: {
+        version: "0.20.4",
+        commit: "e".repeat(40),
+        repository: "https://github.com/NousResearch/hermes-agent.git",
+      },
       foursdayVersion: "0.6.0",
       run: async (path, args) => {
         calls.push([path, args]);
         if (args[0] === "--version") return { stdout: "Hermes Agent 0.20.4\n" };
+        if (path === "/usr/bin/git" && args.includes("rev-parse")) return { stdout: `${"e".repeat(40)}\n` };
+        if (path === "/usr/bin/git" && args.includes("get-url")) return { stdout: "https://github.com/NousResearch/hermes-agent.git\n" };
+        if (path === "/usr/bin/git" && args.includes("status")) return { stdout: "" };
+        if (path === "/usr/bin/git" && args.includes("ls-files")) return { stdout: "H agent/conversation_loop.py\n" };
         if (args[0] === "gateway") return { stdout: "Gateway is not running\n" };
         if (args[0] === "profile" && args[1] === "export") {
           await writeFile(args.at(-1), "private profile backup", { mode: 0o600 });

@@ -2,16 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   adapterContractVersion,
-  assertAgentRuntime,
   assertMessageAdapter,
-  assertModelProvider,
   assertNormalizedMessage,
 } from "../src/adapter-contracts.mjs";
-import {
-  ClaudeCodeAgentRuntime,
-  CodexAgentRuntime,
-  ModelProviderAgentRuntime,
-} from "../src/agent-runtime.mjs";
 import { DwsAdapter } from "../src/dws.mjs";
 
 test("DWS exposes the versioned generic message adapter contract", async () => {
@@ -53,7 +46,7 @@ test("message contracts fail closed for missing methods and ambiguous group ment
       deliveryMode: "demo",
       contractVersion: adapterContractVersion,
     }),
-    (error) => error.code === "AI_EMPLOYEE_MESSAGE_ADAPTER_CONTRACT",
+    (error) => error.code === "FOURSDAY_MESSAGE_ADAPTER_CONTRACT",
   );
   assert.throws(
     () => assertNormalizedMessage({
@@ -64,50 +57,6 @@ test("message contracts fail closed for missing methods and ambiguous group ment
       occurredAt: "2026-08-11T10:00:00Z",
       chatType: "group",
     }),
-    (error) => error.code === "AI_EMPLOYEE_MESSAGE_CONTRACT",
-  );
-});
-
-test("Codex and model-backed runtimes share one draft runtime contract", async () => {
-  assert.equal(assertAgentRuntime(new CodexAgentRuntime()).id, "codex");
-  assert.equal(
-    assertAgentRuntime(new ClaudeCodeAgentRuntime()).id,
-    "claude-code",
-  );
-  const provider = {
-    id: "fixture-model",
-    contractVersion: adapterContractVersion,
-    async generateStructured({ context, schema }) {
-      assert.equal(context.marker, "contract-test");
-      assert.equal(schema.type, "object");
-      return { ok: true };
-    },
-  };
-  assert.equal(assertModelProvider(provider), provider);
-  const runtime = assertAgentRuntime(new ModelProviderAgentRuntime(provider));
-  assert.deepEqual(await runtime.generateDraft({
-    prompt: "fixture",
-    schemaPath: new URL("../schemas/draft.schema.json", import.meta.url),
-    context: { marker: "contract-test" },
-  }), { ok: true });
-});
-
-test("model and runtime contracts reject unstable identities", () => {
-  assert.throws(
-    () => assertModelProvider({
-      id: "Claude Model",
-      contractVersion: adapterContractVersion,
-      generateStructured() {},
-    }),
-    (error) => error.code === "AI_EMPLOYEE_MODEL_PROVIDER_CONTRACT",
-  );
-  assert.throws(
-    () => assertAgentRuntime({
-      id: "runtime",
-      decisionSource: "runtime",
-      contractVersion: "2.0",
-      generateDraft() {},
-    }),
-    (error) => error.code === "AI_EMPLOYEE_AGENT_RUNTIME_CONTRACT",
+    (error) => error.code === "FOURSDAY_MESSAGE_CONTRACT",
   );
 });
