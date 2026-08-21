@@ -17,7 +17,7 @@ test("环境变量密钥引用只返回来源类型且不改变值", async () =>
 test("钥匙串引用解码固定服务和账号并支持注入测试适配器", async () => {
   const calls = [];
   const result = await resolveSecretReference(
-    "keychain://ai-employee/admin%2Fread",
+    "keychain://foursday/admin%2Fread",
     {
       keychainReader: async (service, account) => {
         calls.push({ service, account });
@@ -25,7 +25,7 @@ test("钥匙串引用解码固定服务和账号并支持注入测试适配器",
       },
     },
   );
-  assert.deepEqual(calls, [{ service: "ai-employee", account: "admin/read" }]);
+  assert.deepEqual(calls, [{ service: "foursday", account: "admin/read" }]);
   assert.equal(result.source, "macos-keychain");
   assert.equal(result.value, "keychain-secret");
 });

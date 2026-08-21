@@ -309,7 +309,6 @@ export class DwsAdapter {
     this.dwsMock = dwsMock;
     this.commandRunner = commandRunner;
     this.environment = environment;
-    this.selfApprovalIdentity = null;
     this.userIdentityCache = new Map();
   }
 
@@ -544,83 +543,6 @@ export class DwsAdapter {
       })
       .sort((a, b) => String(a.createTime).localeCompare(String(b.createTime)))
       .slice(-limit);
-  }
-
-  async resolveSelfApprovalIdentity(expectedUserId) {
-    if (this.selfApprovalIdentity?.userId === expectedUserId) {
-      return this.selfApprovalIdentity.openDingTalkId;
-    }
-    const self = await this.run(["contact", "user", "get-self"]);
-    const employee = self?.result?.[0]?.orgEmployeeModel;
-    if (!employee?.userId || employee.userId !== expectedUserId || !employee.orgUserName) {
-      throw new Error("DWS current user does not match the configured approval owner");
-    }
-    const search = await this.run([
-      "contact",
-      "user",
-      "search",
-      "--query",
-      employee.orgUserName,
-    ]);
-    const candidates = search?.result ?? search?.items ?? [];
-    const exact = candidates.filter((candidate) =>
-      (candidate.userId ?? candidate.orgEmployeeModel?.userId) === expectedUserId
-    );
-    const openDingTalkId = exact[0]?.openDingTalkId ??
-      exact[0]?.openDingtalkId ?? exact[0]?.orgEmployeeModel?.openDingTalkId;
-    if (exact.length !== 1 || !openDingTalkId) {
-      throw new Error("DWS approval owner identity is ambiguous or unavailable");
-    }
-    this.selfApprovalIdentity = { userId: expectedUserId, openDingTalkId };
-    return openDingTalkId;
-  }
-
-  async sendMobileApproval({ selfUserId, text, idempotencyKey }) {
-    const receiver = await this.resolveSelfApprovalIdentity(selfUserId);
-    return this.run([
-      "chat",
-      "message",
-      "send",
-      "--open-dingtalk-id",
-      receiver,
-      "--title",
-      "Foursday 待审批",
-      "--text",
-      text,
-      "--uuid",
-      idempotencyKey,
-      "--ai-tag",
-      "-y",
-    ]);
-  }
-
-  async fetchMobileApprovalMessages({ selfUserId, start, end }) {
-    const receiver = await this.resolveSelfApprovalIdentity(selfUserId);
-    const payload = await this.run([
-      "chat",
-      "message",
-      "list-direct",
-      "--open-dingtalk-id",
-      receiver,
-      "--time",
-      localTimestamp(start),
-      "--forward",
-      "true",
-      "--limit",
-      "50",
-    ]);
-    const startTime = epoch(start);
-    const endTime = epoch(end);
-    return collectMessages(payload, null)
-      .filter((message) => {
-        const createdAt = epoch(message.createTime);
-        const senderMatches = normalizeDwsIdentity(message.senderUserId) === selfUserId ||
-          normalizeDwsIdentity(message.senderOpenDingTalkId) === receiver;
-        return senderMatches && createdAt != null &&
-          createdAt > startTime && createdAt <= endTime + 999;
-      })
-      .map((message) => ({ ...message, approvalOwnerVerified: true }))
-      .sort((left, right) => String(left.createTime).localeCompare(String(right.createTime)));
   }
 
   async hasManualReply({

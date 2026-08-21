@@ -14,8 +14,8 @@ const args = process.argv.slice(2);
 if (args.some((argument) => !["--once", "--quiet-idle"].includes(argument))) {
   throw new Error("Usage: 运行个人gbrain记忆晋升.mjs [--once] [--quiet-idle]");
 }
-if (!process.env.AI_EMPLOYEE_CONFIG_FILE && process.env.FOURSDAY_PRODUCTION_CONFIG) {
-  process.env.AI_EMPLOYEE_CONFIG_FILE = process.env.FOURSDAY_PRODUCTION_CONFIG;
+if (!process.env.FOURSDAY_CONFIG_FILE && process.env.FOURSDAY_PRODUCTION_CONFIG) {
+  process.env.FOURSDAY_CONFIG_FILE = process.env.FOURSDAY_PRODUCTION_CONFIG;
 }
 await applyProductionConfigFile();
 const config = loadConfig({ requireTargets: false, production: true });

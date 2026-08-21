@@ -6,9 +6,9 @@
 
 **A personal-memory-driven work twin for real projects.**
 
-Trusted message → personal context → real workspace → Hermes + Codex → verified work → natural reply.
+Trusted message → personal context → real workspace → verified work → natural reply.
 
-[简体中文](./docs/指南/中文首页.md) · [Architecture](./docs/设计总览.md) · [Gate 2 evidence](./docs/历史/自主工作分身迁移验收报告.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+[简体中文](./docs/指南/中文首页.md) · [Architecture](./docs/en/architecture.md) · [Install](./docs/en/deployment.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 [![Checks](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/check.yml)
 [![Security](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml/badge.svg)](https://github.com/ruiwang20010702/foursday/actions/workflows/security.yml)
@@ -16,115 +16,119 @@ Trusted message → personal context → real workspace → Hermes + Codex → v
 
 </div>
 
-## What Foursday is
+## What it does
 
-Foursday is an AI work twin that uses your personal gbrain and a general Hermes Agent Loop to do work—not a chatbot that needs a new capability, JSON pointer, or reply template for every question.
+Foursday is an AI work twin for people who want an agent to work inside their real projects—not a chatbot that needs a new workflow for every question.
 
-For an allowlisted contact, ordinary reversible work is autonomous:
+For an allowlisted contact, Foursday can:
 
-- understand the conversation and route the project;
-- enter the real workspace;
-- inspect files, scripts, ledgers, and Git state;
-- calculate, analyze, write documents, or change code;
-- run tests and continue fixing failures;
-- read the result back and reply with evidence.
+- understand the conversation and route it to the right project;
+- read authorized pages from your personal gbrain;
+- use Codex inside the real workspace;
+- search, calculate, edit files, run tests, and recover from failures;
+- reply naturally with read-back evidence;
+- stop when the owner takes over.
 
-Push, merge, production deployment, production data writes, irreversible deletion, payment, contracts, HR decisions, secrets, and irreversible commitments remain independent hard boundaries.
-
-## One-command install
-
-Requires macOS and Git. The verified upstream Hermes installer manages its own Python, Node.js, and `uv` runtime.
-
-```bash
-git clone https://github.com/ruiwang20010702/foursday.git && cd foursday && npm ci --ignore-scripts && npm run hermes:setup -- --apply
-```
-
-Already cloned? Run `npm run hermes:setup` for a zero-write preview, then repeat with `-- --apply`. Foursday downloads the official Hermes installer from the locked upstream commit, verifies its SHA-256, installs the native runtime, and installs an isolated `foursday` Profile distribution containing the plugins, Profile, Skills, and host bridges. It does not vendor or patch the Hermes core.
-
-When installed as an npm/GitHub package, `foursday install` is the same native zero-write preview and `foursday install --apply` uses the same official Profile path. The old overlay/Node initializer is not the default install command.
-
-Installation does **not** copy credentials, start the Gateway, send messages, or enable active mode. Configure the profile with `npm run hermes:configure`, then install the native send-disabled service with `npm run hermes:gateway -- install-shadow --apply`. Active mode remains a separate single-writer cutover.
-
-Updates are refused while the Profile Gateway is running. An existing Profile is exported to a private temporary archive and restored automatically if installation, dependency setup, or plugin doctor fails. Activation requires a private, non-stale shadow acceptance receipt, the same full release SHA, and its derived confirmation value. `npm run hermes:gateway -- remove-profile` is a zero-write uninstall preview; applying the displayed `REMOVE-FOURSDAY-PROFILE` confirmation uses official Hermes commands to remove only the Foursday Gateway, alias, Profile, and bundled plugins while preserving native Hermes, production configuration, and personal gbrain.
+Push, merge, deployment, production writes, irreversible deletion, payment, contracts, HR decisions, and secret disclosure remain hard boundaries.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A["DWS personal DingTalk / Hermes channels"] --> B["Allowlist + session"]
-    B --> C["Personal gbrain + minimal project registry"]
-    C --> D["Real project workspace"]
-    D --> E["Hermes Agent Loop"]
-    E --> F["OpenAI Codex app-server"]
-    F --> G["Search / files / terminal / tests"]
-    G --> F
-    F --> H["Read-back evidence + natural reply"]
-    E --> I{"High-risk boundary"}
-    I -->|"reversible"| G
-    I -->|"external / irreversible"| J["Owner authorization"]
+    M["Personal DingTalk / messaging channels"] --> T["Foursday Gateway + session"]
+    T --> R["Foursday trust + project router"]
+    G["Personal gbrain"] --> C["Private context"]
+    R --> C
+    C --> X["Codex Agent Loop"]
+    X --> W["Real project workspace"]
+    W --> X
+    X --> V["Read-back evidence"]
+    V --> T
+    T --> M
+    X --> B{"Sandbox + rules + review"}
+    B -->|"reversible"| W
+    B -->|"external / irreversible"| O["Blocked / owner-authorized exit"]
 ```
 
-Foursday is a native Hermes Profile distribution on an exact compatible upstream release:
+Foursday uses a pinned, minimally installed [Hermes](https://github.com/NousResearch/hermes-agent) control plane internally; Codex is the only work-planning and reply-generating loop. Foursday ships:
 
-- pinned Hermes `v2026.8.18` / `0.20.4`;
-- external DWS, project-router, personal-gbrain, and high-risk-boundary plugins;
-- a Foursday Profile and general project-work Skill;
-- project workspace routing through the official per-turn plugin Hook, with no core patch;
-- no Hermes fork, copied virtualenv, custom Agent Loop, or second business-memory repository.
+- an isolated `foursday` Profile;
+- DWS personal DingTalk and project-router plugins;
+- an isolated Codex home with an App Server policy proxy, workspace sandboxing, forbidden command rules, automatic approval review, and a Foursday MCP;
+- a project-work Skill;
+- small host-side bridges for credentials and personal-memory promotion.
 
-[Read the canonical architecture map](./docs/设计总览.md).
+The installation gate verifies that the pinned runtime bypasses its own foreground tool loop in `codex_app_server` mode. Foursday also disables upstream built-in memory, memory/skill nudges, background review, automatic title generation, and the curator; durable learning goes only through the Foursday MCP and personal-gbrain promotion path.
 
-## Memory model
+Profile behavior, routed project details, and personal-memory context are explicitly bridged into Codex rather than assumed to flow through the embedded runtime. A private 15-minute token binds each turn to one workspace and Session; the proxy removes the internal marker before reasoning, labels gbrain text as data rather than instructions, and prevents the token from leaving in a reply.
 
-```text
-Personal PRIVATE gbrain Git → durable business knowledge authority
-Personal gbrain PostgreSQL  → rebuildable search/entity/graph index
-Hermes Session DB           → conversation, tool calls, short-term execution
-Foursday PostgreSQL         → retained rollback and governance state
+The previous custom Agent Runtime, capability manifests, approval UI, managed Gateway, compatibility installer, and duplicated documentation were removed. Git history remains the recovery path.
+
+## Install
+
+Requirements: macOS, Git, Node.js 22+, a working DWS installation, and access to a personal gbrain endpoint.
+
+```bash
+git clone https://github.com/ruiwang20010702/foursday.git
+cd foursday
+npm ci --ignore-scripts
+npx --no-install foursday install
+npx --no-install foursday install --apply
 ```
 
-The gbrain OAuth credential stays in a host-side read-only bridge. Agent terminal commands never receive the credential, production configuration, DWS executable, deployment secrets, or network access.
+`foursday install` verifies the pinned upstream installer, skips browser, Computer Use and bundled skills, then atomically prunes optional Node dependency trees only after the runtime and plugin doctor still pass. On the reference macOS host this reduced the installed runtime from 1.8 GB to 454 MB; the first install is still limited by the upstream dependency-install time. It does not start a Gateway or send a message.
 
-## Production status
+Then create private copies of:
 
-The local V3 candidate has passed all 12 PoC gates:
+- [`deploy/foursday.example.json`](./deploy/foursday.example.json)
+- [`distribution/projects.example.json`](./distribution/projects.example.json)
 
-- real DWS receipt from the original personal DingTalk conversation;
-- autonomous 2.2 project audit: `68,786` formal questions vs `81,088` source rows;
-- same-session follow-ups for release, failures, worst batch, cost, and cause;
-- real project documentation, analysis, and code changes with read-back;
-- one real personal self-chat send plus owner takeover interrupt;
-- one separately authorized natural correction to the original contact, read back exactly once;
-- unknown users, unmentioned groups, ambiguity, secret access, network, push, and deployment rejected;
-- full Foursday regression passed; the live count is maintained only in the [status matrix](./docs/完成度矩阵.md);
-- Hermes contract checks: 202 passed, 1 upstream conditional skip.
+Configure and start in send-disabled shadow mode:
 
-Production is intentionally in a safe review stop: the database pause flag is on, both the previously managed Gateway and the native Profile Gateway are stopped and launchd-disabled, and sending, execution, proactive work, automatic approval, and memory read/write are disabled. Only the local console and read-only health surface remain available. The native `~/.hermes` migration is versioned for review but has not received production authority. See the [status matrix](./docs/完成度矩阵.md) for live boundaries.
+```bash
+FOURSDAY_CONFIG_FILE=/absolute/private/foursday.json npx --no-install foursday configure --apply --registry /absolute/private/projects.json
+FOURSDAY_CONFIG_FILE=/absolute/private/foursday.json npx --no-install foursday login --apply
+FOURSDAY_CONFIG_FILE=/absolute/private/foursday.json npx --no-install foursday verify --apply
+npx --no-install foursday gateway install-shadow --apply
+npx --no-install foursday gateway start-shadow --apply
+```
 
-[Review the full Gate 2 report](./docs/历史/自主工作分身迁移验收报告.md).
+Activation is deliberately separate and requires a current shadow-acceptance receipt bound to the exact Foursday commit. See [deployment](./docs/en/deployment.md).
 
-The old `hermes:prepare`, `hermes:patch`, and `hermes:install` commands remain temporarily under the legacy migration path only. New installations use the native installer, Profile configuration, official plugin doctor, and official Gateway service commands. See the [deployment guide](./docs/en/deployment.md).
+`foursday verify` runs one real Codex turn against an ephemeral fixture. It requires tool evidence, checks an unpredictable fact token, proves the workspace digest is unchanged, and performs no DingTalk send, production write, or deployment.
+
+## Memory ownership
+
+| Store | Responsibility |
+|---|---|
+| Personal PRIVATE gbrain Git | Durable business knowledge |
+| gbrain PostgreSQL | Rebuildable search and graph projection |
+| Foursday Session store | Conversation and tool history, provided by the embedded control plane |
+| Foursday PostgreSQL | Encrypted memory-promotion queue only |
+
+Foursday does not create a second knowledge repository or copy personal pages into its own Git repository.
+
+## Status
+
+The repository now targets the Foursday control-plane distribution with one Codex Agent Loop. The local production instance is intentionally stopped; installing this repository does not inherit its authority, credentials, allowlist, or send permission.
+
+Run the verified checks locally:
+
+```bash
+npm run check:full
+npm run check:python
+npm run reuse:verify
+npm run check:security
+```
 
 ## Documentation
 
-| Need | Canonical source |
-|---|---|
-| Product definition and acceptance | [Product requirements](./docs/产品需求文档.md) |
-| Architecture and module map | [Design overview](./docs/设计总览.md) |
-| Implementation rules | [Technical design](./docs/技术设计文档.md) |
-| Current status and removed concepts | [Status matrix](./docs/完成度矩阵.md) |
-| Migration evidence | [Gate 2 report](./docs/历史/自主工作分身迁移验收报告.md) |
-| Current production operations | [Legacy runtime runbook](./docs/生产运维手册.md) |
-| Historical decision | [Hermes migration decision](./docs/历史/自主工作分身架构迁移方案.md) |
-
-## Roadmap
-
-- [x] General Hermes/Codex loop with DWS, gbrain, routing, evidence, and hard boundaries
-- [x] Real P0 conversations, follow-ups, project work, send read-back, and takeover
-- [x] Reproducible native Profile distribution with a pinned official installer and zero core patches
-- [x] Gate 2 candidate committed and published on `main`
-- [ ] Controlled production migration from the Foursday-managed Gateway to the native Hermes Profile Gateway
-- [ ] Feishu, WeCom, Slack, Teams, Gmail, and Google Workspace profiles
+- [Architecture](./docs/en/architecture.md)
+- [Deployment](./docs/en/deployment.md)
+- [Integration guide](./docs/en/integrations.md)
+- [产品需求文档](./docs/产品需求文档.md)
+- [技术设计文档](./docs/技术设计文档.md)
+- [中文首页](./docs/指南/中文首页.md)
 
 ## License
 

@@ -20,7 +20,7 @@ import { isMainModule } from "../src/main-module.mjs";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
-const testDirectoryPrefix = "ai-employee-pgtest-";
+const testDirectoryPrefix = "foursday-pgtest-";
 
 export function assertSafeTemporaryTestDirectory(path, systemTemporaryDirectory = tmpdir()) {
   const target = resolve(path);
@@ -38,6 +38,7 @@ export function assertSafeTemporaryTestDirectory(path, systemTemporaryDirectory 
 export function isolatedTestEnvironment(environment, databaseUrl) {
   const result = {};
   const exactBlocked = new Set([
+    "FOURSDAY_DATABASE_URL",
     "DATABASE_URL",
     "DATABASE_SSL",
     "DWS_PATH",
@@ -50,6 +51,7 @@ export function isolatedTestEnvironment(environment, databaseUrl) {
   for (const [key, value] of Object.entries(environment ?? {})) {
     if (
       exactBlocked.has(key) ||
+      key.startsWith("FOURSDAY_") ||
       key.startsWith("AI_EMPLOYEE_") ||
       key.startsWith("DINGTALK_") ||
       key.startsWith("ANTHROPIC_") ||
@@ -180,8 +182,8 @@ export async function runCompleteTest({
   const dataDirectory = join(temporaryRoot, "data");
   const logPath = join(temporaryRoot, "postgres.log");
   const port = await availablePort();
-  const databaseUser = "ai_employee_test_admin";
-  const databaseName = "ai_employee_test";
+  const databaseUser = "foursday_test_admin";
+  const databaseName = "foursday_test";
   const databaseUrl = `postgresql://${databaseUser}@127.0.0.1:${port}/${databaseName}`;
   let started = false;
   try {

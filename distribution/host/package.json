@@ -1,0 +1,9 @@
+{
+  "name": "foursday-hermes-host",
+  "version": "0.7.0-rc.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pg": "8.22.0"
+  }
+}

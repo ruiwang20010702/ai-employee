@@ -7,7 +7,7 @@ import {
 
 function acceptance(releaseSha, createdAt = "2026-08-20T00:00:00.000Z") {
   return {
-    schema: "foursday-hermes-shadow-acceptance/v1",
+    schema: "foursday-shadow-acceptance/v1",
     releaseSha,
     evidenceDigest: "a".repeat(64),
     createdAt,
@@ -26,7 +26,7 @@ test("native activation preview and apply bind the exact shadow receipt", () => 
     now: new Date("2026-08-20T01:00:00.000Z"),
   });
   assert.equal(preview.scenarioCount, 10);
-  assert.match(preview.confirmation, /^ACTIVATE-HERMES:/u);
+  assert.match(preview.confirmation, /^ACTIVATE-FOURSDAY:/u);
   assert.throws(
     () => authorizeFoursdayNativeGatewayAction("activate", {
       apply: true,

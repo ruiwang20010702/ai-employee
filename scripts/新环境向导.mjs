@@ -1,365 +1,182 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { initializeProductionConfig } from "./初始化生产配置.mjs";
-import { provisionGeneratedKeychainSecrets } from "./初始化钥匙串密钥.mjs";
-import { inspectReuseReadiness } from "../src/reuse-readiness.mjs";
-import { isMainModule } from "../src/main-module.mjs";
-import { activationHelp, runActivation } from "./启动体验.mjs";
 import {
   foursdayNativeHermesLayout,
   inspectFoursdaySourceCommit,
   runFoursdayNativeHermesInstall,
 } from "../src/foursday-hermes-native-install.mjs";
 import { validateHermesUpstreamLock } from "../src/hermes-upstream.mjs";
+import { runFoursdayCodexLogin } from "../src/foursday-codex-auth.mjs";
+import { runFoursdayCodexShadow } from "../src/foursday-codex-shadow.mjs";
+import { defaultProductionConfigPath } from "../src/production-config-file.mjs";
+import { isMainModule } from "../src/main-module.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-const planSchema = "ai-employee-command-plan/v1";
 
-async function installNativeFoursdayProfile({ apply, projectRoot }) {
+export const foursdayHelp = Object.freeze({
+  usage: [
+    "foursday install [--apply]",
+    "foursday configure [--apply] [--replace] [--cron] --registry /absolute/private/projects.json",
+    "foursday login [--apply]",
+    "foursday verify [--apply]",
+    "foursday accept --release-sha SHA --ledger FILE --restart-evidence FILE --code-evidence FILE --output FILE [--apply]",
+    "foursday gateway <status|install-shadow|start-shadow|activate|stop|restart|uninstall|remove-profile> [options]",
+    "foursday status",
+  ],
+  architecture: "Foursday Gateway + Codex work loop + personal memory",
+  defaultSafety: "install and configure preview changes; Gateway starts send-disabled; activation requires exact shadow evidence",
+});
+
+async function install({ apply }) {
   const [lock, packageDocument, foursdayCommit] = await Promise.all([
-    readFile(new URL("../hermes/upstream.lock.json", import.meta.url), "utf8")
+    readFile(new URL("../distribution/upstream.lock.json", import.meta.url), "utf8")
       .then(JSON.parse)
       .then(validateHermesUpstreamLock),
     readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
-    inspectFoursdaySourceCommit(projectRoot),
+    inspectFoursdaySourceCommit(packageRoot),
   ]);
   return runFoursdayNativeHermesInstall({
     apply,
     installGateway: false,
     profileOnly: false,
     lock,
-    layout: foursdayNativeHermesLayout({ projectRoot }),
+    layout: foursdayNativeHermesLayout({ projectRoot: packageRoot }),
     foursdayVersion: packageDocument.version,
     foursdayCommit,
   });
 }
 
-const bundledCommands = Object.freeze({
-  preflight: Object.freeze({
-    script: "scripts/生产预检.mjs",
-    effect: "联网只读检查配置、授权、工具和数据库迁移状态",
-  }),
-  doctor: Object.freeze({
-    script: "scripts/只读生产诊断.mjs",
-    effect: "联网只读检查生产依赖和数据库结构",
-  }),
-  backup: Object.freeze({
-    script: "scripts/备份数据库.mjs",
-    applyRequired: true,
-    effect: "读取数据库并在配置的备份目录创建加密备份",
-  }),
-  migrate: Object.freeze({
-    script: "src/migrate.mjs",
-    applyRequired: true,
-    effect: "对配置的 PostgreSQL 数据库应用尚未执行的迁移",
-  }),
-  probe: Object.freeze({
-    script: "scripts/验证草稿生成.mjs",
-    applyRequired: true,
-    effect: "使用固定合成消息调用当前 AgentRuntime，不读取业务消息或数据库",
-  }),
-  verify: Object.freeze({
-    script: "scripts/验证生产服务.mjs",
-    effect: "只读检查严格业务就绪和本机管理台",
-  }),
-  shadow: Object.freeze({
-    script: "scripts/影子模式验收.mjs",
-    effect: "使用数据库只读会话检查健康、异常任务和人工质量门槛",
-  }),
-});
-
-const serviceActions = Object.freeze({
-  generate: Object.freeze({
-    script: "scripts/管理常驻服务.mjs",
-    args: ["generate"],
-    applyRequired: true,
-    effect: "在当前安装包运行目录生成 10 个 LaunchAgent 配置，不加载服务",
-  }),
-  install: Object.freeze({
-    script: "scripts/管理常驻服务.mjs",
-    args: ["install"],
-    applyRequired: true,
-    effect: "从当前安装包目录生成、安装并加载 10 个 LaunchAgent",
-  }),
-  uninstall: Object.freeze({
-    script: "scripts/管理常驻服务.mjs",
-    args: ["uninstall"],
-    applyRequired: true,
-    effect: "卸载 Foursday LaunchAgent；保留 plist 以便人工恢复",
-  }),
-  verify: Object.freeze({
-    script: "scripts/验证服务部署.mjs",
-    args: [],
-    effect: "只读核对 10 个 LaunchAgent、健康接口和目标安装包目录",
-  }),
-});
-
-function argumentValue(args, name) {
-  const indexes = args.flatMap((value, index) => value === name ? [index] : []);
-  if (indexes.length === 0) return null;
-  if (indexes.length > 1) throw new Error(`${name} must be provided once`);
-  const value = args[indexes[0] + 1];
-  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
-  return value;
+export function publicFoursdayStatus(status) {
+  if (status?.schema !== "foursday-native-gateway-status/v1") return status;
+  const {
+    label: _label,
+    runtime: _runtime,
+    profile: _profile,
+    ...publicStatus
+  } = status;
+  return {
+    ...publicStatus,
+    schema: "foursday-status/v1",
+    product: "Foursday",
+    controlPlane: "embedded",
+  };
 }
 
-function parsedArguments(args) {
-  argumentValue(args, "--config");
-  const apply = args.includes("--apply");
-  const dryRun = args.includes("--dry-run");
-  if (apply && dryRun) throw new Error("--apply and --dry-run cannot be used together");
-  const positionals = [];
-  for (let index = 1; index < args.length; index += 1) {
-    const value = args[index];
-    if (value === "--config") {
-      index += 1;
-      continue;
-    }
-    if (value === "--apply" || value === "--dry-run") continue;
-    if (value.startsWith("--")) throw new Error(`Unknown option: ${value}`);
-    positionals.push(value);
-  }
-  return { apply, dryRun, positionals };
+export function publicFoursdayInstall(result) {
+  return {
+    schema: "foursday-install/v1",
+    apply: result.apply === true,
+    installed: result.installed === true,
+    profile: "foursday",
+    runtimeVersion: result.upstream?.version ?? null,
+    pinnedRuntimeVerified: Boolean(result.upstream?.commit && result.upstream?.installerSha256),
+    components: [
+      "dws-personal-dingtalk",
+      "project-router",
+      "personal-gbrain",
+      "codex-policy-bridge",
+      "foursday-mcp",
+      "session-gateway",
+    ],
+    optionalDependenciesPruned: result.optionalNodeDependenciesPruned === true,
+    gatewayStarted: result.gatewayStarted === true,
+    messagesSent: Number(result.messagesSent ?? 0),
+    productionWrite: result.productionWrite === true,
+  };
 }
 
-export function reuseConfigPath(args = process.argv.slice(2), cwd = process.cwd()) {
-  const input = argumentValue(args, "--config") ??
-    process.env.AI_EMPLOYEE_CONFIG_FILE ??
-    ".runtime/production.json";
-  return resolve(cwd, input);
-}
-
-function packageScript(relativePath) {
-  return fileURLToPath(new URL(`../${relativePath}`, import.meta.url));
-}
-
-async function defaultScriptRunner({ scriptPath, args, cwd, configPath }) {
-  const { stdout } = await execFileAsync(process.execPath, [scriptPath, ...args], {
-    cwd,
-    env: {
-      ...process.env,
-      AI_EMPLOYEE_CONFIG_FILE: configPath,
-      AI_EMPLOYEE_EXPECTED_RELEASE_DIRECTORY: packageRoot,
-    },
+async function runBundledScript(script, args, { transform = (value) => value } = {}) {
+  const options = {
+    cwd: packageRoot,
+    env: process.env,
     timeout: 15 * 60_000,
     maxBuffer: 8 * 1024 * 1024,
-  });
-  const output = stdout.trim();
-  if (!output) return null;
+  };
   try {
-    return JSON.parse(output);
-  } catch {
-    return { output };
+    const { stdout } = await execFileAsync(process.execPath, [
+      fileURLToPath(new URL(script, import.meta.url)),
+      ...args,
+    ], options);
+    return stdout.trim() ? transform(JSON.parse(stdout)) : null;
+  } catch (error) {
+    const stdout = String(error?.stdout ?? "").trim();
+    if (stdout) {
+      try { error.stdout = `${JSON.stringify(transform(JSON.parse(stdout)), null, 2)}\n`; } catch {}
+    }
+    throw error;
   }
 }
 
-function commandPlan({ command, action = null, definition, configPath, cwd }) {
-  return {
-    schema: planSchema,
-    command,
-    action,
-    dryRun: true,
-    executed: false,
-    applyRequired: Boolean(definition.applyRequired),
-    configPath,
-    workingDirectory: resolve(cwd),
-    packageRoot,
-    packageScript: packageScript(definition.script),
-    scriptArguments: definition.args ?? [],
-    effect: definition.effect,
-    boundary: command === "service"
-      ? "服务会从当前安装包目录运行；生产升级、不可变版本切换和自动回退仍须使用受控发布流程。"
-      : "预览不会调用包内脚本，不连接外部服务，也不写文件、数据库或 LaunchAgent。",
-  };
-}
-
-async function runBundledCommand({
-  command,
-  action = null,
-  definition,
-  options,
-  configPath,
-  cwd,
-  scriptRunner,
-}) {
-  if (options.positionals.length > 0) {
-    throw new Error(`Unexpected argument: ${options.positionals[0]}`);
-  }
-  if (options.apply && !definition.applyRequired) {
-    throw new Error(`${command}${action ? ` ${action}` : ""} is read-only and does not accept --apply`);
-  }
-  const plan = commandPlan({ command, action, definition, configPath, cwd });
-  await access(plan.packageScript);
-  if (options.dryRun || (definition.applyRequired && !options.apply)) return plan;
-  return {
-    ...plan,
-    dryRun: false,
-    executed: true,
-    result: await scriptRunner({
-      scriptPath: plan.packageScript,
-      args: plan.scriptArguments,
-      cwd: resolve(cwd),
-      configPath,
-    }),
-  };
-}
-
-function help() {
-  return {
-    usage: [
-      "foursday check [--config /absolute/path.json]",
-      "foursday start [--port 4173]",
-      "foursday install [--apply]",
-      "foursday init [--apply] [--config /absolute/path.json]",
-      "foursday secrets [--apply] [--config /absolute/path.json]",
-      "foursday preflight [--dry-run] [--config /absolute/path.json]",
-      "foursday doctor [--dry-run] [--config /absolute/path.json]",
-      "foursday backup [--apply] [--config /absolute/path.json]",
-      "foursday migrate [--apply] [--config /absolute/path.json]",
-      "foursday probe [--apply] [--config /absolute/path.json]",
-      "foursday service [generate|install|uninstall|verify] [--apply|--dry-run] [--config /absolute/path.json]",
-      "foursday verify [--dry-run] [--config /absolute/path.json]",
-      "foursday shadow [--dry-run] [--config /absolute/path.json]",
-    ],
-    sequence: [
-      "install --apply",
-      "npm run hermes:configure -- --apply --registry /absolute/private/projects.json",
-      "npm run hermes:gateway -- install-shadow --apply",
-      "npm run hermes:gateway -- start-shadow --apply",
-    ],
-    legacyGovernedSequence: [
-      "init --apply",
-      "secrets --apply",
-      "check",
-      "preflight",
-      "backup --apply",
-      "migrate --apply",
-      "doctor",
-      "probe --apply",
-      "service install --apply",
-      "service verify",
-      "verify",
-      "shadow",
-    ],
-    boundary: "install 是默认原生 Hermes Profile 路径且不会启动 Gateway。init、secrets、service、migrate 等旧命令只用于既有 Governed Runtime 恢复；所有预览零写，真实配置、服务、数据库和生产放量仍需逐阶段显式授权。",
-  };
-}
-
-export async function runReuseGuide({
-  args = process.argv.slice(2),
-  cwd = process.cwd(),
-  keychainProvisioner = provisionGeneratedKeychainSecrets,
-  configInitializer = initializeProductionConfig,
-  scriptRunner = defaultScriptRunner,
-  activationRunner = runActivation,
-  hermesInstaller = installNativeFoursdayProfile,
+export async function runFoursdayCli(args = process.argv.slice(2), {
+  codexLogin = runFoursdayCodexLogin,
+  codexShadow = runFoursdayCodexShadow,
 } = {}) {
-  const command = args[0] ?? "check";
-  if (["help", "--help", "-h"].includes(command)) return help();
-  if (["start", "onboard"].includes(command)) {
-    const activationArgs = args.slice(1);
-    if (activationArgs.some((value) => ["--apply", "--dry-run", "--config"].includes(value))) {
-      throw new Error("Usage: foursday start [--port 4173]");
-    }
-    if (activationArgs.some((value) => ["--help", "-h"].includes(value))) {
-      return { command: "start", help: activationHelp };
-    }
-    const server = await activationRunner({
-      args: activationArgs,
-      workingDirectory: resolve(cwd),
-      output: { write() {} },
-    });
-    return {
-      schema: "foursday-activation-launch/v1",
-      command: "start",
-      url: server.url,
-      workingDirectory: resolve(cwd),
-      externalSystemsTouched: false,
-      boundary: "Web 预览绑定回环地址且不写外部系统；模型、Git 和 GitHub 只会在完整计划再次审批后使用。",
-    };
-  }
-  const options = parsedArguments(args);
-  const configPath = reuseConfigPath(args, cwd);
-
+  const [command = "help", ...rest] = args;
+  if (["help", "--help", "-h"].includes(command)) return foursdayHelp;
   if (command === "install") {
-    if (options.positionals.length > 0 || options.dryRun) {
+    if (rest.some((value) => value !== "--apply")) {
       throw new Error("Usage: foursday install [--apply]");
     }
-    return hermesInstaller({ apply: options.apply, projectRoot: packageRoot });
+    return publicFoursdayInstall(await install({ apply: rest.includes("--apply") }));
   }
-
-  if (command === "init") {
-    if (options.positionals.length > 0) {
-      throw new Error(`Unexpected argument: ${options.positionals[0]}`);
-    }
-    if (!options.apply) {
-      return {
-        schema: planSchema,
-        command,
-        dryRun: true,
-        executed: false,
-        applyRequired: true,
-        configPath,
-        configExists: await access(configPath).then(() => true).catch(() => false),
-        effect: "创建权限为 600 且只含外部密钥引用的生产配置；不创建第二个 Markdown 仓库、gbrain source 或数据库，已有文件绝不覆盖",
-      };
-    }
-    const initialized = await configInitializer({ outputPath: configPath });
-    return {
-      command,
-      dryRun: false,
-      executed: true,
-      ...initialized,
-      next: "先运行 foursday secrets --apply，再填写 requiredEdits 并运行 foursday check",
-    };
+  if (command === "configure") {
+    return runBundledScript("./配置Foursday运行时.mjs", rest);
   }
-  if (command === "secrets") {
-    if (options.positionals.length > 0 || options.dryRun) {
-      throw new Error("Usage: foursday secrets [--apply] [--config /absolute/path.json]");
+  if (command === "login") {
+    if (rest.some((value) => value !== "--apply")) {
+      throw new Error("Usage: foursday login [--apply]");
     }
-    return keychainProvisioner({ configPath, apply: options.apply });
-  }
-  if (command === "check") {
-    if (options.positionals.length > 0 || options.apply || options.dryRun) {
-      throw new Error("Usage: foursday check [--config /absolute/path.json]");
-    }
-    return inspectReuseReadiness({ configPath });
-  }
-  if (command === "service") {
-    const action = options.positionals.shift() ?? "install";
-    const definition = serviceActions[action];
-    if (!definition) {
-      throw new Error("Usage: foursday service [generate|install|uninstall|verify] [--apply|--dry-run] [--config /absolute/path.json]");
-    }
-    return runBundledCommand({
-      command,
-      action,
-      definition,
-      options,
-      configPath,
-      cwd,
-      scriptRunner,
+    return codexLogin({
+      layout: foursdayNativeHermesLayout({ projectRoot: packageRoot }),
+      configPath: process.env.FOURSDAY_CONFIG_FILE ?? defaultProductionConfigPath(),
+      apply: rest.includes("--apply"),
     });
   }
-  const definition = bundledCommands[command];
-  if (definition) {
-    return runBundledCommand({
-      command,
-      definition,
-      options,
-      configPath,
-      cwd,
-      scriptRunner,
+  if (command === "verify") {
+    if (rest.some((value) => value !== "--apply")) {
+      throw new Error("Usage: foursday verify [--apply]");
+    }
+    return codexShadow({
+      layout: foursdayNativeHermesLayout({ projectRoot: packageRoot }),
+      configPath: process.env.FOURSDAY_CONFIG_FILE ?? defaultProductionConfigPath(),
+      apply: rest.includes("--apply"),
     });
   }
-  throw new Error("Usage: foursday help (legacy alias: ai-employee help)");
+  if (command === "accept") {
+    return runBundledScript("./生成Foursday影子验收.mjs", rest);
+  }
+  if (command === "gateway") {
+    return runBundledScript("./管理FoursdayGateway.mjs", rest, {
+      transform: rest[0] === "status" ? publicFoursdayStatus : undefined,
+    });
+  }
+  if (command === "status") {
+    if (rest.length > 0) throw new Error("Usage: foursday status");
+    return runBundledScript("./管理FoursdayGateway.mjs", ["status"], {
+      transform: publicFoursdayStatus,
+    });
+  }
+  throw new Error(`Unknown command: ${command}`);
 }
 
 if (isMainModule(import.meta.url)) {
-  console.log(JSON.stringify(await runReuseGuide(), null, 2));
+  try {
+    console.log(JSON.stringify(await runFoursdayCli(), null, 2));
+  } catch (error) {
+    if (error?.stdout) {
+      const output = String(error.stdout).trim();
+      try {
+        console.log(JSON.stringify(JSON.parse(output), null, 2));
+        process.exitCode = Number(error.code) || 1;
+      } catch {
+        throw error;
+      }
+    } else {
+      throw error;
+    }
+  }
 }

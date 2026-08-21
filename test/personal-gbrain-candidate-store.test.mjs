@@ -35,7 +35,7 @@ class FakePool {
   async query(sql, values = []) {
     if (/^(?:BEGIN|COMMIT|ROLLBACK)$/u.test(sql)) return { rows: [] };
     if (/SELECT 1 FROM/u.test(sql)) return { rows: [] };
-    if (/INSERT INTO hermes_memory_candidates/u.test(sql)) {
+    if (/INSERT INTO foursday_memory_candidates/u.test(sql)) {
       if (!this.rows.some((row) => row.candidate_key === values[2])) {
         this.rows.push({
           tenant_id: values[0], id: values[1], candidate_key: values[2],
@@ -51,7 +51,7 @@ class FakePool {
       }
       return { rows: [] };
     }
-    if (/INSERT INTO hermes_memory_candidate_sources/u.test(sql)) {
+    if (/INSERT INTO foursday_memory_candidate_sources/u.test(sql)) {
       if (!this.sources.some((row) => row.candidate_id === values[1] &&
         row.source_principal_key === values[2] && row.source_session_hash === values[3])) {
         this.sources.push({

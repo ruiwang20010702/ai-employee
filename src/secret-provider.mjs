@@ -6,16 +6,9 @@ const environmentReference = /^env:\/\/([A-Z_][A-Z0-9_]*)$/u;
 const keychainReference = /^keychain:\/\/([^/]+)\/([^/]+)$/u;
 
 export const secretConfigKeys = new Set([
-  "DATABASE_URL",
-  "AI_EMPLOYEE_GBRAIN_DATABASE_URL",
-  "AI_EMPLOYEE_PERSONAL_MEMORY_CLIENT_SECRET",
-  "AI_EMPLOYEE_DATA_KEY",
-  "AI_EMPLOYEE_BACKUP_KEY",
-  "AI_EMPLOYEE_HEALTH_AUTH_TOKEN",
-  "AI_EMPLOYEE_ADMIN_READ_TOKEN",
-  "AI_EMPLOYEE_ADMIN_WRITE_TOKEN",
-  "AI_EMPLOYEE_ALERT_WEBHOOK_URL",
-  "AI_EMPLOYEE_ALERT_WEBHOOK_SECRET",
+  "FOURSDAY_DATABASE_URL",
+  "FOURSDAY_DATA_KEY",
+  "FOURSDAY_GBRAIN_CLIENT_SECRET",
 ]);
 
 export function isSecretReference(value) {

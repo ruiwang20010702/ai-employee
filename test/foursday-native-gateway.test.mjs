@@ -23,7 +23,7 @@ async function fixture(t) {
     'DWS_PERSONAL_SEND_ENABLED="false"',
     `DWS_PERSONAL_STATE_FILE=${JSON.stringify(checkpoint)}`,
     'DWS_PERSONAL_FALLBACK_MS="300000"',
-    'FOURSDAY_HERMES_MODE="shadow"',
+    'FOURSDAY_MODE="shadow"',
     "",
   ].join("\n"), { mode: 0o600 });
   await writeFile(join(profileDirectory, "foursday-release.json"), JSON.stringify({
@@ -41,7 +41,7 @@ async function fixture(t) {
       userHome: root,
       hermesCommand: join(root, ".local", "bin", "hermes"),
       profileDirectory,
-      profileAlias: join(root, ".local", "bin", "hermes-foursday"),
+      profileAlias: join(root, ".local", "bin", "foursday-runtime"),
       installDirectory: join(root, ".hermes", "hermes-agent"),
     },
   };
@@ -54,6 +54,12 @@ async function nativeRuntimeIdentity(path, args) {
   if (path === "/usr/bin/git" && args.includes("get-url")) {
     return { stdout: "https://github.com/NousResearch/hermes-agent.git\n" };
   }
+  if (path === "/usr/bin/git" && args.includes("status")) {
+    return { stdout: " M contributors/emails/agent@fixture.local\n" };
+  }
+  if (path === "/usr/bin/git" && args.includes("ls-files")) {
+    return { stdout: "H agent/conversation_loop.py\n" };
+  }
   return null;
 }
 
@@ -62,7 +68,7 @@ function activationEvidence() {
   return {
     releaseSha,
     acceptance: {
-      schema: "foursday-hermes-shadow-acceptance/v1",
+      schema: "foursday-shadow-acceptance/v1",
       releaseSha,
       evidenceDigest: "a".repeat(64),
       createdAt: "2026-08-20T00:00:00.000Z",
@@ -71,7 +77,7 @@ function activationEvidence() {
         "codeWork", "humanTakeover", "restartRecovery", "sendDisabled", "noDuplicate",
       ].map((name) => [name, true])),
     },
-    confirmation: `ACTIVATE-HERMES:${releaseSha}:${"a".repeat(16)}`,
+    confirmation: `ACTIVATE-FOURSDAY:${releaseSha}:${"a".repeat(16)}`,
     now: new Date("2026-08-20T01:00:00.000Z"),
   };
 }
@@ -110,7 +116,7 @@ test("native Gateway activation preview is zero-write and gated apply is atomic"
   await runFoursdayNativeGatewayAction("activate", {
     layout: value.layout,
     apply: true,
-    legacyRunning: async () => false,
+    conflictingWriterRunning: async () => false,
     ...activationEvidence(),
     run: async (path, args) =>
       await nativeRuntimeIdentity(path, args) ?? { stdout: "" },
@@ -119,7 +125,7 @@ test("native Gateway activation preview is zero-write and gated apply is atomic"
   });
   const after = await readFile(join(value.profileDirectory, ".env"), "utf8");
   assert.match(after, /DWS_PERSONAL_SEND_ENABLED="true"/u);
-  assert.match(after, /FOURSDAY_HERMES_MODE="active"/u);
+  assert.match(after, /FOURSDAY_MODE="active"/u);
 });
 
 test("native Gateway refuses active while the previous writer is running", async (t) => {
@@ -129,7 +135,7 @@ test("native Gateway refuses active while the previous writer is running", async
     runFoursdayNativeGatewayAction("activate", {
       layout: value.layout,
       apply: true,
-      legacyRunning: async () => true,
+      conflictingWriterRunning: async () => true,
       ...activationEvidence(),
       run: async (path, args) => {
         calls.push([path, args]);
@@ -141,7 +147,7 @@ test("native Gateway refuses active while the previous writer is running", async
   assert.equal(calls.filter(([path]) => path !== "/usr/bin/git").length, 0);
   assert.match(
     await readFile(join(value.profileDirectory, ".env"), "utf8"),
-    /FOURSDAY_HERMES_MODE="shadow"/u,
+    /FOURSDAY_MODE="shadow"/u,
   );
 });
 
@@ -152,7 +158,7 @@ test("native Gateway core cannot activate without exact shadow evidence", async 
     runFoursdayNativeGatewayAction("activate", {
       layout: value.layout,
       apply: true,
-      legacyRunning: async () => false,
+      conflictingWriterRunning: async () => false,
       run: async () => { calls += 1; return { stdout: "" }; },
     }),
     /shadow acceptance receipt|exact release SHA/u,
@@ -195,7 +201,7 @@ test("native Gateway rejects a Hermes checkout that drifted from the Profile loc
         return { stdout: "" };
       },
     }),
-    /runtime does not match the Foursday profile lock/u,
+    /runtime does not match its immutable Foursday lock/u,
   );
 });
 
@@ -224,7 +230,7 @@ test("failed active restart stops the process and restores send-disabled shadow"
     runFoursdayNativeGatewayAction("activate", {
       layout: value.layout,
       apply: true,
-      legacyRunning: async () => false,
+      conflictingWriterRunning: async () => false,
       ...activationEvidence(),
       run: async (_path, args) => {
         const identity = await nativeRuntimeIdentity(_path, args);
@@ -245,7 +251,7 @@ test("failed active restart stops the process and restores send-disabled shadow"
   assert.deepEqual(enabled, [true, false]);
   assert.match(
     await readFile(join(value.profileDirectory, ".env"), "utf8"),
-    /FOURSDAY_HERMES_MODE="shadow"/u,
+    /FOURSDAY_MODE="shadow"/u,
   );
 });
 
@@ -269,7 +275,7 @@ test("stopping native active mode restores persistent shadow and disables launch
   const path = join(value.profileDirectory, ".env");
   const active = (await readFile(path, "utf8"))
     .replace('DWS_PERSONAL_SEND_ENABLED="false"', 'DWS_PERSONAL_SEND_ENABLED="true"')
-    .replace('FOURSDAY_HERMES_MODE="shadow"', 'FOURSDAY_HERMES_MODE="active"');
+    .replace('FOURSDAY_MODE="shadow"', 'FOURSDAY_MODE="active"');
   await writeFile(path, active, { mode: 0o600 });
   const enabled = [];
   await runFoursdayNativeGatewayAction("stop", {
@@ -279,7 +285,7 @@ test("stopping native active mode restores persistent shadow and disables launch
     setServiceEnabled: async (state) => enabled.push(state),
   });
   const environment = await readFile(join(value.profileDirectory, ".env"), "utf8");
-  assert.match(environment, /FOURSDAY_HERMES_MODE="shadow"/u);
+  assert.match(environment, /FOURSDAY_MODE="shadow"/u);
   assert.match(environment, /DWS_PERSONAL_SEND_ENABLED="false"/u);
   assert.deepEqual(enabled, [false]);
 });
@@ -310,10 +316,11 @@ test("profile removal uses official Hermes commands and preserves the native run
   assert.deepEqual(calls.map(([, args]) => args.slice(0, 2)), [
     ["gateway", "uninstall"],
     ["profile", "alias"],
+    ["profile", "alias"],
     ["profile", "delete"],
   ]);
   assert.equal(result.profileRemoved, true);
-  assert.equal(result.nativeHermesPreserved, true);
+  assert.equal(result.embeddedRuntimePreserved, true);
   assert.equal(result.productionConfigPreserved, true);
   assert.equal(result.personalGbrainPreserved, true);
   assert.deepEqual(enabled, [false]);

@@ -14,17 +14,17 @@ test("完整测试运行器只清理系统临时目录中的专用随机目录",
   const systemTemporaryDirectory = "/tmp";
   assert.equal(
     assertSafeTemporaryTestDirectory(
-      join(systemTemporaryDirectory, "ai-employee-pgtest-abc123"),
+      join(systemTemporaryDirectory, "foursday-pgtest-abc123"),
       systemTemporaryDirectory,
     ),
-    join(systemTemporaryDirectory, "ai-employee-pgtest-abc123"),
+    join(systemTemporaryDirectory, "foursday-pgtest-abc123"),
   );
   assert.throws(
     () => assertSafeTemporaryTestDirectory("/tmp/other-project", systemTemporaryDirectory),
     /不在允许范围/u,
   );
   assert.throws(
-    () => assertSafeTemporaryTestDirectory("/tmp/ai-employee-pgtest-abc/nested", systemTemporaryDirectory),
+    () => assertSafeTemporaryTestDirectory("/tmp/foursday-pgtest-abc/nested", systemTemporaryDirectory),
     /不在允许范围/u,
   );
 });
@@ -34,26 +34,26 @@ test("完整测试子进程不继承生产连接和业务密钥", () => {
     PATH: "/usr/bin:/bin",
     LANG: "zh_CN.UTF-8",
     DATABASE_URL: "production-database",
-    AI_EMPLOYEE_DATA_KEY: "production-key",
-    AI_EMPLOYEE_CONFIG_FILE: "production-config",
+    FOURSDAY_DATA_KEY: "production-key",
+    FOURSDAY_CONFIG_FILE: "production-config",
     DINGTALK_SELF_USER_ID: "production-user",
     DWS_PATH: "/production/dws",
     CLAUDE_CODE_PATH: "/production/claude",
     ANTHROPIC_API_KEY: "production-anthropic-key",
     PGPASSWORD: "production-password",
     TEST_DATABASE_URL: "old-test-database",
-  }, "postgresql://test@127.0.0.1:55433/ai_employee_test");
+  }, "postgresql://test@127.0.0.1:55433/foursday_test");
   assert.equal(environment.PATH, "/usr/bin:/bin");
   assert.equal(environment.LANG, "zh_CN.UTF-8");
   assert.equal(environment.TEST_DATABASE_TEMP, "false");
   assert.equal(
     environment.TEST_DATABASE_URL,
-    "postgresql://test@127.0.0.1:55433/ai_employee_test",
+    "postgresql://test@127.0.0.1:55433/foursday_test",
   );
   for (const key of [
     "DATABASE_URL",
-    "AI_EMPLOYEE_DATA_KEY",
-    "AI_EMPLOYEE_CONFIG_FILE",
+    "FOURSDAY_DATA_KEY",
+    "FOURSDAY_CONFIG_FILE",
     "DINGTALK_SELF_USER_ID",
     "DWS_PATH",
     "CLAUDE_CODE_PATH",
@@ -63,7 +63,7 @@ test("完整测试子进程不继承生产连接和业务密钥", () => {
 });
 
 test("完整测试可以识别 Homebrew 版本目录符号链接", async () => {
-  const fixture = await mkdtemp(join(tmpdir(), "ai-employee-postgres-links-"));
+  const fixture = await mkdtemp(join(tmpdir(), "foursday-postgres-links-"));
   const target = join(fixture, "postgresql-17.9");
   const link = join(fixture, "postgresql@17");
   try {
@@ -76,7 +76,7 @@ test("完整测试可以识别 Homebrew 版本目录符号链接", async () => {
 });
 
 test("完整测试失败后仍停止临时数据库并清理专用目录", async () => {
-  const fixture = await mkdtemp(join(tmpdir(), "ai-employee-runner-fixture-"));
+  const fixture = await mkdtemp(join(tmpdir(), "foursday-runner-fixture-"));
   const postgresBin = join(fixture, "postgres-bin");
   const isolatedTemporaryDirectory = join(fixture, "tmp");
   const project = join(fixture, "project");
@@ -121,7 +121,7 @@ test("完整测试失败后仍停止临时数据库并清理专用目录", async
 });
 
 test("发布安装包缺少源码测试时不会启动临时数据库", async () => {
-  const fixture = await mkdtemp(join(tmpdir(), "ai-employee-no-source-tests-"));
+  const fixture = await mkdtemp(join(tmpdir(), "foursday-no-source-tests-"));
   try {
     await assert.rejects(
       runCompleteTest({

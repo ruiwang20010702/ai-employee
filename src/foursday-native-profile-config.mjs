@@ -11,7 +11,7 @@ import {
   stat,
   unlink,
 } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { isSecretReference, secretConfigKeys } from "./secret-provider.mjs";
@@ -46,6 +46,112 @@ function scalar(values, name, fallback = "") {
 
 function envLine(name, value) {
   return `${name}=${JSON.stringify(String(value))}`;
+}
+
+export function foursdayCodexConfig({ nodePath, mcpPath, projectRoots = [] } = {}) {
+  const node = absoluteExecutable(nodePath, "Codex MCP Node");
+  const mcp = absoluteExecutable(mcpPath, "Foursday Codex MCP");
+  return [
+    'default_permissions = "foursday-workspace"',
+    'approval_policy = "untrusted"',
+    'approvals_reviewer = "auto_review"',
+    "allow_login_shell = false",
+    "",
+    "[shell_environment_policy]",
+    'inherit = "core"',
+    "ignore_default_excludes = false",
+    'exclude = ["FOURSDAY_*", "DWS_*", "DINGTALK_*", "HERMES_*", "*TOKEN*", "*SECRET*", "*KEY*", "*DATABASE*", "*PROXY*"]',
+    "",
+    "[tools]",
+    "web_search = false",
+    "view_image = false",
+    "",
+    "[permissions.foursday-workspace]",
+    'description = "Foursday project workspace without host reads or command network"',
+    'extends = ":workspace"',
+    "",
+    "[permissions.foursday-workspace.filesystem]",
+    '":root" = "deny"',
+    '":minimal" = "read"',
+    "glob_scan_max_depth = 6",
+    "",
+    "[permissions.foursday-workspace.filesystem.\":workspace_roots\"]",
+    '"." = "write"',
+    '".env" = "deny"',
+    '".env.*" = "deny"',
+    '".runtime" = "deny"',
+    '"**/*.env" = "deny"',
+    "",
+    "[permissions.foursday-workspace.network]",
+    "enabled = false",
+    "",
+    "[mcp_servers.foursday]",
+    `command = ${JSON.stringify(node)}`,
+    `args = [${JSON.stringify(mcp)}]`,
+    'env_vars = ["FOURSDAY_PRODUCTION_CONFIG", "FOURSDAY_PROJECT_REGISTRY", "FOURSDAY_WORK_CONTEXT_FILE"]',
+    "required = true",
+    'enabled_tools = ["foursday_remember_project_fact"]',
+    'default_tools_approval_mode = "auto"',
+    "",
+    ...[...new Set(projectRoots)].flatMap((root) => [
+      `[projects.${JSON.stringify(absoluteExecutable(root, "Foursday project root"))}]`,
+      'trust_level = "untrusted"',
+      "",
+    ]),
+  ].join("\n");
+}
+
+export function foursdayCodexRules() {
+  const rawForbidden = [
+    [["git", "push"], "Prepare a local commit and ask the owner to authorize push."],
+    [["git", "reset", "--hard"], "Use a reversible branch or restore individual files."],
+    [["git", "clean"], "List untracked files and ask the owner before removing them."],
+    [["git", "restore"], "Preserve dirty worktree changes and restore only through an owner-authorized exit."],
+    [["git", "checkout", "--"], "Preserve dirty worktree changes and restore only through an owner-authorized exit."],
+    [["gh", "pr", "merge"], "Prepare the PR and ask the owner to authorize merge."],
+    [["gh", "release"], "Prepare release notes and ask the owner to authorize publication."],
+    [["npm", "publish"], "Build and verify the package without publishing it."],
+    [["pnpm", "publish"], "Build and verify the package without publishing it."],
+    [["yarn", "npm", "publish"], "Build and verify the package without publishing it."],
+    [["kubectl"], "Prepare a deployment plan without touching a cluster."],
+    [["helm"], "Render or validate locally without touching a cluster."],
+    [["terraform", "apply"], "Generate and review a plan first."],
+    [["terraform", "destroy"], "Destructive infrastructure changes require owner authorization."],
+    [["tofu", "apply"], "Generate and review a plan first."],
+    [["tofu", "destroy"], "Destructive infrastructure changes require owner authorization."],
+    [["rm"], "Move scoped files to a recoverable location instead."],
+    [["rmdir"], "Move scoped files to a recoverable location instead."],
+    [["unlink"], "Move scoped files to a recoverable location instead."],
+    [["shred"], "Irreversible deletion requires owner authorization."],
+    [["sudo"], "System privilege escalation is outside the Foursday workspace."],
+    [["launchctl"], "Service control requires an independent owner-authorized exit."],
+    [["security"], "macOS Keychain access is reserved for host-side bridges."],
+    [["osascript"], "GUI automation is not available to project commands."],
+    [["diskutil"], "Disk administration is outside the Foursday workspace."],
+    [["dd"], "Raw device or file destruction is prohibited."],
+    [["shutdown"], "System power control is prohibited."],
+    [["reboot"], "System power control is prohibited."],
+    [["killall"], "System-wide process control is prohibited."],
+    [["psql"], "Production database access requires an independent owner-authorized exit."],
+    [["ssh"], "Direct remote execution is outside the project sandbox."],
+    [["scp"], "Direct remote transfer is outside the project sandbox."],
+  ];
+  const commandForms = (command) => [
+    command,
+    `/usr/bin/${command}`,
+    `/bin/${command}`,
+    `/usr/sbin/${command}`,
+    `/sbin/${command}`,
+    `/opt/homebrew/bin/${command}`,
+    `/usr/local/bin/${command}`,
+  ];
+  const forbidden = rawForbidden.map(([pattern, justification]) => [
+    [commandForms(pattern[0]), ...pattern.slice(1)],
+    justification,
+  ]);
+  return `${forbidden.map(([pattern, justification]) =>
+    `prefix_rule(pattern=${JSON.stringify(pattern)}, decision="forbidden", justification=${JSON.stringify(justification)})`
+  ).join("\n")}\n`;
 }
 
 async function atomicWrite(path, content, { replace = false } = {}) {
@@ -87,6 +193,7 @@ export async function buildFoursdayNativeProfileConfiguration({
   projectRegistryPath,
   nodePath,
   dwsPath,
+  codexPath,
 } = {}) {
   const production = await privateJson(productionConfigPath, "Foursday production config");
   const registry = await privateJson(projectRegistryPath, "Foursday project registry");
@@ -100,12 +207,15 @@ export async function buildFoursdayNativeProfileConfiguration({
   }
   const node = absoluteExecutable(nodePath, "Hermes managed Node");
   const dws = absoluteExecutable(dwsPath, "DWS executable");
+  const codex = absoluteExecutable(codexPath, "Codex executable");
   await Promise.all([
     access(node, constants.X_OK),
     access(dws, constants.X_OK),
+    access(codex, constants.X_OK),
   ]);
   const localRoot = join(layout.profileDirectory, "local", "foursday");
   const stateRoot = join(localRoot, "state");
+  const codexRoot = join(localRoot, "codex");
   const hostRoot = join(layout.profileDirectory, "host", "src");
   const targetConfig = join(localRoot, "production.json");
   const targetRegistry = join(localRoot, "projects.json");
@@ -119,30 +229,36 @@ export async function buildFoursdayNativeProfileConfiguration({
     FOURSDAY_FALLBACK_WORKSPACE: join(localRoot, "fallback"),
     FOURSDAY_ROUTE_STATE_FILE: join(stateRoot, "routes.json"),
     FOURSDAY_SHADOW_EVIDENCE_FILE: join(stateRoot, "shadow-evidence.jsonl"),
-    FOURSDAY_HERMES_MODE: "shadow",
+    FOURSDAY_WORK_CONTEXT_FILE: join(stateRoot, "work-contexts.json"),
+    FOURSDAY_MODE: "shadow",
     FOURSDAY_MEMORY_HOME: layout.userHome,
     FOURSDAY_DWS_HOME: layout.userHome,
+    FOURSDAY_CODEX_PATH: codex,
+    FOURSDAY_PROFILE_INSTRUCTIONS_FILE: join(layout.profileDirectory, "SOUL.md"),
+    FOURSDAY_PROJECT_SKILL_FILE: join(layout.profileDirectory, "skills", "project-work", "SKILL.md"),
+    FOURSDAY_REQUIRE_WORK_CONTEXT: "true",
+    CODEX_HOME: codexRoot,
     DWS_PATH: dws,
-    DWS_PERSONAL_ALLOWED_USERS: scalar(production.value, "DINGTALK_TARGET_USER_IDS"),
-    DWS_PERSONAL_FETCH_USERS: scalar(production.value, "DINGTALK_TARGET_USER_IDS"),
-    DWS_PERSONAL_ALLOWED_GROUPS: scalar(production.value, "DINGTALK_TARGET_GROUP_IDS"),
-    DINGTALK_SELF_USER_ID: scalar(production.value, "DINGTALK_SELF_USER_ID"),
+    DWS_PERSONAL_ALLOWED_USERS: scalar(production.value, "FOURSDAY_DINGTALK_USERS"),
+    DWS_PERSONAL_FETCH_USERS: scalar(production.value, "FOURSDAY_DINGTALK_USERS"),
+    DWS_PERSONAL_ALLOWED_GROUPS: scalar(production.value, "FOURSDAY_DINGTALK_GROUPS"),
+    DINGTALK_SELF_USER_ID: scalar(production.value, "FOURSDAY_DINGTALK_SELF_USER"),
     DINGTALK_DATA_ROOT: join(layout.userHome, "Library", "Application Support", "DingTalkMac"),
     DWS_PERSONAL_STATE_FILE: join(stateRoot, "dws.json"),
-    // Native shadow starts from a bounded ten-minute overlap. The existing
-    // managed writer remains authoritative during migration; replaying the
-    // legacy 72-hour bootstrap window would create needless duplicate work.
+    // A bounded overlap keeps restarts lossless without replaying old conversations.
     DWS_PERSONAL_INITIAL_LOOKBACK_MS: "600000",
-    DWS_PERSONAL_FALLBACK_MS: scalar(production.value, "DINGTALK_FALLBACK_MS", 300_000),
-    DWS_PERSONAL_BUNDLE_QUIET_MS: scalar(production.value, "DINGTALK_QUIET_WINDOW_MS", 3_000),
-    DWS_PERSONAL_BUNDLE_MAX_WAIT_MS: scalar(production.value, "AI_EMPLOYEE_BUNDLE_MAX_WAIT_MS", 8_000),
+    DWS_PERSONAL_FALLBACK_MS: scalar(production.value, "FOURSDAY_DINGTALK_FALLBACK_MS", 300_000),
+    DWS_PERSONAL_BUNDLE_QUIET_MS: scalar(production.value, "FOURSDAY_DINGTALK_QUIET_MS", 3_000),
+    DWS_PERSONAL_BUNDLE_MAX_WAIT_MS: scalar(production.value, "FOURSDAY_DINGTALK_MAX_WAIT_MS", 8_000),
     DWS_PERSONAL_SEND_ENABLED: "false",
-    CODEX_HOME: join(layout.userHome, ".codex"),
+    PATH: [join(layout.profileDirectory, "host", "bin"), dirname(codex), dirname(node),
+      "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":"),
   };
   return {
     schema: "foursday-native-profile-config/v1",
     localRoot,
     stateRoot,
+    codexRoot,
     targetConfig,
     targetRegistry,
     sourceConfig: production.absolute,
@@ -153,6 +269,15 @@ export async function buildFoursdayNativeProfileConfiguration({
       .map(([name, value]) => envLine(name, value))
       .join("\n")}\n`,
     secretsCopied: false,
+    codexConfigContent: foursdayCodexConfig({
+      nodePath: node,
+      mcpPath: join(hostRoot, "foursday-codex-mcp.mjs"),
+      projectRoots: [
+        ...registry.value.projects.map((project) => project.root),
+        join(localRoot, "fallback"),
+      ],
+    }),
+    codexRulesContent: foursdayCodexRules(),
     sendEnabled: false,
     mode: "shadow",
   };
@@ -165,13 +290,16 @@ export async function configureFoursdayNativeProfile(options = {}) {
     mkdir(plan.localRoot, { recursive: true, mode: 0o700 }),
     mkdir(plan.stateRoot, { recursive: true, mode: 0o700 }),
     mkdir(plan.environment.FOURSDAY_FALLBACK_WORKSPACE, { recursive: true, mode: 0o700 }),
+    mkdir(join(plan.codexRoot, "rules"), { recursive: true, mode: 0o700 }),
   ]);
   await Promise.all([
     chmod(plan.localRoot, 0o700),
     chmod(plan.stateRoot, 0o700),
     chmod(plan.environment.FOURSDAY_FALLBACK_WORKSPACE, 0o700),
+    chmod(plan.codexRoot, 0o700),
+    chmod(join(plan.codexRoot, "rules"), 0o700),
   ]);
-  const [configResult, registryResult, envResult] = await Promise.all([
+  const [configResult, registryResult, envResult, codexConfigResult, codexRulesResult] = await Promise.all([
     atomicWrite(
       plan.targetConfig,
       `${JSON.stringify(JSON.parse(await readFile(plan.sourceConfig, "utf8")), null, 2)}\n`,
@@ -185,12 +313,20 @@ export async function configureFoursdayNativeProfile(options = {}) {
     atomicWrite(join(options.layout.profileDirectory, ".env"), plan.envContent, {
       replace: options.replace,
     }),
+    atomicWrite(join(plan.codexRoot, "config.toml"), plan.codexConfigContent, {
+      replace: options.replace,
+    }),
+    atomicWrite(join(plan.codexRoot, "rules", "foursday.rules"), plan.codexRulesContent, {
+      replace: options.replace,
+    }),
   ]);
   return {
     ...plan,
     apply: true,
-    changed: configResult.changed || registryResult.changed || envResult.changed,
-    backupsCreated: [configResult.backup, registryResult.backup, envResult.backup]
+    changed: configResult.changed || registryResult.changed || envResult.changed ||
+      codexConfigResult.changed || codexRulesResult.changed,
+    backupsCreated: [configResult.backup, registryResult.backup, envResult.backup,
+      codexConfigResult.backup, codexRulesResult.backup]
       .filter(Boolean).length,
   };
 }

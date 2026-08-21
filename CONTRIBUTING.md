@@ -1,78 +1,31 @@
 # Contributing to Foursday
 
-**English** · [简体中文](./docs/指南/参与贡献.md)
+[简体中文](./docs/指南/参与贡献.md)
 
-Thank you for helping improve Foursday. This project treats workplace messaging and external actions as production systems, so authorization boundaries, failure paths, and verifiable evidence are first-class requirements.
+Foursday is a work-twin product with one Codex Agent Loop and an embedded control plane. Contributions should strengthen that boundary instead of rebuilding another Agent Runtime around it.
 
-## What you can contribute
+## Good contributions
 
-- reproducible bug reports;
-- documentation, examples, and usability improvements;
-- message adapters, work adapters, and target verifiers;
-- security, reliability, observability, and test improvements.
+- Foursday connectors, policy rules, Skills, or MCP integrations;
+- project routing, gbrain context, DWS, and workspace isolation improvements;
+- security, restart recovery, read-back, and human-takeover tests;
+- installation and documentation improvements.
 
-New here? Start with the live [first-contribution queue](./docs/en/first-contributions.md). Each task has a narrow file surface, acceptance commands, and explicit non-goals. Comment on the matching GitHub Issue before starting so maintainers can prevent duplicate work.
+Do not add business-specific capability manifests, JSON pointers, fixed reply templates, a second knowledge repository, a second Agent Loop, or a control-plane core patch.
 
-Sanitize anything related to real DingTalk accounts, production data, or internal company information. Report security issues privately according to [SECURITY.md](./SECURITY.md).
-
-## Local development
-
-Foursday requires Node.js 22.5 or later:
+## Development
 
 ```bash
 git clone https://github.com/ruiwang20010702/foursday.git
 cd foursday
 npm ci
-npm run check
-```
-
-`npm run check` must not read real DingTalk conversations or connect to a production database. For PostgreSQL integration coverage, run the isolated test environment:
-
-```bash
 npm run check:full
-```
-
-## Making a change
-
-1. Open an issue describing the problem, expected behavior, and capability boundary. Small documentation fixes may go directly to a pull request.
-2. Keep each pull request focused and avoid unrelated refactors.
-3. Preserve default-deny behavior. New message sources, execution capabilities, people, or external writes must be explicitly configured.
-4. Cover the allowed path, denied path, timeout or failure path, idempotency behavior, and target-system read-back.
-5. Never let model text authorize a tool, and never treat a tool's success response as proof of the final external state.
-6. Update the affected authoritative documentation and explain migration, rollback, and compatibility boundaries.
-
-Before submitting:
-
-```bash
-npm run check
-npm audit --audit-level=high
+npm run check:security
 git diff --check
 ```
 
-For a community recipe or adapter manifest, run the fast, credential-free
-contract check before the full suite:
+Use synthetic identities and data. Never commit `.runtime/`, credentials, real messages, personal identifiers, database dumps, private gbrain pages, or machine-specific paths.
 
-```bash
-npm run extensions:validate -- --recipe examples/recipes/my-recipe.json
-# or
-npm run extensions:validate -- --adapter examples/adapters/my-adapter.json
-```
+Every behavioral change should cover the allowed path, denied path, timeout/failure, duplicate/restart behavior, and final read-back. A merge does not authorize deployment or message sending.
 
-This command validates JSON contracts only. It never installs or executes the
-extension and does not turn a reference manifest into a supported integration.
-
-Run `npm run check:full` when the change affects PostgreSQL, migrations, concurrent state, or SQLite/PostgreSQL parity.
-
-## Pull request checklist
-
-- Describe the user problem and final behavior, not only the edited files.
-- List the commands you actually ran and their results.
-- Explain changes to permissions, data access, external effects, migrations, and rollback behavior.
-- Include sanitized screenshots for UI or documentation changes when useful.
-- Do not commit `.runtime/`, databases, logs, backups, tokens, cookies, real messages, user identifiers, or machine-specific absolute paths.
-
-Maintainers prioritize correctness, security, failure recovery, readability, and performance. A merged change is not automatically deployed or enabled in production.
-
-## License
-
-By contributing, you agree that your contribution is provided under the project's [MIT License](./LICENSE).
+By contributing, you agree that your contribution is provided under the [MIT License](./LICENSE).

@@ -3,7 +3,7 @@ import pg from "pg";
 const { Pool } = pg;
 
 export function postgresPoolOptions(config, { readOnly = false } = {}) {
-  if (!config.databaseUrl) throw new Error("DATABASE_URL is required");
+  if (!config.databaseUrl) throw new Error("FOURSDAY_DATABASE_URL is required");
   return {
     connectionString: config.databaseUrl,
     max: config.databasePoolMax,
